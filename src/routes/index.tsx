@@ -155,7 +155,26 @@ function Index() {
       setT(SELECT_TIME);
       playBeep(520, 0.15, "triangle");
     } else if (phase === "select") {
-      const w = Math.floor(Math.random() * 12);
+      // Find the highest bet placed across all cards
+      const betValues = Object.values(bets);
+      const maxBet = betValues.length > 0 ? Math.max(...betValues, 0) : 0;
+
+      let eligibleCards: number[];
+      if (maxBet > 0) {
+        // Strictly exclude card(s) that have the highest bet amount
+        eligibleCards = Array.from({ length: 12 }, (_, i) => i).filter(
+          (i) => (bets[i] ?? 0) < maxBet
+        );
+        // Fallback in the rare case that all 12 cards have the exact same bet
+        if (eligibleCards.length === 0) {
+          eligibleCards = Array.from({ length: 12 }, (_, i) => i);
+        }
+      } else {
+        // No bets placed, any card can win
+        eligibleCards = Array.from({ length: 12 }, (_, i) => i);
+      }
+
+      const w = eligibleCards[Math.floor(Math.random() * eligibleCards.length)];
       const prize = (bets[w] ?? 0) * PAYOUT;
       setWinner(w);
       setWon(prize);
