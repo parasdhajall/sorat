@@ -68,6 +68,7 @@ function Index() {
   // Round tracking references
   const lastProcessedRoundRef = useRef<number>(initialSync.roundNumber);
   const lastDecidedWinnerRoundRef = useRef<number | null>(null);
+  const forcedWinnerRef = useRef<number | null>(null);
 
   // Realtime TV-Phone sync state
   const [counterConnected, setCounterConnected] = useState(false);
@@ -189,8 +190,15 @@ function Index() {
       } else if (msg.type === "SET_STRATEGY") {
         setStrategy(msg.mode);
       } else if (msg.type === "FORCE_WINNER") {
+        forcedWinnerRef.current = msg.card;
         setForcedWinner(msg.card);
-        if (msg.card !== null) setStrategy("manual");
+        if (msg.card !== null && msg.card >= 0 && msg.card < 12) {
+          setStrategy("manual");
+          // If in select or result phase, lock it as winner immediately
+          setWinner(msg.card);
+          const prize = (bets[msg.card] ?? 0) * PAYOUT;
+          setWon(prize);
+        }
       } else if (msg.type === "TRIGGER_SPIN") {
         setPhase("select");
         playBeep(520, 0.15, "triangle");
@@ -248,6 +256,8 @@ function Index() {
         setBets({});
         setWinner(null);
         setSpot(null);
+        // Clear forced winner for the new round
+        forcedWinnerRef.current = null;
         setForcedWinner(null);
         setWon(0);
         lastDecidedWinnerRoundRef.current = null;
@@ -276,9 +286,11 @@ function Index() {
       lastDecidedWinnerRoundRef.current = roundNumber;
 
       let w: number;
-      if (strategy === "manual" && forcedWinner !== null && forcedWinner >= 0 && forcedWinner < 12) {
-        // Admin manually selected winner card
-        w = forcedWinner;
+      const adminPick = forcedWinnerRef.current !== null ? forcedWinnerRef.current : forcedWinner;
+
+      // 👑 ADMIN SELECTED WINNER - 100% UNCONDITIONAL GUARANTEE
+      if (adminPick !== null && adminPick >= 0 && adminPick < 12) {
+        w = adminPick;
       } else if (strategy === "player_win") {
         // Player retention: pick among cards with smaller bets
         const cardsWithBets = Object.entries(bets)
@@ -317,12 +329,16 @@ function Index() {
   // Spinning spotlight animation during "select" phase
   useEffect(() => {
     if (phase !== "select") return;
+    const adminPick = forcedWinnerRef.current !== null ? forcedWinnerRef.current : forcedWinner;
     const id = setInterval(() => {
       setSpot(Math.floor(Math.random() * 12));
       playBeep(580 + Math.random() * 200, 0.04, "sine");
     }, 120);
-    return () => clearInterval(id);
-  }, [phase, soundEnabled]);
+    return () => {
+      clearInterval(id);
+      if (adminPick !== null) setSpot(adminPick);
+    };
+  }, [phase, soundEnabled, forcedWinner]);
 
   // User places bet by clicking cards
   const place = (i: number) => {

@@ -158,26 +158,31 @@ export default function AdminPage() {
 
   // Admin sets the winner card
   const handleSelectWinner = (cardIdx: number) => {
-    if (forcedWinner === cardIdx) {
-      // Toggle off to auto
-      setForcedWinner(null);
-      setStrategy("house_profit");
-      clientSyncRef.current?.send({ type: "FORCE_WINNER", card: null });
-      clientSyncRef.current?.send({ type: "SET_STRATEGY", mode: "house_profit" });
-    } else {
-      // Lock this card as winner
-      setForcedWinner(cardIdx);
-      setStrategy("manual");
+    // Lock this card as unconditional winner
+    setForcedWinner(cardIdx);
+    setStrategy("manual");
+    clientSyncRef.current?.send({ type: "FORCE_WINNER", card: cardIdx });
+    clientSyncRef.current?.send({ type: "SET_STRATEGY", mode: "manual" });
+    // Re-send once after 100ms to guarantee zero packet loss
+    setTimeout(() => {
       clientSyncRef.current?.send({ type: "FORCE_WINNER", card: cardIdx });
-      clientSyncRef.current?.send({ type: "SET_STRATEGY", mode: "manual" });
-    }
+    }, 100);
+  };
+
+  const handleClearForcedWinner = () => {
+    setForcedWinner(null);
+    setStrategy("house_profit");
+    clientSyncRef.current?.send({ type: "FORCE_WINNER", card: null });
+    clientSyncRef.current?.send({ type: "SET_STRATEGY", mode: "house_profit" });
   };
 
   const handleSetStrategy = (mode: "house_profit" | "player_win" | "manual") => {
     setStrategy(mode);
-    if (mode !== "manual") setForcedWinner(null);
+    if (mode !== "manual") {
+      setForcedWinner(null);
+      clientSyncRef.current?.send({ type: "FORCE_WINNER", card: null });
+    }
     clientSyncRef.current?.send({ type: "SET_STRATEGY", mode });
-    if (mode !== "manual") clientSyncRef.current?.send({ type: "FORCE_WINNER", card: null });
   };
 
   const handleTriggerSpin = () => {
@@ -305,6 +310,29 @@ export default function AdminPage() {
             </span>
           </div>
         </div>
+
+        {/* Active Locked Winner Alert Banner */}
+        {forcedWinner !== null && (
+          <div className="mt-2.5 rounded-xl bg-amber-500/25 border-2 border-amber-400 p-2.5 text-center flex items-center justify-between shadow-[0_0_20px_rgba(245,158,11,0.35)] animate-pulse">
+            <div className="flex items-center gap-2 text-left">
+              <span className="text-xl">👑</span>
+              <div>
+                <span className="text-xs font-black text-amber-300 block uppercase tracking-wide">
+                  WINNER LOCKED: {CARDS[forcedWinner]?.name}
+                </span>
+                <span className="text-[10px] text-amber-200/90 font-bold block">
+                  Yeh card 100% jeetega iss round me!
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={handleClearForcedWinner}
+              className="text-[10px] bg-destructive text-destructive-foreground px-2.5 py-1 rounded-lg font-black uppercase tracking-wider hover:opacity-90 shadow-sm"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
       </header>
 
       {/* ============================================================== */}
@@ -444,7 +472,7 @@ export default function AdminPage() {
                       : "bg-muted text-muted-foreground hover:bg-primary hover:text-primary-foreground"
                   }`}
                 >
-                  <span>{isWinnerSelected ? "👑 SELECTED WINNER" : "🏆 JITAAO"}</span>
+                  <span>{isWinnerSelected ? "👑 100% JEETEGA (LOCKED)" : "🏆 JITAAO"}</span>
                 </button>
               </div>
             );
