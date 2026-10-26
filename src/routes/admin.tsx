@@ -1,6 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useRef } from "react";
-import { AdminClientSync, DEFAULT_ROOM_ID, GameMessage } from "@/lib/realtime";
+import {
+  AdminClientSync,
+  DEFAULT_ROOM_ID,
+  GameMessage,
+  getSynchronizedRoundState,
+} from "@/lib/realtime";
 import kite from "@/assets/kite.jpg";
 import umbrella from "@/assets/umbrella.jpg";
 import ball from "@/assets/ball.jpg";
@@ -50,9 +55,12 @@ export default function AdminPage() {
   const [roomId] = useState(DEFAULT_ROOM_ID);
   const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "disconnected" | "error">("connecting");
 
-  // Synced live state from User Screen
-  const [phase, setPhase] = useState<"bet" | "select" | "result">("bet");
-  const [timer, setTimer] = useState(60);
+  // Synchronized live state identical to User Screen
+  const initialSync = getSynchronizedRoundState();
+  const [roundNumber, setRoundNumber] = useState(initialSync.roundNumber);
+  const [roundId, setRoundId] = useState(initialSync.roundId);
+  const [phase, setPhase] = useState<"bet" | "select" | "result">(initialSync.phase);
+  const [timer, setTimer] = useState(initialSync.timeLeft);
   const [bets, setBets] = useState<Record<number, number>>({});
   const [lastWinner, setLastWinner] = useState<number | null>(null);
 
@@ -61,6 +69,7 @@ export default function AdminPage() {
   const [forcedWinner, setForcedWinner] = useState<number | null>(null);
 
   const clientSyncRef = useRef<AdminClientSync | null>(null);
+  const lastProcessedRoundRef = useRef<number>(initialSync.roundNumber);
 
   // Check stored auth session
   useEffect(() => {
@@ -68,6 +77,28 @@ export default function AdminPage() {
       const stored = sessionStorage.getItem("sorat_admin_auth");
       if (stored === "true") setIsAuthenticated(true);
     }
+  }, []);
+
+  // Synchronized Game Clock Ticker:
+  // Guarantees Admin panel countdown seconds and round are bit-for-bit identical with the User Screen!
+  useEffect(() => {
+    const updateTick = () => {
+      const sync = getSynchronizedRoundState();
+      setTimer(sync.timeLeft);
+      setPhase(sync.phase);
+
+      if (sync.roundNumber !== lastProcessedRoundRef.current) {
+        lastProcessedRoundRef.current = sync.roundNumber;
+        setRoundNumber(sync.roundNumber);
+        setRoundId(sync.roundId);
+        setBets({});
+        setForcedWinner(null);
+      }
+    };
+
+    updateTick();
+    const id = setInterval(updateTick, 250);
+    return () => clearInterval(id);
   }, []);
 
   const handlePinSubmit = (e: React.FormEvent) => {
@@ -82,7 +113,7 @@ export default function AdminPage() {
     }
   };
 
-  // Connect to User Screen via WebRTC
+  // Connect to User Screen via WebRTC + BroadcastChannel
   useEffect(() => {
     if (!isAuthenticated) return;
 
@@ -97,6 +128,8 @@ export default function AdminPage() {
       if (msg.type === "SYNC_FROM_TV") {
         setPhase(msg.phase);
         setTimer(msg.t);
+        setRoundNumber(msg.roundNumber);
+        setRoundId(msg.roundId);
         setBets(msg.bets || {});
         if (msg.winner !== null) setLastWinner(msg.winner);
         setStrategy(msg.strategy || "house_profit");
@@ -198,22 +231,36 @@ export default function AdminPage() {
       <header className="sticky top-0 z-40 border-b border-border bg-card/95 backdrop-blur-md px-3.5 py-2.5 shadow-lg">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="font-display text-xl tracking-wide text-primary">ADMIN CONTROL</span>
+            <span className="font-display text-lg tracking-wide text-primary">ADMIN CONTROL</span>
+            <span className="inline-flex items-center gap-1 rounded-md bg-primary/20 border border-primary/50 px-2 py-0.5 text-xs font-mono font-black text-primary shadow-sm tracking-wide">
+              🎰 ROUND {roundId}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
             <span
-              className={`flex items-center gap-1.5 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border ${
+              className={`flex items-center gap-1 text-[10px] font-extrabold px-2 py-1 rounded-md border ${
                 connectionStatus === "connected"
                   ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-400"
                   : "bg-amber-500/15 border-amber-500/40 text-amber-400 animate-pulse"
               }`}
             >
-              <span className={`h-2 w-2 rounded-full ${connectionStatus === "connected" ? "bg-emerald-400" : "bg-amber-400"}`} />
-              {connectionStatus === "connected" ? "USER SCREEN LIVE" : "CONNECTING..."}
+              <span className={`h-1.5 w-1.5 rounded-full ${connectionStatus === "connected" ? "bg-emerald-400" : "bg-amber-400"}`} />
+              {connectionStatus === "connected" ? "TV SYNCED" : "CONNECTING"}
             </span>
-          </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-md bg-muted border border-border">
-              {phase === "bet" ? `⏳ ${timer}s` : phase === "select" ? "⚡ SPINNING" : "🏆 RESULT"}
+            <span
+              className={`text-xs font-mono font-black px-2.5 py-1 rounded-md border ${
+                phase === "bet"
+                  ? timer <= 5
+                    ? "bg-destructive/20 text-destructive border-destructive/40 animate-pulse"
+                    : "bg-primary/20 text-primary border-primary/40"
+                  : phase === "select"
+                  ? "bg-amber-500/20 text-amber-400 border-amber-500/40 animate-pulse"
+                  : "bg-purple-500/20 text-purple-400 border-purple-500/40"
+              }`}
+            >
+              {phase === "bet" ? `⏳ ${timer}s` : phase === "select" ? `⚡ ${timer}s SPIN` : `🏆 ${timer}s WIN`}
             </span>
             <button
               onClick={() => {

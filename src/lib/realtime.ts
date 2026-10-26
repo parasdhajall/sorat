@@ -1,5 +1,62 @@
-// Realtime communication helper between Smart TV Display and Admin Mobile Phone
-// Supports WebRTC (PeerJS) over Wi-Fi/Internet + BroadcastChannel for same-device tabs
+export const BET_DURATION = 50; // 50s for bets
+export const SELECT_DURATION = 5; // 5s for card spin
+export const RESULT_DURATION = 5; // 5s for winner reveal
+export const ROUND_DURATION = BET_DURATION + SELECT_DURATION + RESULT_DURATION; // 60s total (1 round per minute)
+
+export interface SynchronizedRoundState {
+  roundNumber: number; // e.g. 1325 (Minute of the day in IST)
+  roundId: string; // e.g. "#1325"
+  phase: "bet" | "select" | "result";
+  timeLeft: number; // seconds remaining in current phase
+  totalTime: number; // total duration of current phase
+  elapsedInRound: number; // 0..59
+}
+
+/**
+ * Calculates deterministic game clock synchronized to Indian Standard Time (IST / UTC+5:30).
+ * Guarantees that any device (TV, Phone, Laptop) anywhere in the world will display
+ * the exact same round number and exact same countdown seconds simultaneously!
+ */
+export function getSynchronizedRoundState(nowMs: number = Date.now()): SynchronizedRoundState {
+  const epochSeconds = Math.floor(nowMs / 1000);
+  // IST offset: UTC + 5 hours 30 mins = 19800 seconds
+  const istSeconds = epochSeconds + (5 * 3600 + 30 * 60);
+  const istDate = new Date(istSeconds * 1000);
+
+  // Daily round number from 1 to 1440
+  const roundNumber = istDate.getUTCHours() * 60 + istDate.getUTCMinutes() + 1;
+  const roundId = `#${String(roundNumber).padStart(4, "0")}`;
+
+  const seconds = istDate.getUTCSeconds();
+  const elapsedInRound = seconds % ROUND_DURATION;
+
+  let phase: "bet" | "select" | "result";
+  let timeLeft: number;
+  let totalTime: number;
+
+  if (elapsedInRound < BET_DURATION) {
+    phase = "bet";
+    timeLeft = BET_DURATION - elapsedInRound;
+    totalTime = BET_DURATION;
+  } else if (elapsedInRound < BET_DURATION + SELECT_DURATION) {
+    phase = "select";
+    timeLeft = (BET_DURATION + SELECT_DURATION) - elapsedInRound;
+    totalTime = SELECT_DURATION;
+  } else {
+    phase = "result";
+    timeLeft = ROUND_DURATION - elapsedInRound;
+    totalTime = RESULT_DURATION;
+  }
+
+  return {
+    roundNumber,
+    roundId,
+    phase,
+    timeLeft,
+    totalTime,
+    elapsedInRound,
+  };
+}
 
 export type GameMessage =
   | { type: "ADD_BET"; card: number; amount: number }
@@ -12,6 +69,8 @@ export type GameMessage =
   | { type: "RESET_ROUND" }
   | {
       type: "SYNC_FROM_TV";
+      roundNumber: number;
+      roundId: string;
       phase: "bet" | "select" | "result";
       t: number;
       bets: Record<number, number>;

@@ -1,6 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useRef } from "react";
-import { TVHostSync, DEFAULT_ROOM_ID, GameMessage } from "@/lib/realtime";
+import {
+  TVHostSync,
+  DEFAULT_ROOM_ID,
+  GameMessage,
+  getSynchronizedRoundState,
+  BET_DURATION,
+  SELECT_DURATION,
+  RESULT_DURATION,
+  ROUND_DURATION,
+} from "@/lib/realtime";
 import kite from "@/assets/kite.jpg";
 import umbrella from "@/assets/umbrella.jpg";
 import ball from "@/assets/ball.jpg";
@@ -35,12 +44,15 @@ const CARDS = [
   { name: "भोवरा", img: top }, { name: "बादली", img: bucket }, { name: "गाय", img: cow },
 ];
 const STAKES = [10, 15, 25, 50, 70];
-const BET_TIME = 60, SELECT_TIME = 5, RESULT_TIME = 4, PAYOUT = 10;
+const PAYOUT = 10;
 type Phase = "bet" | "select" | "result";
 
 function Index() {
-  const [phase, setPhase] = useState<Phase>("bet");
-  const [t, setT] = useState(BET_TIME);
+  const initialSync = getSynchronizedRoundState();
+  const [roundNumber, setRoundNumber] = useState(initialSync.roundNumber);
+  const [roundId, setRoundId] = useState(initialSync.roundId);
+  const [phase, setPhase] = useState<Phase>(initialSync.phase);
+  const [t, setT] = useState(initialSync.timeLeft);
   const [stake, setStake] = useState(10);
   const [balance, setBalance] = useState(1000);
   const [bets, setBets] = useState<Record<number, number>>({});
@@ -52,6 +64,10 @@ function Index() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showCounterModal, setShowCounterModal] = useState(false);
+
+  // Round tracking references
+  const lastProcessedRoundRef = useRef<number>(initialSync.roundNumber);
+  const lastDecidedWinnerRoundRef = useRef<number | null>(null);
 
   // Realtime TV-Phone sync state
   const [counterConnected, setCounterConnected] = useState(false);
@@ -177,7 +193,6 @@ function Index() {
         if (msg.card !== null) setStrategy("manual");
       } else if (msg.type === "TRIGGER_SPIN") {
         setPhase("select");
-        setT(SELECT_TIME);
         playBeep(520, 0.15, "triangle");
       }
     };
@@ -189,10 +204,12 @@ function Index() {
     };
   }, []);
 
-  // Broadcast TV State to Admin Phone every second
+  // Broadcast TV State to Admin Phone whenever key properties change
   useEffect(() => {
     hostSyncRef.current?.broadcast({
       type: "SYNC_FROM_TV",
+      roundNumber,
+      roundId,
       phase,
       t,
       bets,
@@ -201,39 +218,56 @@ function Index() {
       strategy,
       forcedWinner,
     });
-  }, [t, phase, bets, pool, winner, strategy, forcedWinner]);
+  }, [roundNumber, roundId, t, phase, bets, pool, winner, strategy, forcedWinner]);
 
-  // Round Timer Interval
+  // Global Synchronized Clock Ticker
   useEffect(() => {
-    const id = setInterval(() => setT((x) => x - 1), 1000);
-    return () => clearInterval(id);
-  }, []);
+    const updateTick = () => {
+      const sync = getSynchronizedRoundState();
+      setT(sync.timeLeft);
+      setPhase(sync.phase);
 
-  // Game Phases Transitions
-  useEffect(() => {
-    if (t > 0) {
-      if (phase === "bet" && t % 3 === 0) setPlayers((p) => Math.max(8, p + Math.floor(Math.random() * 5) - 2));
+      // Handle Round rollover (new round starts every 60 seconds)
+      if (sync.roundNumber !== lastProcessedRoundRef.current) {
+        lastProcessedRoundRef.current = sync.roundNumber;
+        setRoundNumber(sync.roundNumber);
+        setRoundId(sync.roundId);
+        setBets({});
+        setWinner(null);
+        setSpot(null);
+        setForcedWinner(null);
+        setWon(0);
+        lastDecidedWinnerRoundRef.current = null;
+        setPool(Math.floor(50000 + Math.random() * 150000) / 100 * 100);
+      }
 
-      // Audio countdown cues in final seconds
-      if (phase === "bet" && t <= 5 && t > 0) {
+      // Dynamic player count fluctuation
+      if (sync.phase === "bet" && sync.timeLeft % 3 === 0) {
+        setPlayers((p) => Math.max(8, p + Math.floor(Math.random() * 5) - 2));
+      }
+
+      // Audio countdown cues in final 5 seconds of bet phase
+      if (sync.phase === "bet" && sync.timeLeft <= 5 && sync.timeLeft > 0) {
         playBeep(880, 0.12, "sawtooth");
       }
-      return;
-    }
+    };
 
-    if (phase === "bet") {
-      setPhase("select");
-      setT(SELECT_TIME);
-      playBeep(520, 0.15, "triangle");
-    } else if (phase === "select") {
-      // Determine the winner based on operator strategy & bet distribution
+    updateTick();
+    const id = setInterval(updateTick, 250);
+    return () => clearInterval(id);
+  }, [soundEnabled]);
+
+  // Determine winner ONCE when phase enters "select"
+  useEffect(() => {
+    if (phase === "select" && lastDecidedWinnerRoundRef.current !== roundNumber) {
+      lastDecidedWinnerRoundRef.current = roundNumber;
+
       let w: number;
-
       if (strategy === "manual" && forcedWinner !== null && forcedWinner >= 0 && forcedWinner < 12) {
-        // Operator manually picked this card to win
+        // Admin manually selected winner card
         w = forcedWinner;
       } else if (strategy === "player_win") {
-        // Player Retention Mode: Pick from cards that have a small bet
+        // Player retention: pick among cards with smaller bets
         const cardsWithBets = Object.entries(bets)
           .map(([card, amt]) => ({ card: Number(card), amt: Number(amt) }))
           .filter((c) => c.amt > 0);
@@ -249,11 +283,10 @@ function Index() {
         // Maximum House Profit Mode (Default):
         // 1. If any cards have 0 bet, ALWAYS pick from 0-bet cards (100% house profit!)
         const zeroBetCards = Array.from({ length: 12 }, (_, i) => i).filter((i) => (bets[i] ?? 0) === 0);
-
         if (zeroBetCards.length > 0) {
           w = zeroBetCards[Math.floor(Math.random() * zeroBetCards.length)];
         } else {
-          // 2. If all cards have bets, pick strictly from the cards with the LOWEST bet amount
+          // 2. Lowest bet card
           const minBet = Math.min(...Object.values(bets));
           const minCards = Array.from({ length: 12 }, (_, i) => i).filter((i) => (bets[i] ?? 0) === minBet);
           w = minCards[Math.floor(Math.random() * minCards.length)];
@@ -263,21 +296,12 @@ function Index() {
       const prize = (bets[w] ?? 0) * PAYOUT;
       setWinner(w);
       setWon(prize);
-      setBalance((b) => b + prize);
-      setPhase("result");
-      setT(RESULT_TIME);
+      if (prize > 0) setBalance((b) => b + prize);
       playVictoryFanfare();
-    } else {
-      setPhase("bet");
-      setT(BET_TIME);
-      setBets({});
-      setWinner(null);
-      setSpot(null);
-      setForcedWinner(null);
-      setPool(Math.floor(50000 + Math.random() * 150000) / 100 * 100);
     }
-  }, [t, phase, bets, soundEnabled, strategy, forcedWinner]);
+  }, [phase, roundNumber, strategy, forcedWinner, bets, soundEnabled]);
 
+  // Spinning spotlight animation during "select" phase
   useEffect(() => {
     if (phase !== "select") return;
     const id = setInterval(() => {
@@ -285,6 +309,8 @@ function Index() {
       playBeep(580 + Math.random() * 200, 0.04, "sine");
     }, 120);
     return () => clearInterval(id);
+  }, [phase, soundEnabled]);
+
   // User places bet by clicking cards
   const place = (i: number) => {
     if (phase !== "bet" || balance < stake) return;
@@ -297,6 +323,8 @@ function Index() {
     // Immediately push update to Admin
     hostSyncRef.current?.broadcast({
       type: "SYNC_FROM_TV",
+      roundNumber,
+      roundId,
       phase,
       t,
       bets: newBets,
@@ -309,7 +337,7 @@ function Index() {
 
   const hurry = phase === "bet" && t <= 5;
   const totalBet = Object.values(bets).reduce((a, b) => a + b, 0);
-  const total = phase === "bet" ? BET_TIME : phase === "select" ? SELECT_TIME : RESULT_TIME;
+  const total = phase === "bet" ? BET_DURATION : phase === "select" ? SELECT_DURATION : RESULT_DURATION;
 
   return (
     <main
@@ -406,6 +434,16 @@ function Index() {
                 : "border-border bg-card/90 shadow-md"
             }`}
           >
+            {/* Round Badge Indicator */}
+            <div className="mb-2 flex items-center justify-between">
+              <span className="inline-flex items-center gap-1 rounded-md bg-primary/20 border border-primary/50 px-2 py-0.5 text-[11px] font-mono font-black text-primary shadow-sm tracking-wider">
+                🎰 ROUND {roundId}
+              </span>
+              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                {phase === "bet" ? (hurry ? "CLOSING" : "BETS OPEN") : phase === "select" ? "SPINNING" : "RESULT"}
+              </span>
+            </div>
+
             {/* Ambient Timer Glow Effect */}
             <div
               className={`relative mx-auto h-14 w-14 rounded-full flex items-center justify-center ${
@@ -509,8 +547,41 @@ function Index() {
       {/* 12-CARD GAME ARENA GRID (User Clicks to Bet)                   */}
       {/* ============================================================== */}
       <section className="relative z-10 flex-1 h-full max-h-screen overflow-hidden p-2 sm:p-2.5 md:p-3 flex flex-col justify-between min-h-0">
+        {/* Top Arena Live Status Bar */}
+        <div className="flex items-center justify-between px-2.5 py-1 rounded-xl bg-card/85 border border-border/80 shadow-sm shrink-0 mb-1.5 backdrop-blur-sm">
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-primary text-primary-foreground font-mono font-black text-xs sm:text-sm shadow-gold tracking-wider">
+              <span>🎰</span> ROUND {roundId}
+            </span>
+            <span
+              className={`px-2 py-0.5 rounded-md text-[11px] sm:text-xs font-black tracking-wide ${
+                hurry
+                  ? "bg-destructive/20 text-destructive border border-destructive/40 animate-pulse"
+                  : phase === "bet"
+                  ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+                  : phase === "select"
+                  ? "bg-amber-500/20 text-amber-400 border border-amber-500/40 animate-pulse"
+                  : "bg-purple-500/20 text-purple-400 border border-purple-500/40"
+              }`}
+            >
+              {phase === "bet" ? `⏳ ${t}s BETS OPEN` : phase === "select" ? `⚡ ${t}s WHEEL SPINNING` : `🏆 ${t}s WINNER`}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 sm:gap-3 text-muted-foreground text-[10px] sm:text-xs font-bold">
+            <span className="flex items-center gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              {players} LIVE
+            </span>
+            <span className="hidden sm:inline">•</span>
+            <span className="text-primary font-display font-extrabold tracking-wide">
+              POOL: ₹{pool.toLocaleString("en-IN")}
+            </span>
+          </div>
+        </div>
+
         {/* Top Casino LED Marquee Light Ticker */}
-        <div className="casino-marquee h-2 w-full shrink-0 rounded-full border border-amber-500/40 opacity-80 shadow-[0_0_10px_rgba(245,158,11,0.5)] mb-1.5" />
+        <div className="casino-marquee h-1.5 w-full shrink-0 rounded-full border border-amber-500/40 opacity-80 shadow-[0_0_10px_rgba(245,158,11,0.5)] mb-1" />
 
         {/* Picture Card Grid - 4 columns x 3 rows, flex-1 min-h-0 to fit exact screen */}
         <div className="grid flex-1 min-h-0 grid-cols-4 grid-rows-3 gap-2 sm:gap-2.5">
