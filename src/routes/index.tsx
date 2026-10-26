@@ -194,10 +194,13 @@ function Index() {
         setForcedWinner(msg.card);
         if (msg.card !== null && msg.card >= 0 && msg.card < 12) {
           setStrategy("manual");
-          // If in select or result phase, lock it as winner immediately
-          setWinner(msg.card);
-          const prize = (bets[msg.card] ?? 0) * PAYOUT;
-          setWon(prize);
+          // Only update visible winner if already in result phase!
+          // During betting phase, keep winner strictly hidden so users see ZERO highlight.
+          if (phase === "result") {
+            setWinner(msg.card);
+            const prize = (bets[msg.card] ?? 0) * PAYOUT;
+            setWon(prize);
+          }
         }
       } else if (msg.type === "TRIGGER_SPIN") {
         setPhase("select");
@@ -615,7 +618,7 @@ function Index() {
         {/* Picture Card Grid - 4 columns x 3 rows, flex-1 min-h-0 to fit exact screen */}
         <div className="grid flex-1 min-h-0 grid-cols-4 grid-rows-3 gap-2 sm:gap-2.5">
           {CARDS.map((c, i) => {
-            const isLit = spot === i || winner === i;
+            const isLit = (phase === "select" && spot === i) || (phase === "result" && winner === i);
             const hasBet = Boolean(bets[i]);
 
             return (
