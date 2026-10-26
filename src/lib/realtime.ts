@@ -58,15 +58,130 @@ export function getSynchronizedRoundState(nowMs: number = Date.now()): Synchroni
   };
 }
 
+export const TARGET_PROFIT_MARGIN = 0.30; // 30% Owner Profit Guarantee
+export const MAX_PAYOUT_RATIO = 0.70; // 70% Maximum RTP to players
+export const PAYOUT_MULTIPLIER = 10; // 10x Payout for 12 cards
+
+export interface CardProfitAnalysis {
+  card: number;
+  bet: number;
+  potentialPayout: number;
+  isSafeForProfit: boolean;
+  status: "ZERO_BET" | "SAFE" | "BLOCKED";
+}
+
+/**
+ * Analyzes all 12 cards against the 30% Owner Profit Margin guarantee rule.
+ */
+export function analyzeCardProfitability(
+  currentBets: Record<number, number>,
+  totalTurnover: number,
+  totalPayouts: number
+): CardProfitAnalysis[] {
+  const roundTurnover = Object.values(currentBets).reduce((a, b) => a + b, 0);
+  const newTurnover = totalTurnover + roundTurnover;
+
+  // Maximum cumulative payouts allowed to guarantee >= 30% house profit
+  const maxAllowedCumulativePayout = newTurnover * MAX_PAYOUT_RATIO;
+  const currentMaxRoundPayout = Math.max(0, maxAllowedCumulativePayout - totalPayouts);
+
+  return Array.from({ length: 12 }, (_, i) => {
+    const bet = currentBets[i] ?? 0;
+    const potentialPayout = bet * PAYOUT_MULTIPLIER;
+    const isSafeForProfit = potentialPayout <= currentMaxRoundPayout || roundTurnover === 0;
+
+    let status: "ZERO_BET" | "SAFE" | "BLOCKED";
+    if (bet === 0) {
+      status = "ZERO_BET";
+    } else if (isSafeForProfit) {
+      status = "SAFE";
+    } else {
+      status = "BLOCKED";
+    }
+
+    return { card: i, bet, potentialPayout, isSafeForProfit, status };
+  });
+}
+
+/**
+ * Calculates the winning card ensuring at least 30% House Margin is maintained.
+ */
+export function calculateProfitGuaranteedWinner(
+  currentBets: Record<number, number>,
+  totalTurnover: number,
+  totalPayouts: number,
+  forcedWinner: number | null = null
+): { winner: number; netPayout: number; reason: string } {
+  // 1. If Admin manually forced a winner, honor Admin's command unconditionally
+  if (forcedWinner !== null && forcedWinner >= 0 && forcedWinner < 12) {
+    const betOnCard = currentBets[forcedWinner] ?? 0;
+    return {
+      winner: forcedWinner,
+      netPayout: betOnCard * PAYOUT_MULTIPLIER,
+      reason: "ADMIN_MANUAL_OVERRIDE",
+    };
+  }
+
+  const analysis = analyzeCardProfitability(currentBets, totalTurnover, totalPayouts);
+  const zeroBetCards = analysis.filter((c) => c.status === "ZERO_BET");
+  const safeCards = analysis.filter((c) => c.isSafeForProfit);
+  const safeWithBets = safeCards.filter((c) => c.bet > 0);
+
+  const roundTurnover = Object.values(currentBets).reduce((a, b) => a + b, 0);
+  const newTurnover = totalTurnover + roundTurnover;
+  const currentProfitMargin = newTurnover > 0 ? (newTurnover - totalPayouts) / newTurnover : 1;
+
+  // If lifetime profit margin is already high (> 35%) and there are safe bets,
+  // let players win occasionally (40% chance) to keep them engaged & entertained!
+  if (currentProfitMargin > 0.35 && safeWithBets.length > 0 && Math.random() < 0.40) {
+    const lucky = safeWithBets[Math.floor(Math.random() * safeWithBets.length)]!;
+    return {
+      winner: lucky.card,
+      netPayout: lucky.potentialPayout,
+      reason: "CONTROLLED_SAFE_PLAYER_WIN",
+    };
+  }
+
+  // Primary House Vault Protection: Prioritize 0-bet cards (100% house profit)
+  if (zeroBetCards.length > 0) {
+    const lucky = zeroBetCards[Math.floor(Math.random() * zeroBetCards.length)]!;
+    return {
+      winner: lucky.card,
+      netPayout: 0,
+      reason: "ZERO_BET_100_PERCENT_PROFIT",
+    };
+  }
+
+  // If all cards have bets, pick the safe card with the lowest payout
+  if (safeCards.length > 0) {
+    const minSafe = safeCards.reduce((prev, curr) => (curr.potentialPayout < prev.potentialPayout ? curr : prev));
+    return {
+      winner: minSafe.card,
+      netPayout: minSafe.potentialPayout,
+      reason: "LOWEST_SAFE_PAYOUT",
+    };
+  }
+
+  // Extreme edge case: Heavy bets on all 12 cards exceeding 70% budget.
+  // Pick the card with absolute lowest bet to protect capital!
+  const lowestLossCard = analysis.reduce((prev, curr) => (curr.bet < prev.bet ? curr : prev));
+  return {
+    winner: lowestLossCard.card,
+    netPayout: lowestLossCard.potentialPayout,
+    reason: "MINIMAL_LOSS_PROTECTION",
+  };
+}
+
 export type GameMessage =
   | { type: "ADD_BET"; card: number; amount: number }
   | { type: "SUB_BET"; card: number; amount: number }
   | { type: "CLEAR_CARD"; card: number }
   | { type: "CLEAR_ALL_BETS" }
-  | { type: "SET_STRATEGY"; mode: "house_profit" | "player_win" | "manual" }
   | { type: "FORCE_WINNER"; card: number | null }
   | { type: "TRIGGER_SPIN" }
   | { type: "RESET_ROUND" }
+  | { type: "RECHARGE_AGENT"; amount: number }
+  | { type: "RESET_FINANCIALS" }
   | {
       type: "SYNC_FROM_TV";
       roundNumber: number;
@@ -76,8 +191,12 @@ export type GameMessage =
       bets: Record<number, number>;
       pool: number;
       winner: number | null;
-      strategy: "house_profit" | "player_win" | "manual";
       forcedWinner: number | null;
+      agentBalance: number;
+      totalTurnover: number;
+      totalPayouts: number;
+      houseProfit: number;
+      profitPercentage: number;
     };
 
 export const DEFAULT_ROOM_ID = "sorat-arena-88";
@@ -144,14 +263,17 @@ export class TVHostSync {
             if (d.forcedWinner !== undefined) {
               this.onMessage({ type: "FORCE_WINNER", card: d.forcedWinner });
             }
-            if (d.strategy) {
-              this.onMessage({ type: "SET_STRATEGY", mode: d.strategy });
-            }
             if (d.triggerSpin) {
               this.onMessage({ type: "TRIGGER_SPIN" });
             }
             if (d.clearBets) {
               this.onMessage({ type: "CLEAR_ALL_BETS" });
+            }
+            if (d.rechargeAgent) {
+              this.onMessage({ type: "RECHARGE_AGENT", amount: d.rechargeAgent });
+            }
+            if (d.resetFinancials) {
+              this.onMessage({ type: "RESET_FINANCIALS" });
             }
           }
         }
@@ -179,7 +301,7 @@ export class TVHostSync {
       localStorage.setItem(`sorat_tv_msg_${this.roomId}`, JSON.stringify(wire));
     } catch {}
 
-    // When TV state changes (bets, phase, t, winner):
+    // When TV state changes (bets, phase, t, winner, financials):
     if (msg.type === "SYNC_FROM_TV") {
       fetch(CLOUD_SYNC_URL, {
         method: "PUT",
@@ -190,12 +312,16 @@ export class TVHostSync {
             bets: msg.bets,
             pool: msg.pool,
             winner: msg.winner,
-            strategy: msg.strategy,
             forcedWinner: msg.forcedWinner,
             tvT: msg.t,
             phase: msg.phase,
             roundNumber: msg.roundNumber,
             roundId: msg.roundId,
+            agentBalance: msg.agentBalance,
+            totalTurnover: msg.totalTurnover,
+            totalPayouts: msg.totalPayouts,
+            houseProfit: msg.houseProfit,
+            profitPercentage: msg.profitPercentage,
             tvUpdatedAt: Date.now(),
           },
         }),
@@ -278,8 +404,12 @@ export class AdminClientSync {
               bets: d.bets || {},
               pool: d.pool || 0,
               winner: d.winner,
-              strategy: d.strategy || "house_profit",
               forcedWinner: d.forcedWinner,
+              agentBalance: d.agentBalance ?? 1000,
+              totalTurnover: d.totalTurnover ?? 0,
+              totalPayouts: d.totalPayouts ?? 0,
+              houseProfit: d.houseProfit ?? 0,
+              profitPercentage: d.profitPercentage ?? 100,
             });
           }
         }
@@ -313,15 +443,15 @@ export class AdminClientSync {
     };
     if (msg.type === "FORCE_WINNER") {
       cloudPayload.forcedWinner = msg.card;
-      cloudPayload.strategy = "manual";
-    } else if (msg.type === "SET_STRATEGY") {
-      cloudPayload.strategy = msg.mode;
-      if (msg.mode !== "manual") cloudPayload.forcedWinner = null;
     } else if (msg.type === "TRIGGER_SPIN") {
       cloudPayload.triggerSpin = Date.now();
     } else if (msg.type === "CLEAR_ALL_BETS") {
       cloudPayload.clearBets = Date.now();
       cloudPayload.bets = {};
+    } else if (msg.type === "RECHARGE_AGENT") {
+      cloudPayload.rechargeAgent = msg.amount;
+    } else if (msg.type === "RESET_FINANCIALS") {
+      cloudPayload.resetFinancials = Date.now();
     }
 
     fetch(CLOUD_SYNC_URL, {

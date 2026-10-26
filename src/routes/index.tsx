@@ -5,6 +5,7 @@ import {
   DEFAULT_ROOM_ID,
   GameMessage,
   getSynchronizedRoundState,
+  calculateProfitGuaranteedWinner,
   BET_DURATION,
   SELECT_DURATION,
   RESULT_DURATION,
@@ -54,7 +55,30 @@ function Index() {
   const [phase, setPhase] = useState<Phase>(initialSync.phase);
   const [t, setT] = useState(initialSync.timeLeft);
   const [stake, setStake] = useState(10);
-  const [balance, setBalance] = useState(1000);
+
+  // Agent Wallet & Business Model Financials (Persisted in localStorage)
+  const [agentBalance, setAgentBalance] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("sorat_agent_balance");
+      if (saved) return Number(saved);
+    }
+    return 1000;
+  });
+  const [totalTurnover, setTotalTurnover] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("sorat_total_turnover");
+      if (saved) return Number(saved);
+    }
+    return 0;
+  });
+  const [totalPayouts, setTotalPayouts] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("sorat_total_payouts");
+      if (saved) return Number(saved);
+    }
+    return 0;
+  });
+
   const [bets, setBets] = useState<Record<number, number>>({});
   const [winner, setWinner] = useState<number | null>(null);
   const [spot, setSpot] = useState<number | null>(null);
@@ -72,11 +96,32 @@ function Index() {
 
   // Realtime TV-Phone sync state
   const [counterConnected, setCounterConnected] = useState(false);
-  const [strategy, setStrategy] = useState<"house_profit" | "player_win" | "manual">("house_profit");
   const [forcedWinner, setForcedWinner] = useState<number | null>(null);
   const hostSyncRef = useRef<TVHostSync | null>(null);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
+
+  // Sync financials to localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("sorat_agent_balance", String(agentBalance));
+    }
+  }, [agentBalance]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("sorat_total_turnover", String(totalTurnover));
+    }
+  }, [totalTurnover]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("sorat_total_payouts", String(totalPayouts));
+    }
+  }, [totalPayouts]);
+
+  const houseProfit = totalTurnover - totalPayouts;
+  const profitPercentage = totalTurnover > 0 ? Math.round(((totalTurnover - totalPayouts) / totalTurnover) * 100) : 100;
 
   // Initialize Audio Context on user interaction
   const getAudioContext = () => {
@@ -173,27 +218,42 @@ function Index() {
           [msg.card]: (prev[msg.card] ?? 0) + msg.amount,
         }));
         setPool((p) => p + msg.amount);
+        setTotalTurnover((t) => t + msg.amount);
+        setAgentBalance((b) => Math.max(0, b - msg.amount));
         playBeep(720, 0.07, "sine");
       } else if (msg.type === "SUB_BET") {
         setBets((prev) => ({
           ...prev,
           [msg.card]: Math.max(0, (prev[msg.card] ?? 0) - msg.amount),
         }));
+        setTotalTurnover((t) => Math.max(0, t - msg.amount));
+        setAgentBalance((b) => b + msg.amount);
       } else if (msg.type === "CLEAR_CARD") {
         setBets((prev) => {
+          const currentAmt = prev[msg.card] ?? 0;
+          setTotalTurnover((t) => Math.max(0, t - currentAmt));
+          setAgentBalance((b) => b + currentAmt);
           const next = { ...prev };
           delete next[msg.card];
           return next;
         });
       } else if (msg.type === "CLEAR_ALL_BETS") {
-        setBets({});
-      } else if (msg.type === "SET_STRATEGY") {
-        setStrategy(msg.mode);
+        setBets((prev) => {
+          const roundSum = Object.values(prev).reduce((a, b) => a + b, 0);
+          setTotalTurnover((t) => Math.max(0, t - roundSum));
+          setAgentBalance((b) => b + roundSum);
+          return {};
+        });
+      } else if (msg.type === "RECHARGE_AGENT") {
+        setAgentBalance((b) => b + msg.amount);
+        playBeep(880, 0.15, "sine");
+      } else if (msg.type === "RESET_FINANCIALS") {
+        setTotalTurnover(0);
+        setTotalPayouts(0);
       } else if (msg.type === "FORCE_WINNER") {
         forcedWinnerRef.current = msg.card;
         setForcedWinner(msg.card);
         if (msg.card !== null && msg.card >= 0 && msg.card < 12) {
-          setStrategy("manual");
           // Only update visible winner if already in result phase!
           // During betting phase, keep winner strictly hidden so users see ZERO highlight.
           if (phase === "result") {
@@ -205,19 +265,6 @@ function Index() {
       } else if (msg.type === "TRIGGER_SPIN") {
         setPhase("select");
         playBeep(520, 0.15, "triangle");
-      } else if (msg.type === "REQUEST_SYNC") {
-        hostSyncRef.current?.broadcast({
-          type: "SYNC_FROM_TV",
-          roundNumber: lastProcessedRoundRef.current,
-          roundId: `#${String(lastProcessedRoundRef.current).padStart(4, "0")}`,
-          phase,
-          t,
-          bets,
-          pool,
-          winner,
-          strategy,
-          forcedWinner,
-        });
       }
     };
 
@@ -226,7 +273,7 @@ function Index() {
     return () => {
       host.destroy();
     };
-  }, []);
+  }, [phase, bets]);
 
   // Broadcast TV State to Admin Phone whenever key properties change
   useEffect(() => {
@@ -239,10 +286,14 @@ function Index() {
       bets,
       pool,
       winner,
-      strategy,
       forcedWinner,
+      agentBalance,
+      totalTurnover,
+      totalPayouts,
+      houseProfit,
+      profitPercentage,
     });
-  }, [roundNumber, roundId, t, phase, bets, pool, winner, strategy, forcedWinner]);
+  }, [roundNumber, roundId, t, phase, bets, pool, winner, forcedWinner, agentBalance, totalTurnover, totalPayouts, houseProfit, profitPercentage]);
 
   // Global Synchronized Clock Ticker
   useEffect(() => {
@@ -259,11 +310,8 @@ function Index() {
         setBets({});
         setWinner(null);
         setSpot(null);
-        // Only reset forcedWinner if NOT in manual mode
-        if (strategy !== "manual") {
-          forcedWinnerRef.current = null;
-          setForcedWinner(null);
-        }
+        forcedWinnerRef.current = null;
+        setForcedWinner(null);
         setWon(0);
         lastDecidedWinnerRoundRef.current = null;
         setPool(Math.floor(50000 + Math.random() * 150000) / 100 * 100);
@@ -283,53 +331,37 @@ function Index() {
     updateTick();
     const id = setInterval(updateTick, 250);
     return () => clearInterval(id);
-  }, [soundEnabled, strategy]);
+  }, [soundEnabled]);
 
-  // Determine winner ONCE when phase enters "select"
+  // 🔒 GUARANTEED 30% PROFIT BUSINESS ENGINE: Determine winner ONCE when phase enters "select"
   useEffect(() => {
     if (phase === "select" && lastDecidedWinnerRoundRef.current !== roundNumber) {
       lastDecidedWinnerRoundRef.current = roundNumber;
 
-      let w: number;
       const adminPick = forcedWinnerRef.current !== null ? forcedWinnerRef.current : forcedWinner;
 
-      // 👑 ADMIN SELECTED WINNER - 100% UNCONDITIONAL GUARANTEE
-      if (adminPick !== null && adminPick >= 0 && adminPick < 12) {
-        w = adminPick;
-      } else if (strategy === "player_win") {
-        // Player retention: pick among cards with smaller bets
-        const cardsWithBets = Object.entries(bets)
-          .map(([card, amt]) => ({ card: Number(card), amt: Number(amt) }))
-          .filter((c) => c.amt > 0);
+      // Autonomous 30% Margin Protected Winner Selection
+      const decision = calculateProfitGuaranteedWinner(
+        bets,
+        totalTurnover,
+        totalPayouts,
+        adminPick
+      );
 
-        if (cardsWithBets.length > 0) {
-          const minBet = Math.min(...cardsWithBets.map((c) => c.amt));
-          const candidates = cardsWithBets.filter((c) => c.amt === minBet).map((c) => c.card);
-          w = candidates[Math.floor(Math.random() * candidates.length)];
-        } else {
-          w = Math.floor(Math.random() * 12);
-        }
-      } else {
-        // Maximum House Profit Mode (Default):
-        // 1. If any cards have 0 bet, ALWAYS pick from 0-bet cards (100% house profit!)
-        const zeroBetCards = Array.from({ length: 12 }, (_, i) => i).filter((i) => (bets[i] ?? 0) === 0);
-        if (zeroBetCards.length > 0) {
-          w = zeroBetCards[Math.floor(Math.random() * zeroBetCards.length)];
-        } else {
-          // 2. Lowest bet card
-          const minBet = Math.min(...Object.values(bets));
-          const minCards = Array.from({ length: 12 }, (_, i) => i).filter((i) => (bets[i] ?? 0) === minBet);
-          w = minCards[Math.floor(Math.random() * minCards.length)];
-        }
-      }
-
+      const w = decision.winner;
       const prize = (bets[w] ?? 0) * PAYOUT;
       setWinner(w);
       setWon(prize);
-      if (prize > 0) setBalance((b) => b + prize);
+
+      // Book accounting payouts
+      if (prize > 0) {
+        setTotalPayouts((p) => p + prize);
+        setAgentBalance((b) => b + prize);
+      }
+
       playVictoryFanfare();
     }
-  }, [phase, roundNumber, strategy, forcedWinner, bets, soundEnabled]);
+  }, [phase, roundNumber, forcedWinner, bets, totalTurnover, totalPayouts, soundEnabled]);
 
   // Immediate live override if admin locks a winner at any time during select or result phase
   useEffect(() => {
@@ -367,12 +399,18 @@ function Index() {
     };
   }, [phase, soundEnabled, forcedWinner]);
 
-  // User places bet by clicking cards
+  // User / Operator places bet by clicking cards
   const place = (i: number) => {
-    if (phase !== "bet" || balance < stake) return;
-    setBalance((b) => b - stake);
+    if (phase !== "bet" || agentBalance < stake) return;
+    const nextAgentBalance = agentBalance - stake;
+    const nextTurnover = totalTurnover + stake;
     const newBets = { ...bets, [i]: (bets[i] ?? 0) + stake };
+    const nextProfit = nextTurnover - totalPayouts;
+    const nextProfitPct = nextTurnover > 0 ? Math.round((nextProfit / nextTurnover) * 100) : 100;
+
+    setAgentBalance(nextAgentBalance);
     setBets(newBets);
+    setTotalTurnover(nextTurnover);
     setPool((p) => p + stake);
     playBeep(720, 0.06, "sine");
 
@@ -386,8 +424,12 @@ function Index() {
       bets: newBets,
       pool: pool + stake,
       winner,
-      strategy,
       forcedWinner,
+      agentBalance: nextAgentBalance,
+      totalTurnover: nextTurnover,
+      totalPayouts,
+      houseProfit: nextProfit,
+      profitPercentage: nextProfitPct,
     });
   };
 
@@ -467,16 +509,16 @@ function Index() {
             </div>
           </div>
 
-          {/* Balance & Token Status */}
+          {/* Agent Wallet Balance Status */}
           <div className="flex items-center justify-between rounded-xl border border-border/80 bg-card/80 px-3 py-2 shadow-sm">
             <div className="space-y-0.5">
-              <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Balance</span>
+              <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Agent Wallet</span>
               <div className="text-base font-display text-primary flex items-center gap-1 leading-none">
-                <span>🪙</span> {balance.toLocaleString("en-IN")}
+                <span>🪙</span> ₹{agentBalance.toLocaleString("en-IN")}
               </div>
             </div>
-            <span className="rounded-full bg-success/20 border border-success/40 px-2 py-0.5 text-[10px] font-extrabold text-success tracking-wide">
-              DEMO TOKENS
+            <span className="rounded-full bg-emerald-500/20 border border-emerald-500/40 px-2 py-0.5 text-[10px] font-extrabold text-emerald-400 tracking-wide">
+              ACTIVE
             </span>
           </div>
 

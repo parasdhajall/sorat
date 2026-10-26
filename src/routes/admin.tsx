@@ -5,6 +5,7 @@ import {
   DEFAULT_ROOM_ID,
   GameMessage,
   getSynchronizedRoundState,
+  analyzeCardProfitability,
 } from "@/lib/realtime";
 import kite from "@/assets/kite.jpg";
 import umbrella from "@/assets/umbrella.jpg";
@@ -22,7 +23,7 @@ import cow from "@/assets/cow.jpg";
 export const Route = createFileRoute("/admin")({
   head: () => ({
     meta: [
-      { title: "Sorat — Live Admin Controller" },
+      { title: "Sorat — Live Admin Controller (30% Profit Model)" },
       { name: "robots", content: "noindex, nofollow" },
     ],
   }),
@@ -64,12 +65,17 @@ export default function AdminPage() {
   const [bets, setBets] = useState<Record<number, number>>({});
   const [lastWinner, setLastWinner] = useState<number | null>(null);
 
-  // Admin Winner Control
-  const [strategy, setStrategy] = useState<"house_profit" | "player_win" | "manual">("house_profit");
+  // Agent Wallet & Business Model Financials
+  const [agentBalance, setAgentBalance] = useState(1000);
+  const [totalTurnover, setTotalTurnover] = useState(0);
+  const [totalPayouts, setTotalPayouts] = useState(0);
+  const [houseProfit, setHouseProfit] = useState(0);
+  const [profitPercentage, setProfitPercentage] = useState(100);
+
+  // Admin Manual Override
   const [forcedWinner, setForcedWinner] = useState<number | null>(null);
 
   const clientSyncRef = useRef<AdminClientSync | null>(null);
-  const lastProcessedRoundRef = useRef<number>(initialSync.roundNumber);
   const tvMasterSyncRef = useRef<{ t: number; receivedAt: number; phase: string; roundNumber: number } | null>(null);
 
   // Check stored auth session
@@ -80,12 +86,10 @@ export default function AdminPage() {
     }
   }, []);
 
-  // Synchronized Game Clock Ticker:
-  // Slaved directly to the TV Master Screen so both screens show bit-for-bit identical seconds!
+  // Synchronized Game Clock Ticker
   useEffect(() => {
     const updateTick = () => {
       if (tvMasterSyncRef.current) {
-        // TV is connected: calculate remaining seconds from TV master baseline
         const elapsedSec = Math.floor((Date.now() - tvMasterSyncRef.current.receivedAt) / 1000);
         const currentT = Math.max(0, tvMasterSyncRef.current.t - elapsedSec);
         setTimer(currentT);
@@ -93,7 +97,6 @@ export default function AdminPage() {
         setRoundNumber(tvMasterSyncRef.current.roundNumber);
         setRoundId(`#${String(tvMasterSyncRef.current.roundNumber).padStart(4, "0")}`);
       } else {
-        // Fallback to global clock if TV message not yet received
         const sync = getSynchronizedRoundState();
         setTimer(sync.timeLeft);
         setPhase(sync.phase);
@@ -144,8 +147,12 @@ export default function AdminPage() {
         setRoundId(msg.roundId);
         setBets(msg.bets || {});
         if (msg.winner !== null) setLastWinner(msg.winner);
-        setStrategy(msg.strategy || "house_profit");
         setForcedWinner(msg.forcedWinner);
+        setAgentBalance(msg.agentBalance ?? 1000);
+        setTotalTurnover(msg.totalTurnover ?? 0);
+        setTotalPayouts(msg.totalPayouts ?? 0);
+        setHouseProfit(msg.houseProfit ?? 0);
+        setProfitPercentage(msg.profitPercentage ?? 100);
       }
     };
 
@@ -156,33 +163,50 @@ export default function AdminPage() {
     };
   }, [isAuthenticated, roomId]);
 
-  // Admin sets the winner card
+  // Admin locks/unlocks manual winner
   const handleSelectWinner = (cardIdx: number) => {
-    // Lock this card as unconditional winner
-    setForcedWinner(cardIdx);
-    setStrategy("manual");
-    clientSyncRef.current?.send({ type: "FORCE_WINNER", card: cardIdx });
-    clientSyncRef.current?.send({ type: "SET_STRATEGY", mode: "manual" });
-    // Re-send once after 100ms to guarantee zero packet loss
-    setTimeout(() => {
+    if (forcedWinner === cardIdx) {
+      // Toggle off / cancel override
+      setForcedWinner(null);
+      clientSyncRef.current?.send({ type: "FORCE_WINNER", card: null });
+    } else {
+      setForcedWinner(cardIdx);
       clientSyncRef.current?.send({ type: "FORCE_WINNER", card: cardIdx });
-    }, 100);
+      // Re-send once after 100ms to guarantee zero packet loss
+      setTimeout(() => {
+        clientSyncRef.current?.send({ type: "FORCE_WINNER", card: cardIdx });
+      }, 100);
+    }
   };
 
   const handleClearForcedWinner = () => {
     setForcedWinner(null);
-    setStrategy("house_profit");
     clientSyncRef.current?.send({ type: "FORCE_WINNER", card: null });
-    clientSyncRef.current?.send({ type: "SET_STRATEGY", mode: "house_profit" });
   };
 
-  const handleSetStrategy = (mode: "house_profit" | "player_win" | "manual") => {
-    setStrategy(mode);
-    if (mode !== "manual") {
-      setForcedWinner(null);
-      clientSyncRef.current?.send({ type: "FORCE_WINNER", card: null });
+  // Recharge Agent Wallet
+  const handleRechargeAgent = (amount: number) => {
+    setAgentBalance((b) => b + amount);
+    clientSyncRef.current?.send({ type: "RECHARGE_AGENT", amount });
+  };
+
+  const handleCustomRecharge = () => {
+    const input = prompt("Agent Wallet me kitne Points / Rupees add karne hain?", "1000");
+    if (!input) return;
+    const num = Number(input.trim());
+    if (!isNaN(num) && num > 0) {
+      handleRechargeAgent(num);
     }
-    clientSyncRef.current?.send({ type: "SET_STRATEGY", mode });
+  };
+
+  const handleResetFinancials = () => {
+    if (confirm("Are you sure? Total Turnover aur Payouts stats 0 ho jayenge.")) {
+      setTotalTurnover(0);
+      setTotalPayouts(0);
+      setHouseProfit(0);
+      setProfitPercentage(100);
+      clientSyncRef.current?.send({ type: "RESET_FINANCIALS" });
+    }
   };
 
   const handleTriggerSpin = () => {
@@ -190,16 +214,20 @@ export default function AdminPage() {
   };
 
   const handleClearBets = () => {
-    if (confirm("User ke saare bets reset karne hain?")) {
+    if (confirm("Round ke saare bets clear karne hain?")) {
       clientSyncRef.current?.send({ type: "CLEAR_ALL_BETS" });
       setBets({});
     }
   };
 
-  // Financial calculations
+  // Calculations
   const totalUserBets = Object.values(bets).reduce((a, b) => a + b, 0);
   const betAmounts = Object.values(bets);
   const maxBetAmount = betAmounts.length > 0 ? Math.max(...betAmounts, 0) : 0;
+
+  // 30% Profitability Analysis on all 12 cards
+  const profitAnalysis = analyzeCardProfitability(bets, totalTurnover, totalPayouts);
+  const analysisMap = new Map(profitAnalysis.map((a) => [a.card, a]));
 
   // PIN Lock Screen
   if (!isAuthenticated) {
@@ -292,22 +320,91 @@ export default function AdminPage() {
           </div>
         </div>
 
-        {/* Live Overview Banner */}
-        <div className="mt-2.5 grid grid-cols-2 gap-2">
-          <div className="rounded-xl border border-border bg-background p-2.5 text-center">
-            <span className="text-[10px] font-bold uppercase text-muted-foreground block">User Total Bets</span>
-            <span className="text-2xl font-display text-primary font-black">₹{totalUserBets.toLocaleString("en-IN")}</span>
+        {/* ============================================================== */}
+        {/* AGENT WALLET RECHARGE STRIP                                    */}
+        {/* ============================================================== */}
+        <div className="mt-2.5 rounded-xl border border-border/80 bg-background/80 p-2.5 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">🪙</span>
+            <div>
+              <span className="text-[10px] uppercase font-bold text-muted-foreground block leading-tight">Agent Wallet Balance</span>
+              <span className="text-xl font-display font-black text-foreground leading-tight">
+                ₹{agentBalance.toLocaleString("en-IN")}
+              </span>
+            </div>
           </div>
 
-          <div className="rounded-xl border border-primary/40 bg-primary/10 p-2.5 text-center flex flex-col justify-center">
-            <span className="text-[10px] font-extrabold uppercase text-primary block">Active Winner Setting</span>
-            <span className="text-xs font-display font-extrabold text-foreground truncate">
-              {forcedWinner !== null
-                ? `👑 FORCED: ${CARDS[forcedWinner]?.name}`
-                : strategy === "house_profit"
-                ? "🛡️ AUTO SAFE (0-BET WINS)"
-                : "🎁 RETENTION PAYOUT"}
-            </span>
+          <div className="flex items-center gap-1.5 w-full sm:w-auto">
+            <span className="text-[10px] font-extrabold uppercase text-muted-foreground shrink-0 hidden sm:inline">Add Points:</span>
+            <button
+              onClick={() => handleRechargeAgent(500)}
+              className="flex-1 sm:flex-initial py-1 px-2.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 text-xs font-bold transition active:scale-95"
+            >
+              +₹500
+            </button>
+            <button
+              onClick={() => handleRechargeAgent(1000)}
+              className="flex-1 sm:flex-initial py-1 px-2.5 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30 text-xs font-black transition active:scale-95"
+            >
+              +₹1,000
+            </button>
+            <button
+              onClick={() => handleRechargeAgent(5000)}
+              className="flex-1 sm:flex-initial py-1 px-2.5 rounded-lg bg-emerald-500/25 border border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/35 text-xs font-black transition active:scale-95"
+            >
+              +₹5,000
+            </button>
+            <button
+              onClick={handleCustomRecharge}
+              className="py-1 px-2 rounded-lg bg-muted border border-border text-foreground hover:bg-accent text-xs font-bold transition"
+            >
+              Custom
+            </button>
+          </div>
+        </div>
+
+        {/* ============================================================== */}
+        {/* 🔒 30% PROFIT VAULT FINANCIAL METRICS DASHBOARD                 */}
+        {/* ============================================================== */}
+        <div className="mt-2.5 rounded-xl border border-primary/30 bg-primary/5 p-2.5">
+          <div className="flex items-center justify-between pb-1.5 mb-2 border-b border-border/50">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs">🛡️</span>
+              <span className="text-[11px] font-black uppercase tracking-wider text-primary">
+                30% Guaranteed Profit Vault
+              </span>
+              <span className="rounded-full bg-emerald-500/20 border border-emerald-500/40 px-2 py-0.2 text-[9px] font-black text-emerald-400">
+                ACTIVE
+              </span>
+            </div>
+            <button
+              onClick={handleResetFinancials}
+              title="Reset Cumulative Turnover & Payouts"
+              className="text-[10px] text-muted-foreground hover:text-destructive underline font-bold"
+            >
+              Reset Stats
+            </button>
+          </div>
+
+          <div className="grid grid-cols-4 gap-1.5 text-center">
+            <div className="rounded-lg bg-background/80 p-1.5 border border-border/60">
+              <span className="text-[9px] uppercase font-bold text-muted-foreground block">Round Bets</span>
+              <span className="text-sm font-display font-black text-primary">₹{totalUserBets}</span>
+            </div>
+            <div className="rounded-lg bg-background/80 p-1.5 border border-border/60">
+              <span className="text-[9px] uppercase font-bold text-muted-foreground block">Total Turnover</span>
+              <span className="text-sm font-display font-black text-foreground">₹{totalTurnover.toLocaleString("en-IN")}</span>
+            </div>
+            <div className="rounded-lg bg-background/80 p-1.5 border border-border/60">
+              <span className="text-[9px] uppercase font-bold text-muted-foreground block">Player Payouts</span>
+              <span className="text-sm font-display font-black text-destructive">₹{totalPayouts.toLocaleString("en-IN")}</span>
+            </div>
+            <div className="rounded-lg bg-background/80 p-1.5 border border-border/60">
+              <span className="text-[9px] uppercase font-bold text-muted-foreground block">House Profit</span>
+              <span className={`text-sm font-display font-black ${houseProfit >= 0 ? "text-emerald-400" : "text-destructive"}`}>
+                {profitPercentage}% (₹{houseProfit.toLocaleString("en-IN")})
+              </span>
+            </div>
           </div>
         </div>
 
@@ -318,7 +415,7 @@ export default function AdminPage() {
               <span className="text-xl">👑</span>
               <div>
                 <span className="text-xs font-black text-amber-300 block uppercase tracking-wide">
-                  WINNER LOCKED: {CARDS[forcedWinner]?.name}
+                  ADMIN OVERRIDE: {CARDS[forcedWinner]?.name}
                 </span>
                 <span className="text-[10px] text-amber-200/90 font-bold block">
                   Yeh card 100% jeetega iss round me!
@@ -336,59 +433,16 @@ export default function AdminPage() {
       </header>
 
       {/* ============================================================== */}
-      {/* QUICK STRATEGY SELECTOR PRESETS                                */}
-      {/* ============================================================== */}
-      <section className="p-3 bg-muted/30 border-b border-border">
-        <div className="flex justify-between items-center mb-1.5">
-          <span className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">
-            Result Mode:
-          </span>
-          {forcedWinner !== null && (
-            <button
-              onClick={() => handleSelectWinner(forcedWinner)}
-              className="text-[10px] text-destructive font-bold underline"
-            >
-              Clear Forced Winner
-            </button>
-          )}
-        </div>
-
-        <div className="grid grid-cols-2 gap-2 text-xs font-bold">
-          <button
-            onClick={() => handleSetStrategy("house_profit")}
-            className={`py-2 px-2 rounded-xl border text-center transition flex items-center justify-center gap-1.5 ${
-              strategy === "house_profit" && forcedWinner === null
-                ? "bg-emerald-600 text-white border-emerald-400 shadow-md font-extrabold"
-                : "bg-card border-border text-muted-foreground hover:bg-accent"
-            }`}
-          >
-            <span>🛡️</span>
-            <span>Auto Safe (User Haro)</span>
-          </button>
-
-          <button
-            onClick={() => handleSetStrategy("player_win")}
-            className={`py-2 px-2 rounded-xl border text-center transition flex items-center justify-center gap-1.5 ${
-              strategy === "player_win" && forcedWinner === null
-                ? "bg-amber-600 text-white border-amber-400 shadow-md font-extrabold"
-                : "bg-card border-border text-muted-foreground hover:bg-accent"
-            }`}
-          >
-            <span>🎁</span>
-            <span>Auto Small Win (Thoda Jitaao)</span>
-          </button>
-        </div>
-      </section>
-
-      {/* ============================================================== */}
-      {/* 12-CARD LIVE BET MONITOR & WINNER SELECTOR                      */}
+      {/* 12-CARD LIVE BET MONITOR & 30% PROFITABILITY GRID               */}
       {/* ============================================================== */}
       <main className="p-3">
         <div className="flex items-center justify-between mb-2">
           <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground">
-            Cards & User Bets (Tap card to make it WINNER 👑):
+            Card Bets & 30% Safety Status (10x Payout):
           </span>
-          <span className="text-[10px] text-primary font-bold">Payout: 10x</span>
+          <span className="text-[10px] font-bold text-emerald-400">
+            🔒 Auto picks Safe/0-Bet cards
+          </span>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
@@ -399,6 +453,9 @@ export default function AdminPage() {
             const isHighest = userBet > 0 && userBet === maxBetAmount;
             const isWinnerSelected = forcedWinner === i;
 
+            const cardInfo = analysisMap.get(i);
+            const isSafe = cardInfo?.isSafe ?? true;
+
             return (
               <div
                 key={i}
@@ -407,31 +464,37 @@ export default function AdminPage() {
                   isWinnerSelected
                     ? "border-amber-400 bg-amber-500/20 ring-4 ring-amber-400/80 shadow-[0_0_25px_rgba(251,191,36,0.5)] z-20"
                     : isHighest
-                    ? "border-destructive bg-destructive/10 ring-2 ring-destructive/40 shadow-sm"
+                    ? "border-destructive/80 bg-destructive/10 ring-2 ring-destructive/40 shadow-sm"
+                    : !isSafe && userBet > 0
+                    ? "border-destructive/40 bg-card/60 opacity-90"
                     : userBet > 0
                     ? "border-primary/80 bg-primary/10 shadow-sm"
                     : "border-border/80 bg-card hover:border-border"
                 }`}
               >
-                {/* Header row: Card Name + Winner Selection Badge */}
+                {/* Header row: Card Name + 30% Profit Status Badge */}
                 <div className="flex items-center justify-between">
                   <span className="font-display text-sm font-extrabold text-foreground">{c.name}</span>
-                  <span
-                    className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider ${
-                      isWinnerSelected
-                        ? "bg-amber-400 text-black font-extrabold shadow-sm animate-pulse"
-                        : "bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    {isWinnerSelected ? "WINNER 👑" : "MAKE WIN"}
-                  </span>
+                  {userBet === 0 ? (
+                    <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                      ⭐ 100% PROFIT
+                    </span>
+                  ) : isSafe ? (
+                    <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-wider bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                      🟢 SAFE (≥30%)
+                    </span>
+                  ) : (
+                    <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-wider bg-destructive/20 text-destructive border border-destructive/40">
+                      🚫 BLOCKED (&lt;30%)
+                    </span>
+                  )}
                 </div>
 
                 {/* Card Image Thumbnail + User Bet Info */}
                 <div className="flex items-center gap-2.5 my-2">
                   <img src={c.img} alt={c.name} className="h-12 w-12 rounded-xl object-cover border border-border shrink-0 shadow-sm" />
                   <div className="flex-1 min-w-0">
-                    <span className="text-[10px] uppercase font-bold text-muted-foreground block leading-tight">User Bet:</span>
+                    <span className="text-[10px] uppercase font-bold text-muted-foreground block leading-tight">Round Bet:</span>
                     <span
                       className={`text-lg font-display font-black leading-tight ${
                         isHighest ? "text-destructive" : userBet > 0 ? "text-primary" : "text-muted-foreground/60"
@@ -439,17 +502,15 @@ export default function AdminPage() {
                     >
                       🪙 ₹{userBet}
                     </span>
-                    {isHighest && (
-                      <span className="text-[9px] font-extrabold text-destructive block leading-none mt-0.5 animate-pulse">
-                        ⚠️ MAX BET
-                      </span>
-                    )}
+                    <span className="text-[9px] font-mono text-muted-foreground block leading-none mt-0.5">
+                      Payout: ₹{payout}
+                    </span>
                   </div>
                 </div>
 
                 {/* P&L Analysis */}
                 <div className="pt-1.5 border-t border-border/50 flex items-center justify-between text-[10px]">
-                  <span className="text-muted-foreground">Admin P&L:</span>
+                  <span className="text-muted-foreground">Round PL:</span>
                   <span
                     className={`font-mono font-extrabold ${
                       netHousePL > 0 ? "text-emerald-400" : netHousePL < 0 ? "text-destructive" : "text-muted-foreground"
@@ -459,7 +520,7 @@ export default function AdminPage() {
                   </span>
                 </div>
 
-                {/* Bottom One-Tap Select Winner Button */}
+                {/* Bottom One-Tap Force Winner Button */}
                 <button
                   type="button"
                   onClick={(e) => {
@@ -472,7 +533,7 @@ export default function AdminPage() {
                       : "bg-muted text-muted-foreground hover:bg-primary hover:text-primary-foreground"
                   }`}
                 >
-                  <span>{isWinnerSelected ? "👑 100% JEETEGA (LOCKED)" : "🏆 JITAAO"}</span>
+                  <span>{isWinnerSelected ? "👑 100% JEETEGA (LOCKED)" : "🏆 FORCE WIN"}</span>
                 </button>
               </div>
             );
