@@ -244,8 +244,20 @@ function Index() {
           setAgentBalance((b) => b + roundSum);
           return {};
         });
+      } else if (msg.type === "SET_AGENT_BALANCE") {
+        setAgentBalance(msg.balance);
+        if (typeof window !== "undefined") {
+          localStorage.setItem("sorat_agent_balance", String(msg.balance));
+        }
+        playBeep(920, 0.2, "sine");
       } else if (msg.type === "RECHARGE_AGENT") {
-        setAgentBalance((b) => b + msg.amount);
+        setAgentBalance((prev) => {
+          const next = prev + msg.amount;
+          if (typeof window !== "undefined") {
+            localStorage.setItem("sorat_agent_balance", String(next));
+          }
+          return next;
+        });
         playBeep(880, 0.15, "sine");
       } else if (msg.type === "RESET_FINANCIALS") {
         setTotalTurnover(0);

@@ -74,6 +74,7 @@ export default function AdminPage() {
 
   // Admin Manual Override
   const [forcedWinner, setForcedWinner] = useState<number | null>(null);
+  const [customBalanceInput, setCustomBalanceInput] = useState("");
 
   const clientSyncRef = useRef<AdminClientSync | null>(null);
   const tvMasterSyncRef = useRef<{ t: number; receivedAt: number; phase: string; roundNumber: number } | null>(null);
@@ -184,19 +185,22 @@ export default function AdminPage() {
     clientSyncRef.current?.send({ type: "FORCE_WINNER", card: null });
   };
 
-  // Recharge Agent Wallet
-  const handleRechargeAgent = (amount: number) => {
-    setAgentBalance((b) => b + amount);
-    clientSyncRef.current?.send({ type: "RECHARGE_AGENT", amount });
+  // Wallet Balance Controls
+  const handleSetExactBalance = (val?: number) => {
+    const target = val !== undefined ? val : Number(customBalanceInput.trim());
+    if (isNaN(target) || target < 0) {
+      alert("Kripya valid amount enter karein!");
+      return;
+    }
+    setAgentBalance(target);
+    clientSyncRef.current?.send({ type: "SET_AGENT_BALANCE", balance: target });
+    setCustomBalanceInput("");
   };
 
-  const handleCustomRecharge = () => {
-    const input = prompt("Agent Wallet me kitne Points / Rupees add karne hain?", "1000");
-    if (!input) return;
-    const num = Number(input.trim());
-    if (!isNaN(num) && num > 0) {
-      handleRechargeAgent(num);
-    }
+  const handleRechargeAgent = (amount: number) => {
+    const next = agentBalance + amount;
+    setAgentBalance(next);
+    clientSyncRef.current?.send({ type: "RECHARGE_AGENT", amount });
   };
 
   const handleResetFinancials = () => {
@@ -321,45 +325,100 @@ export default function AdminPage() {
         </div>
 
         {/* ============================================================== */}
-        {/* AGENT WALLET RECHARGE STRIP                                    */}
+        {/* AGENT / USER WALLET CONTROLS (DIRECT ADMIN ACCESS)             */}
         {/* ============================================================== */}
-        <div className="mt-2.5 rounded-xl border border-border/80 bg-background/80 p-2.5 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className="text-xl">🪙</span>
-            <div>
-              <span className="text-[10px] uppercase font-bold text-muted-foreground block leading-tight">Agent Wallet Balance</span>
-              <span className="text-xl font-display font-black text-foreground leading-tight">
-                ₹{agentBalance.toLocaleString("en-IN")}
-              </span>
+        <div className="mt-2.5 rounded-xl border border-border/80 bg-background/80 p-3 space-y-2.5 shadow-sm">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-2xl">🪙</span>
+              <div>
+                <span className="text-[10px] uppercase font-bold text-muted-foreground block leading-tight">
+                  User / Agent Live Wallet Balance
+                </span>
+                <span className="text-2xl font-display font-black text-primary leading-tight">
+                  ₹{agentBalance.toLocaleString("en-IN")}
+                </span>
+              </div>
+            </div>
+
+            {/* Quick Top-Up Pills */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[10px] font-bold uppercase text-muted-foreground">Quick Add:</span>
+              <button
+                onClick={() => handleRechargeAgent(100)}
+                className="py-1 px-2 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 text-xs font-bold transition active:scale-95"
+              >
+                +₹100
+              </button>
+              <button
+                onClick={() => handleRechargeAgent(500)}
+                className="py-1 px-2.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 text-xs font-bold transition active:scale-95"
+              >
+                +₹500
+              </button>
+              <button
+                onClick={() => handleRechargeAgent(1000)}
+                className="py-1 px-2.5 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30 text-xs font-black transition active:scale-95"
+              >
+                +₹1,000
+              </button>
+              <button
+                onClick={() => handleRechargeAgent(5000)}
+                className="py-1 px-2.5 rounded-lg bg-emerald-500/25 border border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/35 text-xs font-black transition active:scale-95"
+              >
+                +₹5,000
+              </button>
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 w-full sm:w-auto">
-            <span className="text-[10px] font-extrabold uppercase text-muted-foreground shrink-0 hidden sm:inline">Add Points:</span>
-            <button
-              onClick={() => handleRechargeAgent(500)}
-              className="flex-1 sm:flex-initial py-1 px-2.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 text-xs font-bold transition active:scale-95"
-            >
-              +₹500
-            </button>
-            <button
-              onClick={() => handleRechargeAgent(1000)}
-              className="flex-1 sm:flex-initial py-1 px-2.5 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30 text-xs font-black transition active:scale-95"
-            >
-              +₹1,000
-            </button>
-            <button
-              onClick={() => handleRechargeAgent(5000)}
-              className="flex-1 sm:flex-initial py-1 px-2.5 rounded-lg bg-emerald-500/25 border border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/35 text-xs font-black transition active:scale-95"
-            >
-              +₹5,000
-            </button>
-            <button
-              onClick={handleCustomRecharge}
-              className="py-1 px-2 rounded-lg bg-muted border border-border text-foreground hover:bg-accent text-xs font-bold transition"
-            >
-              Custom
-            </button>
+          {/* Direct Custom Amount Set / Add Input */}
+          <div className="pt-2 border-t border-border/50 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            <div className="relative flex-1">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-mono text-xs">₹</span>
+              <input
+                type="number"
+                min="0"
+                value={customBalanceInput}
+                onChange={(e) => setCustomBalanceInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSetExactBalance();
+                }}
+                placeholder="Specific amount enter karein (e.g. 2000, 5000)"
+                className="w-full pl-7 pr-3 py-1.5 rounded-xl border border-input bg-card text-foreground font-mono text-xs focus:border-primary focus:outline-none"
+              />
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => handleSetExactBalance()}
+                className="flex-1 sm:flex-initial py-1.5 px-3 rounded-xl bg-primary text-primary-foreground font-display text-xs font-black transition hover:opacity-90 shadow-sm"
+              >
+                SET EXACT BALANCE
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const val = Number(customBalanceInput.trim());
+                  if (isNaN(val) || val <= 0) {
+                    alert("Kripya valid add amount enter karein!");
+                    return;
+                  }
+                  handleRechargeAgent(val);
+                  setCustomBalanceInput("");
+                }}
+                className="flex-1 sm:flex-initial py-1.5 px-3 rounded-xl bg-muted border border-border text-foreground hover:bg-accent font-display text-xs font-bold transition"
+              >
+                + ADD TO WALLET
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetExactBalance(1000)}
+                title="Reset wallet to default ₹1,000"
+                className="py-1.5 px-2 rounded-xl bg-destructive/15 text-destructive border border-destructive/30 hover:bg-destructive/25 text-xs font-bold transition"
+              >
+                Reset ₹1k
+              </button>
+            </div>
           </div>
         </div>
 

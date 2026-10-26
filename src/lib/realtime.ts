@@ -123,26 +123,29 @@ export function calculateProfitGuaranteedWinner(
   }
 
   const analysis = analyzeCardProfitability(currentBets, totalTurnover, totalPayouts);
-  const zeroBetCards = analysis.filter((c) => c.status === "ZERO_BET");
   const safeCards = analysis.filter((c) => c.isSafeForProfit);
   const safeWithBets = safeCards.filter((c) => c.bet > 0);
+  const zeroBetCards = analysis.filter((c) => c.status === "ZERO_BET");
 
-  const roundTurnover = Object.values(currentBets).reduce((a, b) => a + b, 0);
-  const newTurnover = totalTurnover + roundTurnover;
-  const currentProfitMargin = newTurnover > 0 ? (newTurnover - totalPayouts) / newTurnover : 1;
-
-  // If lifetime profit margin is already high (> 35%) and there are safe bets,
-  // let players win occasionally (40% chance) to keep them engaged & entertained!
-  if (currentProfitMargin > 0.35 && safeWithBets.length > 0 && Math.random() < 0.40) {
-    const lucky = safeWithBets[Math.floor(Math.random() * safeWithBets.length)]!;
-    return {
-      winner: lucky.card,
-      netPayout: lucky.potentialPayout,
-      reason: "CONTROLLED_SAFE_PLAYER_WIN",
-    };
+  // 2. Real, Dynamic Player Wins across ALL Safe Cards (Small, Medium, or High bets):
+  // As long as the payout keeps house profit >= 30%, players CAN and WILL win!
+  // No longer biased to only pick zero or strictly lowest ₹10.
+  if (safeWithBets.length > 0) {
+    // 70% chance a card with a bet wins (varied across small, medium, high safe bets),
+    // 30% chance a zero-bet card wins (if available) to bank house profit.
+    const shouldPlayerWin = zeroBetCards.length === 0 || Math.random() < 0.70;
+    if (shouldPlayerWin) {
+      // Pick randomly among all safe cards with bets
+      const pick = safeWithBets[Math.floor(Math.random() * safeWithBets.length)]!;
+      return {
+        winner: pick.card,
+        netPayout: pick.potentialPayout,
+        reason: "VARIED_SAFE_PLAYER_WIN",
+      };
+    }
   }
 
-  // Primary House Vault Protection: Prioritize 0-bet cards (100% house profit)
+  // 3. 0-Bet Card Selection (100% house profit buffer)
   if (zeroBetCards.length > 0) {
     const lucky = zeroBetCards[Math.floor(Math.random() * zeroBetCards.length)]!;
     return {
@@ -152,18 +155,18 @@ export function calculateProfitGuaranteedWinner(
     };
   }
 
-  // If all cards have bets, pick the safe card with the lowest payout
+  // 4. All cards have bets and some are safe:
   if (safeCards.length > 0) {
-    const minSafe = safeCards.reduce((prev, curr) => (curr.potentialPayout < prev.potentialPayout ? curr : prev));
+    const pick = safeCards[Math.floor(Math.random() * safeCards.length)]!;
     return {
-      winner: minSafe.card,
-      netPayout: minSafe.potentialPayout,
-      reason: "LOWEST_SAFE_PAYOUT",
+      winner: pick.card,
+      netPayout: pick.potentialPayout,
+      reason: "SAFE_RANDOM_WIN",
     };
   }
 
-  // Extreme edge case: Heavy bets on all 12 cards exceeding 70% budget.
-  // Pick the card with absolute lowest bet to protect capital!
+  // 5. Extreme edge case: All cards violate 30% budget (very high bets in early rounds)
+  // Pick card with lowest potential payout to defend capital
   const lowestLossCard = analysis.reduce((prev, curr) => (curr.bet < prev.bet ? curr : prev));
   return {
     winner: lowestLossCard.card,
@@ -181,6 +184,7 @@ export type GameMessage =
   | { type: "TRIGGER_SPIN" }
   | { type: "RESET_ROUND" }
   | { type: "RECHARGE_AGENT"; amount: number }
+  | { type: "SET_AGENT_BALANCE"; balance: number }
   | { type: "RESET_FINANCIALS" }
   | {
       type: "SYNC_FROM_TV";
@@ -200,14 +204,14 @@ export type GameMessage =
     };
 
 export const DEFAULT_ROOM_ID = "sorat-arena-88";
-export const CLOUD_SYNC_URL = "https://api.restful-api.dev/objects/ff808181a09d98f701a17943e2421add";
+export const NTFY_TOPIC = "sorat_arena_live_v2_99";
 
-// TV Host Connection Class (Powered by High-Reliability Cloud REST + Local Broadcast)
+// TV Host Connection Class (Powered by High-Reliability ntfy.sh SSE + Local Broadcast)
 export class TVHostSync {
   private broadcastChannel: BroadcastChannel | null = null;
+  private sse: EventSource | null = null;
   private pollInterval: any = null;
   private isDestroyed = false;
-  private lastAdminUpdate = 0;
 
   public onMessage: (msg: GameMessage) => void = () => {};
   public onStatusChange: (status: "connecting" | "connected" | "waiting" | "disconnected", peerId?: string) => void = () => {};
@@ -248,40 +252,56 @@ export class TVHostSync {
     this.isDestroyed = false;
     this.onStatusChange("connected");
 
-    // Cloud polling every 1000ms
-    const poll = async () => {
+    // 1. Instant Cloud Server-Sent Events (SSE) Stream
+    if (typeof window !== "undefined" && "EventSource" in window) {
+      try {
+        this.sse = new EventSource(`https://ntfy.sh/${NTFY_TOPIC}/sse`);
+        this.sse.onopen = () => {
+          this.onStatusChange("connected");
+        };
+        this.sse.onmessage = (event) => {
+          if (this.isDestroyed) return;
+          try {
+            const ntfyMsg = JSON.parse(event.data);
+            if (ntfyMsg.event === "message" && ntfyMsg.message) {
+              const wire = JSON.parse(ntfyMsg.message);
+              if (wire && wire._from === "admin") {
+                this.onStatusChange("connected");
+                this.onMessage(wire.payload);
+              }
+            }
+          } catch {}
+        };
+      } catch {}
+    }
+
+    // 2. Initial state polling to recover any past commands
+    const pollRecent = async () => {
       if (this.isDestroyed) return;
       try {
-        const res = await fetch(CLOUD_SYNC_URL);
+        const res = await fetch(`https://ntfy.sh/${NTFY_TOPIC}/json?poll=1&since=all`);
         if (res.ok) {
-          const json = await res.json();
-          const d = json.data;
-          if (d && d.adminUpdatedAt && d.adminUpdatedAt > this.lastAdminUpdate) {
-            this.lastAdminUpdate = d.adminUpdatedAt;
-            this.onStatusChange("connected");
-
-            if (d.forcedWinner !== undefined) {
-              this.onMessage({ type: "FORCE_WINNER", card: d.forcedWinner });
-            }
-            if (d.triggerSpin) {
-              this.onMessage({ type: "TRIGGER_SPIN" });
-            }
-            if (d.clearBets) {
-              this.onMessage({ type: "CLEAR_ALL_BETS" });
-            }
-            if (d.rechargeAgent) {
-              this.onMessage({ type: "RECHARGE_AGENT", amount: d.rechargeAgent });
-            }
-            if (d.resetFinancials) {
-              this.onMessage({ type: "RESET_FINANCIALS" });
-            }
+          const text = await res.text();
+          const lines = text.trim().split("\n");
+          for (let i = lines.length - 1; i >= Math.max(0, lines.length - 15); i--) {
+            try {
+              const item = JSON.parse(lines[i]);
+              if (item.event === "message" && item.message) {
+                const wire = JSON.parse(item.message);
+                if (wire && wire._from === "admin") {
+                  this.onStatusChange("connected");
+                  this.onMessage(wire.payload);
+                  break;
+                }
+              }
+            } catch {}
           }
         }
       } catch {}
     };
 
-    poll();
-    this.pollInterval = setInterval(poll, 1000);
+    pollRecent();
+    this.pollInterval = setInterval(pollRecent, 5000);
   }
 
   broadcast(msg: GameMessage) {
@@ -301,49 +321,29 @@ export class TVHostSync {
       localStorage.setItem(`sorat_tv_msg_${this.roomId}`, JSON.stringify(wire));
     } catch {}
 
-    // When TV state changes (bets, phase, t, winner, financials):
-    if (msg.type === "SYNC_FROM_TV") {
-      fetch(CLOUD_SYNC_URL, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: "sorat_live_arena_sync_v1",
-          data: {
-            bets: msg.bets,
-            pool: msg.pool,
-            winner: msg.winner,
-            forcedWinner: msg.forcedWinner,
-            tvT: msg.t,
-            phase: msg.phase,
-            roundNumber: msg.roundNumber,
-            roundId: msg.roundId,
-            agentBalance: msg.agentBalance,
-            totalTurnover: msg.totalTurnover,
-            totalPayouts: msg.totalPayouts,
-            houseProfit: msg.houseProfit,
-            profitPercentage: msg.profitPercentage,
-            tvUpdatedAt: Date.now(),
-          },
-        }),
-      }).catch(() => {});
-    }
+    // Broadcast state to Cloud channel
+    fetch(`https://ntfy.sh/${NTFY_TOPIC}`, {
+      method: "POST",
+      body: JSON.stringify(wire),
+    }).catch(() => {});
   }
 
   destroy() {
     this.isDestroyed = true;
     clearInterval(this.pollInterval);
     try {
+      this.sse?.close();
       this.broadcastChannel?.close();
     } catch {}
   }
 }
 
-// Admin / Phone Client Connection Class (Powered by High-Reliability Cloud REST + Local Broadcast)
+// Admin / Phone Client Connection Class (Powered by High-Reliability ntfy.sh SSE + Local Broadcast)
 export class AdminClientSync {
   private broadcastChannel: BroadcastChannel | null = null;
+  private sse: EventSource | null = null;
   private pollInterval: any = null;
   private isDestroyed = false;
-  private lastTvUpdate = 0;
 
   public onMessage: (msg: GameMessage) => void = () => {};
   public onStatusChange: (status: "connecting" | "connected" | "disconnected" | "error") => void = () => {};
@@ -384,40 +384,56 @@ export class AdminClientSync {
     this.isDestroyed = false;
     this.onStatusChange("connected");
 
-    // Cloud polling every 1000ms
-    const poll = async () => {
+    // 1. Instant Cloud Server-Sent Events (SSE) Stream
+    if (typeof window !== "undefined" && "EventSource" in window) {
+      try {
+        this.sse = new EventSource(`https://ntfy.sh/${NTFY_TOPIC}/sse`);
+        this.sse.onopen = () => {
+          this.onStatusChange("connected");
+        };
+        this.sse.onmessage = (event) => {
+          if (this.isDestroyed) return;
+          try {
+            const ntfyMsg = JSON.parse(event.data);
+            if (ntfyMsg.event === "message" && ntfyMsg.message) {
+              const wire = JSON.parse(ntfyMsg.message);
+              if (wire && wire._from === "tv" && wire.payload) {
+                this.onStatusChange("connected");
+                this.onMessage(wire.payload);
+              }
+            }
+          } catch {}
+        };
+      } catch {}
+    }
+
+    // 2. Initial state poll to get latest TV state
+    const pollRecent = async () => {
       if (this.isDestroyed) return;
       try {
-        const res = await fetch(CLOUD_SYNC_URL);
+        const res = await fetch(`https://ntfy.sh/${NTFY_TOPIC}/json?poll=1&since=all`);
         if (res.ok) {
-          const json = await res.json();
-          const d = json.data;
-          if (d && d.tvUpdatedAt && d.tvUpdatedAt > this.lastTvUpdate) {
-            this.lastTvUpdate = d.tvUpdatedAt;
-            this.onStatusChange("connected");
-            this.onMessage({
-              type: "SYNC_FROM_TV",
-              roundNumber: d.roundNumber,
-              roundId: d.roundId,
-              phase: d.phase,
-              t: d.tvT,
-              bets: d.bets || {},
-              pool: d.pool || 0,
-              winner: d.winner,
-              forcedWinner: d.forcedWinner,
-              agentBalance: d.agentBalance ?? 1000,
-              totalTurnover: d.totalTurnover ?? 0,
-              totalPayouts: d.totalPayouts ?? 0,
-              houseProfit: d.houseProfit ?? 0,
-              profitPercentage: d.profitPercentage ?? 100,
-            });
+          const text = await res.text();
+          const lines = text.trim().split("\n");
+          for (let i = lines.length - 1; i >= Math.max(0, lines.length - 15); i--) {
+            try {
+              const item = JSON.parse(lines[i]);
+              if (item.event === "message" && item.message) {
+                const wire = JSON.parse(item.message);
+                if (wire && wire._from === "tv" && wire.payload?.type === "SYNC_FROM_TV") {
+                  this.onStatusChange("connected");
+                  this.onMessage(wire.payload);
+                  break;
+                }
+              }
+            } catch {}
           }
         }
       } catch {}
     };
 
-    poll();
-    this.pollInterval = setInterval(poll, 1000);
+    pollRecent();
+    this.pollInterval = setInterval(pollRecent, 5000);
   }
 
   send(msg: GameMessage) {
@@ -437,30 +453,10 @@ export class AdminClientSync {
       localStorage.setItem(`sorat_admin_msg_${this.roomId}`, JSON.stringify(wire));
     } catch {}
 
-    // Send action to Cloud REST store
-    const cloudPayload: any = {
-      adminUpdatedAt: Date.now(),
-    };
-    if (msg.type === "FORCE_WINNER") {
-      cloudPayload.forcedWinner = msg.card;
-    } else if (msg.type === "TRIGGER_SPIN") {
-      cloudPayload.triggerSpin = Date.now();
-    } else if (msg.type === "CLEAR_ALL_BETS") {
-      cloudPayload.clearBets = Date.now();
-      cloudPayload.bets = {};
-    } else if (msg.type === "RECHARGE_AGENT") {
-      cloudPayload.rechargeAgent = msg.amount;
-    } else if (msg.type === "RESET_FINANCIALS") {
-      cloudPayload.resetFinancials = Date.now();
-    }
-
-    fetch(CLOUD_SYNC_URL, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "sorat_live_arena_sync_v1",
-        data: cloudPayload,
-      }),
+    // Push action to Cloud channel
+    fetch(`https://ntfy.sh/${NTFY_TOPIC}`, {
+      method: "POST",
+      body: JSON.stringify(wire),
     }).catch(() => {});
   }
 
@@ -468,6 +464,7 @@ export class AdminClientSync {
     this.isDestroyed = true;
     clearInterval(this.pollInterval);
     try {
+      this.sse?.close();
       this.broadcastChannel?.close();
     } catch {}
   }
