@@ -194,7 +194,11 @@ function Index() {
   const total = phase === "bet" ? BET_TIME : phase === "select" ? SELECT_TIME : RESULT_TIME;
 
   return (
-    <main className={`relative min-h-screen overflow-x-hidden bg-background text-foreground md:flex ${hurry ? "shadow-[inset_0_0_90px_rgba(239,68,68,0.35)]" : ""}`}>
+    <main
+      className={`relative h-screen max-h-screen w-full overflow-hidden bg-background text-foreground flex flex-col md:flex-row ${
+        hurry ? "shadow-[inset_0_0_90px_rgba(239,68,68,0.35)]" : ""
+      }`}
+    >
       {/* ============================================================== */}
       {/* BIG SCREEN AMBIENT LIGHTING & DYNAMIC EFFECTS LAYER            */}
       {/* ============================================================== */}
@@ -221,31 +225,31 @@ function Index() {
       </div>
 
       {/* ============================================================== */}
-      {/* SIDEBAR CONTROL & LIVE STATS PANEL                             */}
+      {/* SIDEBAR CONTROL & LIVE STATS PANEL (Fits strictly in height)   */}
       {/* ============================================================== */}
-      <aside className="relative z-10 w-full space-y-4 border-b border-border/70 bg-sidebar/95 backdrop-blur-md p-4 md:sticky md:top-0 md:h-screen md:w-84 md:border-b-0 md:border-r shadow-2xl flex flex-col justify-between">
-        <div className="space-y-4">
+      <aside className="relative z-10 w-full md:w-72 lg:w-80 h-auto md:h-screen md:max-h-screen overflow-hidden border-b border-border/70 bg-sidebar/95 backdrop-blur-md p-3 md:p-3.5 md:border-b-0 md:border-r shadow-2xl flex flex-col justify-between shrink-0">
+        <div className="space-y-2.5">
           {/* Top Brand Header & Controls */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-gold font-display text-base text-primary-foreground shadow-gold">
+              <div className="grid h-9 w-9 place-items-center rounded-lg bg-gradient-gold font-display text-sm text-primary-foreground shadow-gold">
                 S
               </div>
               <div>
-                <span className="font-display text-2xl italic tracking-wider block leading-tight">SORAT</span>
-                <span className="flex items-center gap-1.5 text-[10px] font-bold tracking-widest text-destructive">
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-destructive shadow-[0_0_8px_#ef4444]" />
+                <span className="font-display text-xl italic tracking-wider block leading-none">SORAT</span>
+                <span className="flex items-center gap-1.5 text-[9px] font-bold tracking-widest text-destructive">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-destructive shadow-[0_0_8px_#ef4444]" />
                   LIVE ARENA
                 </span>
               </div>
             </div>
 
             {/* Big Screen Quick Actions: Sound & Fullscreen */}
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1">
               <button
                 onClick={toggleSound}
                 title={soundEnabled ? "Mute Sound" : "Enable Sound FX"}
-                className={`p-2 rounded-lg text-xs font-bold transition border ${
+                className={`p-1.5 rounded-lg text-xs font-bold transition border ${
                   soundEnabled ? "bg-primary/20 border-primary text-primary" : "bg-muted border-border text-muted-foreground hover:text-foreground"
                 }`}
               >
@@ -254,7 +258,7 @@ function Index() {
               <button
                 onClick={toggleFullscreen}
                 title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen (Big Screen TV Mode)"}
-                className="p-2 rounded-lg text-xs font-bold transition border bg-muted border-border text-muted-foreground hover:text-foreground"
+                className="p-1.5 rounded-lg text-xs font-bold transition border bg-muted border-border text-muted-foreground hover:text-foreground"
               >
                 {isFullscreen ? "🗗" : "⛶"}
               </button>
@@ -262,36 +266,36 @@ function Index() {
           </div>
 
           {/* Balance & Token Status */}
-          <div className="flex items-center justify-between rounded-xl border border-border/80 bg-card/80 p-3 shadow-sm">
+          <div className="flex items-center justify-between rounded-xl border border-border/80 bg-card/80 px-3 py-2 shadow-sm">
             <div className="space-y-0.5">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Wallet Balance</span>
-              <div className="text-xl font-display text-primary flex items-center gap-1">
+              <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Balance</span>
+              <div className="text-base font-display text-primary flex items-center gap-1 leading-none">
                 <span>🪙</span> {balance.toLocaleString("en-IN")}
               </div>
             </div>
-            <span className="rounded-full bg-success/20 border border-success/40 px-2.5 py-1 text-[11px] font-extrabold text-success tracking-wide">
+            <span className="rounded-full bg-success/20 border border-success/40 px-2 py-0.5 text-[10px] font-extrabold text-success tracking-wide">
               DEMO TOKENS
             </span>
           </div>
 
           {/* Animated Big-Screen Countdown Gauge */}
           <div
-            className={`relative overflow-hidden rounded-2xl border p-5 text-center transition-all duration-300 ${
+            className={`relative overflow-hidden rounded-xl border p-2.5 text-center transition-all duration-300 ${
               hurry
-                ? "border-destructive bg-destructive/10 shadow-[0_0_35px_rgba(239,68,68,0.4)]"
+                ? "border-destructive bg-destructive/10 shadow-[0_0_25px_rgba(239,68,68,0.35)]"
                 : phase === "select"
                 ? "border-primary bg-primary/10 shadow-gold"
-                : "border-border bg-card/90 shadow-lg"
+                : "border-border bg-card/90 shadow-md"
             }`}
           >
             {/* Ambient Timer Glow Effect */}
             <div
-              className={`relative mx-auto h-20 w-20 rounded-full flex items-center justify-center ${
+              className={`relative mx-auto h-14 w-14 rounded-full flex items-center justify-center ${
                 hurry ? "timer-glow-urgent" : "timer-glow-normal"
               }`}
             >
-              <svg viewBox="0 0 36 36" className="h-20 w-20 -rotate-90">
-                <circle cx="18" cy="18" r="15" fill="none" className="stroke-muted/50" strokeWidth="3" />
+              <svg viewBox="0 0 36 36" className="h-14 w-14 -rotate-90">
+                <circle cx="18" cy="18" r="15" fill="none" className="stroke-muted/40" strokeWidth="3" />
                 <circle
                   cx="18"
                   cy="18"
@@ -310,14 +314,14 @@ function Index() {
                 />
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className={`font-display text-2xl font-extrabold tracking-tight ${hurry ? "text-destructive scale-110 animate-ping-short" : "text-foreground"}`}>
+                <span className={`font-display text-lg font-extrabold tracking-tight ${hurry ? "text-destructive scale-110" : "text-foreground"}`}>
                   {t}s
                 </span>
               </div>
             </div>
 
             {/* Dynamic Status Badges */}
-            <p className={`mt-3 text-base font-extrabold tracking-wider ${hurry ? "text-destructive animate-pulse" : "text-foreground"}`}>
+            <p className={`mt-1.5 text-xs font-extrabold tracking-wider ${hurry ? "text-destructive animate-pulse" : "text-foreground"}`}>
               {phase === "bet"
                 ? hurry
                   ? "⏳ HURRY UP! CLOSING"
@@ -326,33 +330,33 @@ function Index() {
                 ? "⚡ SELECTING LUCKY CARD"
                 : "🏆 WINNER ANNOUNCED"}
             </p>
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mt-0.5">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               {phase === "bet"
                 ? hurry
-                  ? "Place your final tokens now!"
+                  ? "Time is running out!"
                   : "Pick cards & test your luck"
                 : phase === "select"
                 ? "Wheel is spinning..."
-                : "Next round starts shortly"}
+                : "Next round soon"}
             </p>
           </div>
 
           {/* Live Arena Metrics */}
-          <div className="flex items-center justify-between rounded-xl border border-border/80 bg-card/70 p-3 text-xs font-bold">
+          <div className="flex items-center justify-between rounded-lg border border-border/80 bg-card/70 px-2.5 py-1.5 text-[11px] font-bold">
             <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-              {players} ACTIVE PLAYERS
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              {players} PLAYERS
             </span>
             <span className="text-primary font-display tracking-wide">POOL: ₹{pool.toLocaleString("en-IN")}</span>
           </div>
 
           {/* Stake Selector */}
           <div>
-            <div className="mb-2 flex justify-between items-center text-sm font-bold">
-              <span className="tracking-wider text-xs uppercase text-muted-foreground">Select Stake:</span>
-              <span className="text-primary font-display text-base">🪙 {stake}</span>
+            <div className="mb-1.5 flex justify-between items-center text-xs font-bold">
+              <span className="tracking-wider uppercase text-muted-foreground">Stake:</span>
+              <span className="text-primary font-display text-sm">🪙 {stake}</span>
             </div>
-            <div className="grid grid-cols-5 gap-1.5">
+            <div className="grid grid-cols-5 gap-1">
               {STAKES.map((s) => (
                 <button
                   key={s}
@@ -360,9 +364,9 @@ function Index() {
                     setStake(s);
                     playBeep(480, 0.05, "sine");
                   }}
-                  className={`rounded-lg py-2.5 text-sm font-extrabold transition shadow-sm ${
+                  className={`rounded-lg py-1.5 text-xs font-extrabold transition shadow-sm ${
                     s === stake
-                      ? "bg-primary text-primary-foreground shadow-gold scale-105 ring-2 ring-primary/50"
+                      ? "bg-primary text-primary-foreground shadow-gold ring-2 ring-primary/50"
                       : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
                   }`}
                 >
@@ -370,28 +374,28 @@ function Index() {
                 </button>
               ))}
             </div>
-            <div className="mt-2.5 flex justify-between text-xs text-muted-foreground">
-              <span>This round: 🪙 {totalBet}</span>
+            <div className="mt-1.5 flex justify-between text-[11px] text-muted-foreground">
+              <span>Bets: 🪙 {totalBet}</span>
               <span className="font-bold text-primary">Win pays {PAYOUT}x</span>
             </div>
           </div>
         </div>
 
         {/* Footer info */}
-        <div className="pt-2 text-[10px] text-center text-muted-foreground/70 uppercase tracking-widest border-t border-border/40">
-          Big Screen TV Display Edition · 12 Pictures
+        <div className="pt-1 text-[9px] text-center text-muted-foreground/60 uppercase tracking-widest border-t border-border/40">
+          Big Screen TV Edition · 12 Cards
         </div>
       </aside>
 
       {/* ============================================================== */}
-      {/* 12-CARD GAME ARENA GRID                                        */}
+      {/* 12-CARD GAME ARENA GRID (Strictly 100% Screen Fitted, No Scroll)*/}
       {/* ============================================================== */}
-      <section className="relative z-10 flex-1 p-3 sm:p-5 flex flex-col justify-between">
+      <section className="relative z-10 flex-1 h-full max-h-screen overflow-hidden p-2 sm:p-2.5 md:p-3 flex flex-col justify-between min-h-0">
         {/* Top Casino LED Marquee Light Ticker */}
-        <div className="casino-marquee mb-3.5 h-3 w-full rounded-full border border-amber-500/40 opacity-85 shadow-[0_0_15px_rgba(245,158,11,0.5)]" />
+        <div className="casino-marquee h-2 w-full shrink-0 rounded-full border border-amber-500/40 opacity-80 shadow-[0_0_10px_rgba(245,158,11,0.5)] mb-1.5" />
 
-        {/* Picture Card Grid */}
-        <div className="grid flex-1 grid-cols-3 gap-3.5 sm:grid-cols-4 md:gap-4.5">
+        {/* Picture Card Grid - 4 columns x 3 rows, flex-1 min-h-0 to fit exact screen */}
+        <div className="grid flex-1 min-h-0 grid-cols-4 grid-rows-3 gap-2 sm:gap-2.5">
           {CARDS.map((c, i) => {
             const isLit = spot === i || winner === i;
             const hasBet = Boolean(bets[i]);
@@ -401,39 +405,32 @@ function Index() {
                 key={i}
                 onClick={() => place(i)}
                 disabled={phase !== "bet"}
-                className={`card-tile group relative overflow-hidden rounded-2xl border text-left transition-all duration-200 select-none ${
+                className={`card-tile group relative overflow-hidden rounded-xl sm:rounded-2xl border text-left transition-all duration-200 select-none h-full w-full min-h-0 flex flex-col items-center justify-center p-1 ${
                   isLit
-                    ? "ring-4 ring-primary shadow-[0_0_40px_rgba(245,158,11,0.85)] scale-[1.03] z-20 border-primary"
+                    ? "ring-4 ring-primary shadow-[0_0_35px_rgba(245,158,11,0.85)] scale-[1.02] z-20 border-primary"
                     : hasBet
-                    ? "border-primary/80 ring-2 ring-primary/40 shadow-[0_0_20px_rgba(245,158,11,0.3)] bg-card"
+                    ? "border-primary/80 ring-2 ring-primary/40 shadow-[0_0_15px_rgba(245,158,11,0.25)] bg-card"
                     : "border-border/80 bg-card hover:border-primary/50"
                 } ${phase === "result" && winner !== i ? "opacity-35 grayscale-[20%]" : ""}`}
               >
-                {/* Ambient breathing light on active betting */}
-                {phase === "bet" && (
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent z-10" />
-                )}
-
-                {/* Card Picture */}
+                {/* Card Picture - Perfectly contained to never exceed row height */}
                 <img
                   src={c.img}
                   alt={c.name}
-                  width={816}
-                  height={816}
                   loading="lazy"
-                  className="aspect-square w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                  className="h-full w-full object-contain max-h-[calc(100%-1.35rem)] transition-transform duration-300 group-hover:scale-105 pointer-events-none"
                 />
 
                 {/* Marathi Label Overlay */}
-                <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-background via-background/80 to-transparent pb-2 pt-6 text-center">
-                  <span className="font-display text-base sm:text-lg tracking-wide font-extrabold text-foreground drop-shadow-md">
+                <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-background via-background/85 to-transparent pb-0.5 pt-2 text-center pointer-events-none">
+                  <span className="font-display text-xs sm:text-sm md:text-base tracking-wide font-extrabold text-foreground drop-shadow-md">
                     {c.name}
                   </span>
                 </div>
 
                 {/* Bet Badge */}
                 {hasBet && (
-                  <span className="absolute right-2 top-2 z-20 rounded-full bg-primary px-2.5 py-1 text-xs font-black text-primary-foreground shadow-gold flex items-center gap-1 animate-bounce-short">
+                  <span className="absolute right-1.5 top-1.5 z-20 rounded-full bg-primary px-2 py-0.5 text-[10px] sm:text-xs font-black text-primary-foreground shadow-gold flex items-center gap-1">
                     <span>🪙</span> {bets[i]}
                   </span>
                 )}
@@ -448,7 +445,7 @@ function Index() {
         </div>
 
         {/* Bottom Casino LED Marquee Light Ticker */}
-        <div className="casino-marquee mt-3.5 h-3 w-full rounded-full border border-amber-500/40 opacity-85 shadow-[0_0_15px_rgba(245,158,11,0.5)]" />
+        <div className="casino-marquee h-2 w-full shrink-0 rounded-full border border-amber-500/40 opacity-80 shadow-[0_0_10px_rgba(245,158,11,0.5)] mt-1.5" />
       </section>
 
       {/* ============================================================== */}
@@ -456,29 +453,29 @@ function Index() {
       {/* ============================================================== */}
       {phase === "result" && winner !== null && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-background/80 p-4 backdrop-blur-xl animate-fade-in">
-          <div className="relative w-full max-w-md rounded-3xl border-2 border-primary bg-card/95 p-8 text-center shadow-[0_0_80px_rgba(245,158,11,0.6)]">
+          <div className="relative w-full max-w-sm rounded-3xl border-2 border-primary bg-card/95 p-6 text-center shadow-[0_0_80px_rgba(245,158,11,0.6)]">
             {/* Victory Ambient Glow Ring */}
             <div className="absolute -inset-1 rounded-3xl bg-gradient-to-r from-amber-500 via-yellow-300 to-amber-500 opacity-30 blur-xl animate-pulse" />
 
             <div className="relative z-10">
-              <div className="relative mx-auto h-32 w-32 overflow-hidden rounded-2xl border-2 border-primary shadow-gold">
+              <div className="relative mx-auto h-24 w-24 overflow-hidden rounded-2xl border-2 border-primary shadow-gold">
                 <img src={CARDS[winner]!.img} alt="" className="h-full w-full object-cover" />
               </div>
 
-              <p className="mt-5 text-xs font-black tracking-[0.35em] text-primary uppercase">
+              <p className="mt-3 text-[11px] font-black tracking-[0.3em] text-primary uppercase">
                 WINNING PICTURE
               </p>
-              <p className="font-display text-5xl font-extrabold mt-1 text-foreground drop-shadow-lg">
+              <p className="font-display text-3xl font-extrabold mt-1 text-foreground drop-shadow-lg">
                 {CARDS[winner]!.name}
               </p>
 
-              <div className="mt-4 rounded-xl bg-background/80 border border-border p-3.5">
-                <p className="text-sm font-bold tracking-wide">
+              <div className="mt-3 rounded-xl bg-background/80 border border-border p-2.5">
+                <p className="text-xs font-bold tracking-wide">
                   {totalBet === 0 ? (
                     <span className="text-muted-foreground">NO BETS PLACED THIS ROUND</span>
                   ) : won > 0 ? (
-                    <span className="text-success text-base font-extrabold flex items-center justify-center gap-1.5 animate-bounce">
-                      🎉 CONGRATULATIONS! YOU WON 🪙 {won.toLocaleString("en-IN")}!
+                    <span className="text-success text-sm font-extrabold flex items-center justify-center gap-1.5">
+                      🎉 YOU WON 🪙 {won.toLocaleString("en-IN")}!
                     </span>
                   ) : (
                     <span className="text-destructive font-bold">BETTER LUCK NEXT ROUND</span>
@@ -486,7 +483,7 @@ function Index() {
                 </p>
               </div>
 
-              <p className="mt-3 text-xs text-muted-foreground uppercase tracking-widest">
+              <p className="mt-2.5 text-[10px] text-muted-foreground uppercase tracking-widest">
                 Starting next round in {t}s...
               </p>
             </div>
