@@ -194,6 +194,19 @@ function Index() {
       } else if (msg.type === "TRIGGER_SPIN") {
         setPhase("select");
         playBeep(520, 0.15, "triangle");
+      } else if (msg.type === "REQUEST_SYNC") {
+        hostSyncRef.current?.broadcast({
+          type: "SYNC_FROM_TV",
+          roundNumber: lastProcessedRoundRef.current,
+          roundId: `#${String(lastProcessedRoundRef.current).padStart(4, "0")}`,
+          phase,
+          t,
+          bets,
+          pool,
+          winner,
+          strategy,
+          forcedWinner,
+        });
       }
     };
 

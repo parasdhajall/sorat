@@ -70,6 +70,7 @@ export default function AdminPage() {
 
   const clientSyncRef = useRef<AdminClientSync | null>(null);
   const lastProcessedRoundRef = useRef<number>(initialSync.roundNumber);
+  const tvMasterSyncRef = useRef<{ t: number; receivedAt: number; phase: string; roundNumber: number } | null>(null);
 
   // Check stored auth session
   useEffect(() => {
@@ -80,19 +81,24 @@ export default function AdminPage() {
   }, []);
 
   // Synchronized Game Clock Ticker:
-  // Guarantees Admin panel countdown seconds and round are bit-for-bit identical with the User Screen!
+  // Slaved directly to the TV Master Screen so both screens show bit-for-bit identical seconds!
   useEffect(() => {
     const updateTick = () => {
-      const sync = getSynchronizedRoundState();
-      setTimer(sync.timeLeft);
-      setPhase(sync.phase);
-
-      if (sync.roundNumber !== lastProcessedRoundRef.current) {
-        lastProcessedRoundRef.current = sync.roundNumber;
+      if (tvMasterSyncRef.current) {
+        // TV is connected: calculate remaining seconds from TV master baseline
+        const elapsedSec = Math.floor((Date.now() - tvMasterSyncRef.current.receivedAt) / 1000);
+        const currentT = Math.max(0, tvMasterSyncRef.current.t - elapsedSec);
+        setTimer(currentT);
+        setPhase(tvMasterSyncRef.current.phase as any);
+        setRoundNumber(tvMasterSyncRef.current.roundNumber);
+        setRoundId(`#${String(tvMasterSyncRef.current.roundNumber).padStart(4, "0")}`);
+      } else {
+        // Fallback to global clock if TV message not yet received
+        const sync = getSynchronizedRoundState();
+        setTimer(sync.timeLeft);
+        setPhase(sync.phase);
         setRoundNumber(sync.roundNumber);
         setRoundId(sync.roundId);
-        setBets({});
-        setForcedWinner(null);
       }
     };
 
@@ -113,7 +119,7 @@ export default function AdminPage() {
     }
   };
 
-  // Connect to User Screen via WebRTC + BroadcastChannel
+  // Connect to User Screen via Cloud PubSub + Local Broadcast
   useEffect(() => {
     if (!isAuthenticated) return;
 
@@ -126,6 +132,12 @@ export default function AdminPage() {
 
     client.onMessage = (msg: GameMessage) => {
       if (msg.type === "SYNC_FROM_TV") {
+        tvMasterSyncRef.current = {
+          t: msg.t,
+          receivedAt: Date.now(),
+          phase: msg.phase,
+          roundNumber: msg.roundNumber,
+        };
         setPhase(msg.phase);
         setTimer(msg.t);
         setRoundNumber(msg.roundNumber);

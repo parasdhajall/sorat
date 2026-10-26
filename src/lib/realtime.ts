@@ -82,202 +82,272 @@ export type GameMessage =
 
 export const DEFAULT_ROOM_ID = "sorat-arena-88";
 
-// Dynamically load PeerJS CDN script if not present
-export function loadPeerJS(): Promise<any> {
-  return new Promise((resolve, reject) => {
-    if (typeof window === "undefined") return resolve(null);
-    if ((window as any).Peer) return resolve((window as any).Peer);
-
-    const existing = document.getElementById("peerjs-script");
-    if (existing) {
-      existing.addEventListener("load", () => resolve((window as any).Peer));
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.id = "peerjs-script";
-    script.src = "https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js";
-    script.async = true;
-    script.onload = () => resolve((window as any).Peer);
-    script.onerror = () => reject(new Error("PeerJS script failed to load"));
-    document.head.appendChild(script);
-  });
+interface WireMessage {
+  _id: string;
+  _from: "tv" | "admin";
+  payload: GameMessage;
 }
 
-// TV Host Connection Class
+// TV Host Connection Class (Powered by High-Reliability Cloud SSE + Local Broadcast)
 export class TVHostSync {
-  private peer: any = null;
-  private connections: any[] = [];
   private broadcastChannel: BroadcastChannel | null = null;
+  private eventSource: EventSource | null = null;
+  private seenIds = new Set<string>();
+  private isDestroyed = false;
+
   public onMessage: (msg: GameMessage) => void = () => {};
   public onStatusChange: (status: "connecting" | "connected" | "waiting" | "disconnected", peerId?: string) => void = () => {};
 
   constructor(public roomId = DEFAULT_ROOM_ID) {
-    if (typeof window !== "undefined" && "BroadcastChannel" in window) {
-      this.broadcastChannel = new BroadcastChannel(`sorat_channel_${roomId}`);
-      this.broadcastChannel.onmessage = (event) => {
-        if (event.data) this.onMessage(event.data);
+    this.setupLocalChannels();
+  }
+
+  private setupLocalChannels() {
+    if (typeof window === "undefined") return;
+
+    if ("BroadcastChannel" in window) {
+      try {
+        this.broadcastChannel = new BroadcastChannel(`sorat_local_${this.roomId}`);
+        this.broadcastChannel.onmessage = (event) => {
+          this.handleIncoming(event.data);
+        };
+      } catch {}
+    }
+
+    window.addEventListener("storage", (e) => {
+      if (e.key === `sorat_msg_${this.roomId}` && e.newValue) {
+        try {
+          this.handleIncoming(JSON.parse(e.newValue));
+        } catch {}
+      }
+    });
+  }
+
+  start() {
+    this.isDestroyed = false;
+    this.onStatusChange("connecting");
+    this.connectCloud();
+  }
+
+  private connectCloud() {
+    if (typeof window === "undefined" || this.isDestroyed) return;
+
+    try {
+      if (this.eventSource) {
+        this.eventSource.close();
+      }
+
+      const topic = `sorat_arena_ch_${this.roomId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+      const es = new EventSource(`https://ntfy.sh/${topic}/sse`);
+      this.eventSource = es;
+
+      es.onopen = () => {
+        this.onStatusChange("connected");
       };
+
+      es.onmessage = (event) => {
+        try {
+          const envelope = JSON.parse(event.data);
+          if (envelope.event === "message" && envelope.message) {
+            const wire: WireMessage = JSON.parse(envelope.message);
+            this.handleIncoming(wire);
+          }
+        } catch {}
+      };
+
+      es.onerror = () => {
+        if (!this.isDestroyed) {
+          this.onStatusChange("connecting");
+        }
+      };
+    } catch {
+      this.onStatusChange("connected");
     }
   }
 
-  async start() {
-    this.onStatusChange("connecting");
-    try {
-      const Peer = await loadPeerJS();
-      if (!Peer) {
-        this.onStatusChange("waiting");
-        return;
-      }
-
-      const hostPeerId = `tv-${this.roomId}`;
-      this.peer = new Peer(hostPeerId, {
-        debug: 1,
-        config: {
-          iceServers: [
-            { urls: "stun:stun.l.google.com:19302" },
-            { urls: "stun:global.stun.twilio.com:3478" },
-          ],
-        },
-      });
-
-      this.peer.on("open", (id: string) => {
-        this.onStatusChange("waiting", id);
-      });
-
-      this.peer.on("connection", (conn: any) => {
-        this.connections.push(conn);
-        this.onStatusChange("connected");
-
-        conn.on("data", (data: any) => {
-          this.onMessage(data);
-        });
-
-        conn.on("close", () => {
-          this.connections = this.connections.filter((c) => c !== conn);
-          if (this.connections.length === 0) {
-            this.onStatusChange("waiting");
-          }
-        });
-      });
-
-      this.peer.on("error", (err: any) => {
-        // If peer ID is taken or network issue, continue with local channel
-        console.warn("PeerJS host warning:", err);
-      });
-    } catch (e) {
-      console.warn("PeerJS load failed, using local channel:", e);
-      this.onStatusChange("waiting");
+  private handleIncoming(wire: WireMessage) {
+    if (!wire || !wire._id || wire._from === "tv") return;
+    if (this.seenIds.has(wire._id)) return;
+    this.seenIds.add(wire._id);
+    if (this.seenIds.size > 100) {
+      const first = this.seenIds.values().next().value;
+      if (first) this.seenIds.delete(first);
     }
+    this.onStatusChange("connected");
+    this.onMessage(wire.payload);
   }
 
   broadcast(msg: GameMessage) {
-    // Send to local BroadcastChannel (same computer tabs)
+    if (typeof window === "undefined") return;
+
+    const wire: WireMessage = {
+      _id: Math.random().toString(36).slice(2) + Date.now().toString(36),
+      _from: "tv",
+      payload: msg,
+    };
+    this.seenIds.add(wire._id);
+
     try {
-      this.broadcastChannel?.postMessage(msg);
+      this.broadcastChannel?.postMessage(wire);
     } catch {}
 
-    // Send via WebRTC to all connected mobile phone operators
-    for (const conn of this.connections) {
-      try {
-        if (conn && conn.open) conn.send(msg);
-      } catch {}
-    }
+    try {
+      localStorage.setItem(`sorat_msg_${this.roomId}`, JSON.stringify(wire));
+    } catch {}
+
+    try {
+      const topic = `sorat_arena_ch_${this.roomId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+      fetch(`https://ntfy.sh/${topic}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(wire),
+        mode: "no-cors",
+      }).catch(() => {});
+    } catch {}
   }
 
   destroy() {
-    this.broadcastChannel?.close();
-    for (const conn of this.connections) {
-      try {
-        conn.close();
-      } catch {}
-    }
-    this.peer?.destroy();
+    this.isDestroyed = true;
+    try {
+      this.broadcastChannel?.close();
+    } catch {}
+    try {
+      this.eventSource?.close();
+    } catch {}
   }
 }
 
-// Admin / Phone Client Connection Class
+// Admin / Phone Client Connection Class (Powered by High-Reliability Cloud SSE + Local Broadcast)
 export class AdminClientSync {
-  private peer: any = null;
-  private conn: any = null;
   private broadcastChannel: BroadcastChannel | null = null;
+  private eventSource: EventSource | null = null;
+  private seenIds = new Set<string>();
+  private isDestroyed = false;
+
   public onMessage: (msg: GameMessage) => void = () => {};
   public onStatusChange: (status: "connecting" | "connected" | "disconnected" | "error") => void = () => {};
 
   constructor(public roomId = DEFAULT_ROOM_ID) {
-    if (typeof window !== "undefined" && "BroadcastChannel" in window) {
-      this.broadcastChannel = new BroadcastChannel(`sorat_channel_${roomId}`);
-      this.broadcastChannel.onmessage = (event) => {
-        if (event.data) {
-          this.onMessage(event.data);
-          this.onStatusChange("connected");
+    this.setupLocalChannels();
+  }
+
+  private setupLocalChannels() {
+    if (typeof window === "undefined") return;
+
+    if ("BroadcastChannel" in window) {
+      try {
+        this.broadcastChannel = new BroadcastChannel(`sorat_local_${this.roomId}`);
+        this.broadcastChannel.onmessage = (event) => {
+          this.handleIncoming(event.data);
+        };
+      } catch {}
+    }
+
+    window.addEventListener("storage", (e) => {
+      if (e.key === `sorat_msg_${this.roomId}` && e.newValue) {
+        try {
+          this.handleIncoming(JSON.parse(e.newValue));
+        } catch {}
+      }
+    });
+  }
+
+  connect() {
+    this.isDestroyed = false;
+    this.onStatusChange("connecting");
+    this.connectCloud();
+
+    // Immediately request current round and bets sync from TV
+    setTimeout(() => {
+      this.send({ type: "REQUEST_SYNC" });
+    }, 250);
+  }
+
+  private connectCloud() {
+    if (typeof window === "undefined" || this.isDestroyed) return;
+
+    try {
+      if (this.eventSource) {
+        this.eventSource.close();
+      }
+
+      const topic = `sorat_arena_ch_${this.roomId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+      const es = new EventSource(`https://ntfy.sh/${topic}/sse`);
+      this.eventSource = es;
+
+      es.onopen = () => {
+        this.onStatusChange("connected");
+        this.send({ type: "REQUEST_SYNC" });
+      };
+
+      es.onmessage = (event) => {
+        try {
+          const envelope = JSON.parse(event.data);
+          if (envelope.event === "message" && envelope.message) {
+            const wire: WireMessage = JSON.parse(envelope.message);
+            this.handleIncoming(wire);
+          }
+        } catch {}
+      };
+
+      es.onerror = () => {
+        if (!this.isDestroyed) {
+          this.onStatusChange("connecting");
         }
       };
+    } catch {
+      this.onStatusChange("connected");
     }
   }
 
-  async connect() {
-    this.onStatusChange("connecting");
-    try {
-      const Peer = await loadPeerJS();
-      if (!Peer) return;
-
-      this.peer = new Peer({
-        debug: 1,
-        config: {
-          iceServers: [
-            { urls: "stun:stun.l.google.com:19302" },
-            { urls: "stun:global.stun.twilio.com:3478" },
-          ],
-        },
-      });
-
-      this.peer.on("open", () => {
-        const targetId = `tv-${this.roomId}`;
-        this.conn = this.peer.connect(targetId, { reliable: true });
-
-        this.conn.on("open", () => {
-          this.onStatusChange("connected");
-        });
-
-        this.conn.on("data", (data: any) => {
-          this.onMessage(data);
-        });
-
-        this.conn.on("close", () => {
-          this.onStatusChange("disconnected");
-        });
-      });
-
-      this.peer.on("error", (err: any) => {
-        console.warn("PeerJS admin client error:", err);
-        this.onStatusChange("disconnected");
-      });
-    } catch (e) {
-      console.warn("PeerJS connect failed:", e);
-      this.onStatusChange("disconnected");
+  private handleIncoming(wire: WireMessage) {
+    if (!wire || !wire._id || wire._from === "admin") return;
+    if (this.seenIds.has(wire._id)) return;
+    this.seenIds.add(wire._id);
+    if (this.seenIds.size > 100) {
+      const first = this.seenIds.values().next().value;
+      if (first) this.seenIds.delete(first);
     }
+    this.onStatusChange("connected");
+    this.onMessage(wire.payload);
   }
 
   send(msg: GameMessage) {
-    // Send to local BroadcastChannel
+    if (typeof window === "undefined") return;
+
+    const wire: WireMessage = {
+      _id: Math.random().toString(36).slice(2) + Date.now().toString(36),
+      _from: "admin",
+      payload: msg,
+    };
+    this.seenIds.add(wire._id);
+
     try {
-      this.broadcastChannel?.postMessage(msg);
+      this.broadcastChannel?.postMessage(wire);
     } catch {}
 
-    // Send to TV via WebRTC
     try {
-      if (this.conn && this.conn.open) {
-        this.conn.send(msg);
-      }
+      localStorage.setItem(`sorat_msg_${this.roomId}`, JSON.stringify(wire));
+    } catch {}
+
+    try {
+      const topic = `sorat_arena_ch_${this.roomId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+      fetch(`https://ntfy.sh/${topic}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(wire),
+        mode: "no-cors",
+      }).catch(() => {});
     } catch {}
   }
 
   destroy() {
-    this.broadcastChannel?.close();
+    this.isDestroyed = true;
     try {
-      this.conn?.close();
+      this.broadcastChannel?.close();
     } catch {}
-    this.peer?.destroy();
+    try {
+      this.eventSource?.close();
+    } catch {}
   }
 }
