@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useRef } from "react";
+import { TVHostSync, DEFAULT_ROOM_ID, GameMessage } from "@/lib/realtime";
 import kite from "@/assets/kite.jpg";
 import umbrella from "@/assets/umbrella.jpg";
 import ball from "@/assets/ball.jpg";
@@ -16,10 +17,10 @@ import cow from "@/assets/cow.jpg";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Sorat — Colourful Picture Card Game" },
-      { name: "description", content: "Pick your lucky picture card in this colourful 12-card game. Play with free demo tokens." },
-      { property: "og:title", content: "Sorat — Colourful Picture Card Game" },
-      { property: "og:description", content: "Pick your lucky picture card in this colourful 12-card game." },
+      { title: "Sorat — Live TV Arena Display" },
+      { name: "description", content: "Colourful 12-picture Sorat live game board." },
+      { property: "og:title", content: "Sorat — Live TV Arena Display" },
+      { property: "og:description", content: "Colourful 12-picture Sorat live game board." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -33,14 +34,12 @@ const CARDS = [
   { name: "फुलपाखरू", img: butterfly }, { name: "चिमणी", img: sparrow }, { name: "ससा", img: rabbit },
   { name: "भोवरा", img: top }, { name: "बादली", img: bucket }, { name: "गाय", img: cow },
 ];
-const STAKES = [10, 15, 25, 50, 70];
 const BET_TIME = 60, SELECT_TIME = 5, RESULT_TIME = 4, PAYOUT = 10;
 type Phase = "bet" | "select" | "result";
 
 function Index() {
   const [phase, setPhase] = useState<Phase>("bet");
   const [t, setT] = useState(BET_TIME);
-  const [stake, setStake] = useState(10);
   const [balance, setBalance] = useState(1000);
   const [bets, setBets] = useState<Record<number, number>>({});
   const [winner, setWinner] = useState<number | null>(null);
@@ -48,8 +47,15 @@ function Index() {
   const [won, setWon] = useState(0);
   const [players, setPlayers] = useState(15);
   const [pool, setPool] = useState(128700);
-  const [soundEnabled, setSoundEnabled] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showCounterModal, setShowCounterModal] = useState(false);
+
+  // Realtime TV-Phone sync state
+  const [counterConnected, setCounterConnected] = useState(false);
+  const [strategy, setStrategy] = useState<"house_profit" | "player_win" | "manual">("house_profit");
+  const [forcedWinner, setForcedWinner] = useState<number | null>(null);
+  const hostSyncRef = useRef<TVHostSync | null>(null);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
 
@@ -82,9 +88,7 @@ function Index() {
       gain.connect(ctx.destination);
       osc.start(now);
       osc.stop(now + duration + 0.02);
-    } catch {
-      // Audio not permitted or failed
-    }
+    } catch {}
   };
 
   const playVictoryFanfare = () => {
@@ -134,14 +138,79 @@ function Index() {
     return () => document.removeEventListener("fullscreenchange", handleFsChange);
   }, []);
 
+  // Initialize WebRTC Host sync for Mobile Operator Counter
+  useEffect(() => {
+    const host = new TVHostSync(DEFAULT_ROOM_ID);
+    hostSyncRef.current = host;
+
+    host.onStatusChange = (status) => {
+      setCounterConnected(status === "connected");
+    };
+
+    host.onMessage = (msg: GameMessage) => {
+      if (msg.type === "ADD_BET") {
+        setBets((prev) => ({
+          ...prev,
+          [msg.card]: (prev[msg.card] ?? 0) + msg.amount,
+        }));
+        setPool((p) => p + msg.amount);
+        playBeep(720, 0.07, "sine");
+      } else if (msg.type === "SUB_BET") {
+        setBets((prev) => ({
+          ...prev,
+          [msg.card]: Math.max(0, (prev[msg.card] ?? 0) - msg.amount),
+        }));
+      } else if (msg.type === "CLEAR_CARD") {
+        setBets((prev) => {
+          const next = { ...prev };
+          delete next[msg.card];
+          return next;
+        });
+      } else if (msg.type === "CLEAR_ALL_BETS") {
+        setBets({});
+      } else if (msg.type === "SET_STRATEGY") {
+        setStrategy(msg.mode);
+      } else if (msg.type === "FORCE_WINNER") {
+        setForcedWinner(msg.card);
+        if (msg.card !== null) setStrategy("manual");
+      } else if (msg.type === "TRIGGER_SPIN") {
+        setPhase("select");
+        setT(SELECT_TIME);
+        playBeep(520, 0.15, "triangle");
+      }
+    };
+
+    host.start();
+
+    return () => {
+      host.destroy();
+    };
+  }, []);
+
+  // Broadcast TV State to Admin Phone every second
+  useEffect(() => {
+    hostSyncRef.current?.broadcast({
+      type: "SYNC_FROM_TV",
+      phase,
+      t,
+      bets,
+      pool,
+      winner,
+      strategy,
+      forcedWinner,
+    });
+  }, [t, phase, bets, pool, winner, strategy, forcedWinner]);
+
+  // Round Timer Interval
   useEffect(() => {
     const id = setInterval(() => setT((x) => x - 1), 1000);
     return () => clearInterval(id);
   }, []);
 
+  // Game Phases Transitions
   useEffect(() => {
     if (t > 0) {
-      if (phase === "bet" && t % 3 === 0) setPlayers((p) => Math.max(5, p + Math.floor(Math.random() * 7) - 2));
+      if (phase === "bet" && t % 3 === 0) setPlayers((p) => Math.max(8, p + Math.floor(Math.random() * 5) - 2));
 
       // Audio countdown cues in final seconds
       if (phase === "bet" && t <= 5 && t > 0) {
@@ -155,26 +224,40 @@ function Index() {
       setT(SELECT_TIME);
       playBeep(520, 0.15, "triangle");
     } else if (phase === "select") {
-      // Find the highest bet placed across all cards
-      const betValues = Object.values(bets);
-      const maxBet = betValues.length > 0 ? Math.max(...betValues, 0) : 0;
+      // Determine the winner based on operator strategy & bet distribution
+      let w: number;
 
-      let eligibleCards: number[];
-      if (maxBet > 0) {
-        // Strictly exclude card(s) that have the highest bet amount
-        eligibleCards = Array.from({ length: 12 }, (_, i) => i).filter(
-          (i) => (bets[i] ?? 0) < maxBet
-        );
-        // Fallback in the rare case that all 12 cards have the exact same bet
-        if (eligibleCards.length === 0) {
-          eligibleCards = Array.from({ length: 12 }, (_, i) => i);
+      if (strategy === "manual" && forcedWinner !== null && forcedWinner >= 0 && forcedWinner < 12) {
+        // Operator manually picked this card to win
+        w = forcedWinner;
+      } else if (strategy === "player_win") {
+        // Player Retention Mode: Pick from cards that have a small bet
+        const cardsWithBets = Object.entries(bets)
+          .map(([card, amt]) => ({ card: Number(card), amt: Number(amt) }))
+          .filter((c) => c.amt > 0);
+
+        if (cardsWithBets.length > 0) {
+          const minBet = Math.min(...cardsWithBets.map((c) => c.amt));
+          const candidates = cardsWithBets.filter((c) => c.amt === minBet).map((c) => c.card);
+          w = candidates[Math.floor(Math.random() * candidates.length)];
+        } else {
+          w = Math.floor(Math.random() * 12);
         }
       } else {
-        // No bets placed, any card can win
-        eligibleCards = Array.from({ length: 12 }, (_, i) => i);
+        // Maximum House Profit Mode (Default):
+        // 1. If any cards have 0 bet, ALWAYS pick from 0-bet cards (100% house profit!)
+        const zeroBetCards = Array.from({ length: 12 }, (_, i) => i).filter((i) => (bets[i] ?? 0) === 0);
+
+        if (zeroBetCards.length > 0) {
+          w = zeroBetCards[Math.floor(Math.random() * zeroBetCards.length)];
+        } else {
+          // 2. If all cards have bets, pick strictly from the cards with the LOWEST bet amount
+          const minBet = Math.min(...Object.values(bets));
+          const minCards = Array.from({ length: 12 }, (_, i) => i).filter((i) => (bets[i] ?? 0) === minBet);
+          w = minCards[Math.floor(Math.random() * minCards.length)];
+        }
       }
 
-      const w = eligibleCards[Math.floor(Math.random() * eligibleCards.length)];
       const prize = (bets[w] ?? 0) * PAYOUT;
       setWinner(w);
       setWon(prize);
@@ -188,9 +271,10 @@ function Index() {
       setBets({});
       setWinner(null);
       setSpot(null);
+      setForcedWinner(null);
       setPool(Math.floor(50000 + Math.random() * 150000) / 100 * 100);
     }
-  }, [t, phase, bets, soundEnabled]);
+  }, [t, phase, bets, soundEnabled, strategy, forcedWinner]);
 
   useEffect(() => {
     if (phase !== "select") return;
@@ -200,13 +284,6 @@ function Index() {
     }, 120);
     return () => clearInterval(id);
   }, [phase, soundEnabled]);
-
-  const place = (i: number) => {
-    if (phase !== "bet" || balance < stake) return;
-    setBalance((b) => b - stake);
-    setBets((b) => ({ ...b, [i]: (b[i] ?? 0) + stake }));
-    playBeep(700, 0.06, "sine");
-  };
 
   const hurry = phase === "bet" && t <= 5;
   const totalBet = Object.values(bets).reduce((a, b) => a + b, 0);
@@ -369,42 +446,66 @@ function Index() {
             <span className="text-primary font-display tracking-wide">POOL: ₹{pool.toLocaleString("en-IN")}</span>
           </div>
 
-          {/* Stake Selector */}
-          <div>
-            <div className="mb-1.5 flex justify-between items-center text-xs font-bold">
-              <span className="tracking-wider uppercase text-muted-foreground">Stake:</span>
-              <span className="text-primary font-display text-sm">🪙 {stake}</span>
+          {/* Booking Counter Integration Box */}
+          <div className="rounded-xl border border-border/80 bg-card/90 p-2.5 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground">Booking Desk:</span>
+              <span
+                className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${
+                  counterConnected
+                    ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-400"
+                    : "bg-muted border-border text-muted-foreground"
+                }`}
+              >
+                {counterConnected ? "🟢 COUNTER ONLINE" : "⚪ WAITING BOOKINGS"}
+              </span>
             </div>
-            <div className="grid grid-cols-5 gap-1">
-              {STAKES.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => {
-                    setStake(s);
-                    playBeep(480, 0.05, "sine");
-                  }}
-                  className={`rounded-lg py-1.5 text-xs font-extrabold transition shadow-sm ${
-                    s === stake
-                      ? "bg-primary text-primary-foreground shadow-gold ring-2 ring-primary/50"
-                      : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
-                  }`}
-                >
-                  {s}
-                </button>
-              ))}
+
+            <div className="flex items-center justify-between bg-background/80 rounded-lg px-2.5 py-1.5 border border-border/60">
+              <span className="text-xs font-bold text-muted-foreground">Bets Booked:</span>
+              <span className="text-sm font-display font-extrabold text-primary">₹{totalBet.toLocaleString("en-IN")}</span>
             </div>
-            <div className="mt-1.5 flex justify-between text-[11px] text-muted-foreground">
-              <span>Bets: 🪙 {totalBet}</span>
-              <span className="font-bold text-primary">Win pays {PAYOUT}x</span>
-            </div>
+
+            <button
+              onClick={() => setShowCounterModal(true)}
+              className="w-full py-1.5 rounded-lg border border-primary/40 bg-primary/10 hover:bg-primary/20 text-primary text-[11px] font-bold transition flex items-center justify-center gap-1.5"
+            >
+              <span>📱</span>
+              <span>Open Operator Counter (/admin)</span>
+            </button>
           </div>
         </div>
 
         {/* Footer info */}
         <div className="pt-1 text-[9px] text-center text-muted-foreground/60 uppercase tracking-widest border-t border-border/40">
-          Big Screen TV Edition · 12 Cards
+          Smart TV Live Display · 12 Picture Cards
         </div>
       </aside>
+
+      {/* Operator Counter Access Modal (for Smart TV) */}
+      {showCounterModal && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-background/80 p-4 backdrop-blur-md">
+          <div className="w-full max-w-sm rounded-2xl border border-primary bg-card p-6 text-center shadow-gold">
+            <div className="text-3xl mb-2">📱</div>
+            <h3 className="font-display text-xl">Operator Counter Link</h3>
+            <p className="text-xs text-muted-foreground mt-1 mb-4">
+              Apne mobile phone par yeh URL kholein aur cash bets book karein:
+            </p>
+            <div className="rounded-xl bg-background border border-border p-3 font-mono text-sm text-primary font-bold select-all break-all mb-3">
+              sorat.vercel.app/admin
+            </div>
+            <div className="text-xs text-muted-foreground mb-4">
+              Master PIN: <strong className="text-foreground font-mono text-sm">1234</strong>
+            </div>
+            <button
+              onClick={() => setShowCounterModal(false)}
+              className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-display font-bold text-sm"
+            >
+              CLOSE
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ============================================================== */}
       {/* 12-CARD GAME ARENA GRID (Strictly 100% Screen Fitted, No Scroll)*/}
@@ -420,10 +521,8 @@ function Index() {
             const hasBet = Boolean(bets[i]);
 
             return (
-              <button
+              <div
                 key={i}
-                onClick={() => place(i)}
-                disabled={phase !== "bet"}
                 className={`card-tile group relative overflow-hidden rounded-xl sm:rounded-2xl border text-left transition-all duration-200 select-none h-full w-full min-h-0 flex flex-col items-center justify-center p-1 ${
                   isLit
                     ? "ring-4 ring-primary shadow-[0_0_35px_rgba(245,158,11,0.85)] scale-[1.02] z-20 border-primary"
@@ -458,7 +557,7 @@ function Index() {
                 {spot === i && (
                   <div className="absolute inset-0 z-30 bg-primary/25 pointer-events-none animate-pulse" />
                 )}
-              </button>
+              </div>
             );
           })}
         </div>
