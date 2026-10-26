@@ -259,9 +259,11 @@ function Index() {
         setBets({});
         setWinner(null);
         setSpot(null);
-        // Clear forced winner for the new round
-        forcedWinnerRef.current = null;
-        setForcedWinner(null);
+        // Only reset forcedWinner if NOT in manual mode
+        if (strategy !== "manual") {
+          forcedWinnerRef.current = null;
+          setForcedWinner(null);
+        }
         setWon(0);
         lastDecidedWinnerRoundRef.current = null;
         setPool(Math.floor(50000 + Math.random() * 150000) / 100 * 100);
@@ -281,7 +283,7 @@ function Index() {
     updateTick();
     const id = setInterval(updateTick, 250);
     return () => clearInterval(id);
-  }, [soundEnabled]);
+  }, [soundEnabled, strategy]);
 
   // Determine winner ONCE when phase enters "select"
   useEffect(() => {
@@ -328,6 +330,28 @@ function Index() {
       playVictoryFanfare();
     }
   }, [phase, roundNumber, strategy, forcedWinner, bets, soundEnabled]);
+
+  // Immediate live override if admin locks a winner at any time during select or result phase
+  useEffect(() => {
+    const adminPick = forcedWinnerRef.current !== null ? forcedWinnerRef.current : forcedWinner;
+    if (adminPick !== null && adminPick >= 0 && adminPick < 12) {
+      if (phase === "select" || phase === "result") {
+        setWinner(adminPick);
+        const prize = (bets[adminPick] ?? 0) * PAYOUT;
+        setWon(prize);
+      }
+    }
+  }, [forcedWinner, phase, bets]);
+
+  // Safety net: ensure winner is never null when entering result phase
+  useEffect(() => {
+    if (phase === "result" && winner === null) {
+      const adminPick = forcedWinnerRef.current !== null ? forcedWinnerRef.current : forcedWinner;
+      const w = adminPick !== null && adminPick >= 0 && adminPick < 12 ? adminPick : 0;
+      setWinner(w);
+      setWon((bets[w] ?? 0) * PAYOUT);
+    }
+  }, [phase, winner, forcedWinner, bets]);
 
   // Spinning spotlight animation during "select" phase
   useEffect(() => {

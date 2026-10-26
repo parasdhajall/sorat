@@ -81,19 +81,14 @@ export type GameMessage =
     };
 
 export const DEFAULT_ROOM_ID = "sorat-arena-88";
+export const CLOUD_SYNC_URL = "https://api.restful-api.dev/objects/ff808181a09d98f701a17943e2421add";
 
-interface WireMessage {
-  _id: string;
-  _from: "tv" | "admin";
-  payload: GameMessage;
-}
-
-// TV Host Connection Class (Powered by High-Reliability Cloud SSE + Local Broadcast)
+// TV Host Connection Class (Powered by High-Reliability Cloud REST + Local Broadcast)
 export class TVHostSync {
   private broadcastChannel: BroadcastChannel | null = null;
-  private eventSource: EventSource | null = null;
-  private seenIds = new Set<string>();
+  private pollInterval: any = null;
   private isDestroyed = false;
+  private lastAdminUpdate = 0;
 
   public onMessage: (msg: GameMessage) => void = () => {};
   public onStatusChange: (status: "connecting" | "connected" | "waiting" | "disconnected", peerId?: string) => void = () => {};
@@ -109,15 +104,22 @@ export class TVHostSync {
       try {
         this.broadcastChannel = new BroadcastChannel(`sorat_local_${this.roomId}`);
         this.broadcastChannel.onmessage = (event) => {
-          this.handleIncoming(event.data);
+          if (event.data && event.data._from === "admin") {
+            this.onStatusChange("connected");
+            this.onMessage(event.data.payload);
+          }
         };
       } catch {}
     }
 
     window.addEventListener("storage", (e) => {
-      if (e.key === `sorat_msg_${this.roomId}` && e.newValue) {
+      if (e.key === `sorat_admin_msg_${this.roomId}` && e.newValue) {
         try {
-          this.handleIncoming(JSON.parse(e.newValue));
+          const wire = JSON.parse(e.newValue);
+          if (wire && wire._from === "admin") {
+            this.onStatusChange("connected");
+            this.onMessage(wire.payload);
+          }
         } catch {}
       }
     });
@@ -125,104 +127,97 @@ export class TVHostSync {
 
   start() {
     this.isDestroyed = false;
-    this.onStatusChange("connecting");
-    this.connectCloud();
-  }
-
-  private connectCloud() {
-    if (typeof window === "undefined" || this.isDestroyed) return;
-
-    try {
-      if (this.eventSource) {
-        this.eventSource.close();
-      }
-
-      const topic = `sorat_arena_ch_${this.roomId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
-      const es = new EventSource(`https://ntfy.sh/${topic}/sse`);
-      this.eventSource = es;
-
-      es.onopen = () => {
-        this.onStatusChange("connected");
-      };
-
-      es.onmessage = (event) => {
-        try {
-          const envelope = JSON.parse(event.data);
-          if (envelope.event === "message" && envelope.message) {
-            const wire: WireMessage = JSON.parse(envelope.message);
-            this.handleIncoming(wire);
-          }
-        } catch {}
-      };
-
-      es.onerror = () => {
-        if (!this.isDestroyed) {
-          this.onStatusChange("connecting");
-        }
-      };
-    } catch {
-      this.onStatusChange("connected");
-    }
-  }
-
-  private handleIncoming(wire: WireMessage) {
-    if (!wire || !wire._id || wire._from === "tv") return;
-    if (this.seenIds.has(wire._id)) return;
-    this.seenIds.add(wire._id);
-    if (this.seenIds.size > 100) {
-      const first = this.seenIds.values().next().value;
-      if (first) this.seenIds.delete(first);
-    }
     this.onStatusChange("connected");
-    this.onMessage(wire.payload);
+
+    // Cloud polling every 1000ms
+    const poll = async () => {
+      if (this.isDestroyed) return;
+      try {
+        const res = await fetch(CLOUD_SYNC_URL);
+        if (res.ok) {
+          const json = await res.json();
+          const d = json.data;
+          if (d && d.adminUpdatedAt && d.adminUpdatedAt > this.lastAdminUpdate) {
+            this.lastAdminUpdate = d.adminUpdatedAt;
+            this.onStatusChange("connected");
+
+            if (d.forcedWinner !== undefined) {
+              this.onMessage({ type: "FORCE_WINNER", card: d.forcedWinner });
+            }
+            if (d.strategy) {
+              this.onMessage({ type: "SET_STRATEGY", mode: d.strategy });
+            }
+            if (d.triggerSpin) {
+              this.onMessage({ type: "TRIGGER_SPIN" });
+            }
+            if (d.clearBets) {
+              this.onMessage({ type: "CLEAR_ALL_BETS" });
+            }
+          }
+        }
+      } catch {}
+    };
+
+    poll();
+    this.pollInterval = setInterval(poll, 1000);
   }
 
   broadcast(msg: GameMessage) {
     if (typeof window === "undefined") return;
 
-    const wire: WireMessage = {
-      _id: Math.random().toString(36).slice(2) + Date.now().toString(36),
+    const wire = {
       _from: "tv",
       payload: msg,
+      time: Date.now(),
     };
-    this.seenIds.add(wire._id);
 
     try {
       this.broadcastChannel?.postMessage(wire);
     } catch {}
 
     try {
-      localStorage.setItem(`sorat_msg_${this.roomId}`, JSON.stringify(wire));
+      localStorage.setItem(`sorat_tv_msg_${this.roomId}`, JSON.stringify(wire));
     } catch {}
 
-    try {
-      const topic = `sorat_arena_ch_${this.roomId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
-      fetch(`https://ntfy.sh/${topic}`, {
-        method: "POST",
+    // When TV state changes (bets, phase, t, winner):
+    if (msg.type === "SYNC_FROM_TV") {
+      fetch(CLOUD_SYNC_URL, {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(wire),
-        mode: "no-cors",
+        body: JSON.stringify({
+          name: "sorat_live_arena_sync_v1",
+          data: {
+            bets: msg.bets,
+            pool: msg.pool,
+            winner: msg.winner,
+            strategy: msg.strategy,
+            forcedWinner: msg.forcedWinner,
+            tvT: msg.t,
+            phase: msg.phase,
+            roundNumber: msg.roundNumber,
+            roundId: msg.roundId,
+            tvUpdatedAt: Date.now(),
+          },
+        }),
       }).catch(() => {});
-    } catch {}
+    }
   }
 
   destroy() {
     this.isDestroyed = true;
+    clearInterval(this.pollInterval);
     try {
       this.broadcastChannel?.close();
-    } catch {}
-    try {
-      this.eventSource?.close();
     } catch {}
   }
 }
 
-// Admin / Phone Client Connection Class (Powered by High-Reliability Cloud SSE + Local Broadcast)
+// Admin / Phone Client Connection Class (Powered by High-Reliability Cloud REST + Local Broadcast)
 export class AdminClientSync {
   private broadcastChannel: BroadcastChannel | null = null;
-  private eventSource: EventSource | null = null;
-  private seenIds = new Set<string>();
+  private pollInterval: any = null;
   private isDestroyed = false;
+  private lastTvUpdate = 0;
 
   public onMessage: (msg: GameMessage) => void = () => {};
   public onStatusChange: (status: "connecting" | "connected" | "disconnected" | "error") => void = () => {};
@@ -238,15 +233,22 @@ export class AdminClientSync {
       try {
         this.broadcastChannel = new BroadcastChannel(`sorat_local_${this.roomId}`);
         this.broadcastChannel.onmessage = (event) => {
-          this.handleIncoming(event.data);
+          if (event.data && event.data._from === "tv") {
+            this.onStatusChange("connected");
+            this.onMessage(event.data.payload);
+          }
         };
       } catch {}
     }
 
     window.addEventListener("storage", (e) => {
-      if (e.key === `sorat_msg_${this.roomId}` && e.newValue) {
+      if (e.key === `sorat_tv_msg_${this.roomId}` && e.newValue) {
         try {
-          this.handleIncoming(JSON.parse(e.newValue));
+          const wire = JSON.parse(e.newValue);
+          if (wire && wire._from === "tv") {
+            this.onStatusChange("connected");
+            this.onMessage(wire.payload);
+          }
         } catch {}
       }
     });
@@ -254,100 +256,89 @@ export class AdminClientSync {
 
   connect() {
     this.isDestroyed = false;
-    this.onStatusChange("connecting");
-    this.connectCloud();
-
-    // Immediately request current round and bets sync from TV
-    setTimeout(() => {
-      this.send({ type: "REQUEST_SYNC" });
-    }, 250);
-  }
-
-  private connectCloud() {
-    if (typeof window === "undefined" || this.isDestroyed) return;
-
-    try {
-      if (this.eventSource) {
-        this.eventSource.close();
-      }
-
-      const topic = `sorat_arena_ch_${this.roomId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
-      const es = new EventSource(`https://ntfy.sh/${topic}/sse`);
-      this.eventSource = es;
-
-      es.onopen = () => {
-        this.onStatusChange("connected");
-        this.send({ type: "REQUEST_SYNC" });
-      };
-
-      es.onmessage = (event) => {
-        try {
-          const envelope = JSON.parse(event.data);
-          if (envelope.event === "message" && envelope.message) {
-            const wire: WireMessage = JSON.parse(envelope.message);
-            this.handleIncoming(wire);
-          }
-        } catch {}
-      };
-
-      es.onerror = () => {
-        if (!this.isDestroyed) {
-          this.onStatusChange("connecting");
-        }
-      };
-    } catch {
-      this.onStatusChange("connected");
-    }
-  }
-
-  private handleIncoming(wire: WireMessage) {
-    if (!wire || !wire._id || wire._from === "admin") return;
-    if (this.seenIds.has(wire._id)) return;
-    this.seenIds.add(wire._id);
-    if (this.seenIds.size > 100) {
-      const first = this.seenIds.values().next().value;
-      if (first) this.seenIds.delete(first);
-    }
     this.onStatusChange("connected");
-    this.onMessage(wire.payload);
+
+    // Cloud polling every 1000ms
+    const poll = async () => {
+      if (this.isDestroyed) return;
+      try {
+        const res = await fetch(CLOUD_SYNC_URL);
+        if (res.ok) {
+          const json = await res.json();
+          const d = json.data;
+          if (d && d.tvUpdatedAt && d.tvUpdatedAt > this.lastTvUpdate) {
+            this.lastTvUpdate = d.tvUpdatedAt;
+            this.onStatusChange("connected");
+            this.onMessage({
+              type: "SYNC_FROM_TV",
+              roundNumber: d.roundNumber,
+              roundId: d.roundId,
+              phase: d.phase,
+              t: d.tvT,
+              bets: d.bets || {},
+              pool: d.pool || 0,
+              winner: d.winner,
+              strategy: d.strategy || "house_profit",
+              forcedWinner: d.forcedWinner,
+            });
+          }
+        }
+      } catch {}
+    };
+
+    poll();
+    this.pollInterval = setInterval(poll, 1000);
   }
 
   send(msg: GameMessage) {
     if (typeof window === "undefined") return;
 
-    const wire: WireMessage = {
-      _id: Math.random().toString(36).slice(2) + Date.now().toString(36),
+    const wire = {
       _from: "admin",
       payload: msg,
+      time: Date.now(),
     };
-    this.seenIds.add(wire._id);
 
     try {
       this.broadcastChannel?.postMessage(wire);
     } catch {}
 
     try {
-      localStorage.setItem(`sorat_msg_${this.roomId}`, JSON.stringify(wire));
+      localStorage.setItem(`sorat_admin_msg_${this.roomId}`, JSON.stringify(wire));
     } catch {}
 
-    try {
-      const topic = `sorat_arena_ch_${this.roomId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
-      fetch(`https://ntfy.sh/${topic}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(wire),
-        mode: "no-cors",
-      }).catch(() => {});
-    } catch {}
+    // Send action to Cloud REST store
+    const cloudPayload: any = {
+      adminUpdatedAt: Date.now(),
+    };
+    if (msg.type === "FORCE_WINNER") {
+      cloudPayload.forcedWinner = msg.card;
+      cloudPayload.strategy = "manual";
+    } else if (msg.type === "SET_STRATEGY") {
+      cloudPayload.strategy = msg.mode;
+      if (msg.mode !== "manual") cloudPayload.forcedWinner = null;
+    } else if (msg.type === "TRIGGER_SPIN") {
+      cloudPayload.triggerSpin = Date.now();
+    } else if (msg.type === "CLEAR_ALL_BETS") {
+      cloudPayload.clearBets = Date.now();
+      cloudPayload.bets = {};
+    }
+
+    fetch(CLOUD_SYNC_URL, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "sorat_live_arena_sync_v1",
+        data: cloudPayload,
+      }),
+    }).catch(() => {});
   }
 
   destroy() {
     this.isDestroyed = true;
+    clearInterval(this.pollInterval);
     try {
       this.broadcastChannel?.close();
-    } catch {}
-    try {
-      this.eventSource?.close();
     } catch {}
   }
 }
