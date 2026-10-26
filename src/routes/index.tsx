@@ -34,12 +34,14 @@ const CARDS = [
   { name: "फुलपाखरू", img: butterfly }, { name: "चिमणी", img: sparrow }, { name: "ससा", img: rabbit },
   { name: "भोवरा", img: top }, { name: "बादली", img: bucket }, { name: "गाय", img: cow },
 ];
+const STAKES = [10, 15, 25, 50, 70];
 const BET_TIME = 60, SELECT_TIME = 5, RESULT_TIME = 4, PAYOUT = 10;
 type Phase = "bet" | "select" | "result";
 
 function Index() {
   const [phase, setPhase] = useState<Phase>("bet");
   const [t, setT] = useState(BET_TIME);
+  const [stake, setStake] = useState(10);
   const [balance, setBalance] = useState(1000);
   const [bets, setBets] = useState<Record<number, number>>({});
   const [winner, setWinner] = useState<number | null>(null);
@@ -283,7 +285,27 @@ function Index() {
       playBeep(580 + Math.random() * 200, 0.04, "sine");
     }, 120);
     return () => clearInterval(id);
-  }, [phase, soundEnabled]);
+  // User places bet by clicking cards
+  const place = (i: number) => {
+    if (phase !== "bet" || balance < stake) return;
+    setBalance((b) => b - stake);
+    const newBets = { ...bets, [i]: (bets[i] ?? 0) + stake };
+    setBets(newBets);
+    setPool((p) => p + stake);
+    playBeep(720, 0.06, "sine");
+
+    // Immediately push update to Admin
+    hostSyncRef.current?.broadcast({
+      type: "SYNC_FROM_TV",
+      phase,
+      t,
+      bets: newBets,
+      pool: pool + stake,
+      winner,
+      strategy,
+      forcedWinner,
+    });
+  };
 
   const hurry = phase === "bet" && t <= 5;
   const totalBet = Object.values(bets).reduce((a, b) => a + b, 0);
@@ -446,69 +468,45 @@ function Index() {
             <span className="text-primary font-display tracking-wide">POOL: ₹{pool.toLocaleString("en-IN")}</span>
           </div>
 
-          {/* Booking Counter Integration Box */}
-          <div className="rounded-xl border border-border/80 bg-card/90 p-2.5 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground">Booking Desk:</span>
-              <span
-                className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${
-                  counterConnected
-                    ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-400"
-                    : "bg-muted border-border text-muted-foreground"
-                }`}
-              >
-                {counterConnected ? "🟢 COUNTER ONLINE" : "⚪ WAITING BOOKINGS"}
-              </span>
+          {/* User Stake Selector */}
+          <div>
+            <div className="mb-1.5 flex justify-between items-center text-xs font-bold">
+              <span className="tracking-wider uppercase text-muted-foreground">Select Stake:</span>
+              <span className="text-primary font-display text-sm">🪙 {stake}</span>
             </div>
-
-            <div className="flex items-center justify-between bg-background/80 rounded-lg px-2.5 py-1.5 border border-border/60">
-              <span className="text-xs font-bold text-muted-foreground">Bets Booked:</span>
-              <span className="text-sm font-display font-extrabold text-primary">₹{totalBet.toLocaleString("en-IN")}</span>
+            <div className="grid grid-cols-5 gap-1">
+              {STAKES.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => {
+                    setStake(s);
+                    playBeep(480, 0.05, "sine");
+                  }}
+                  className={`rounded-lg py-1.5 text-xs font-extrabold transition shadow-sm ${
+                    s === stake
+                      ? "bg-primary text-primary-foreground shadow-gold ring-2 ring-primary/50"
+                      : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
             </div>
-
-            <button
-              onClick={() => setShowCounterModal(true)}
-              className="w-full py-1.5 rounded-lg border border-primary/40 bg-primary/10 hover:bg-primary/20 text-primary text-[11px] font-bold transition flex items-center justify-center gap-1.5"
-            >
-              <span>📱</span>
-              <span>Open Operator Counter (/admin)</span>
-            </button>
+            <div className="mt-1.5 flex justify-between text-[11px] text-muted-foreground">
+              <span>Your bets: 🪙 {totalBet}</span>
+              <span className="font-bold text-primary">Win pays {PAYOUT}x</span>
+            </div>
           </div>
         </div>
 
         {/* Footer info */}
         <div className="pt-1 text-[9px] text-center text-muted-foreground/60 uppercase tracking-widest border-t border-border/40">
-          Smart TV Live Display · 12 Picture Cards
+          Click any card to place bet · 12 Picture Cards
         </div>
       </aside>
 
-      {/* Operator Counter Access Modal (for Smart TV) */}
-      {showCounterModal && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-background/80 p-4 backdrop-blur-md">
-          <div className="w-full max-w-sm rounded-2xl border border-primary bg-card p-6 text-center shadow-gold">
-            <div className="text-3xl mb-2">📱</div>
-            <h3 className="font-display text-xl">Operator Counter Link</h3>
-            <p className="text-xs text-muted-foreground mt-1 mb-4">
-              Apne mobile phone par yeh URL kholein aur cash bets book karein:
-            </p>
-            <div className="rounded-xl bg-background border border-border p-3 font-mono text-sm text-primary font-bold select-all break-all mb-3">
-              sorat.vercel.app/admin
-            </div>
-            <div className="text-xs text-muted-foreground mb-4">
-              Master PIN: <strong className="text-foreground font-mono text-sm">1234</strong>
-            </div>
-            <button
-              onClick={() => setShowCounterModal(false)}
-              className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-display font-bold text-sm"
-            >
-              CLOSE
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* ============================================================== */}
-      {/* 12-CARD GAME ARENA GRID (Strictly 100% Screen Fitted, No Scroll)*/}
+      {/* 12-CARD GAME ARENA GRID (User Clicks to Bet)                   */}
       {/* ============================================================== */}
       <section className="relative z-10 flex-1 h-full max-h-screen overflow-hidden p-2 sm:p-2.5 md:p-3 flex flex-col justify-between min-h-0">
         {/* Top Casino LED Marquee Light Ticker */}
@@ -521,9 +519,11 @@ function Index() {
             const hasBet = Boolean(bets[i]);
 
             return (
-              <div
+              <button
                 key={i}
-                className={`card-tile group relative overflow-hidden rounded-xl sm:rounded-2xl border text-left transition-all duration-200 select-none h-full w-full min-h-0 flex flex-col items-center justify-center p-1 ${
+                onClick={() => place(i)}
+                disabled={phase !== "bet"}
+                className={`card-tile group relative overflow-hidden rounded-xl sm:rounded-2xl border text-left transition-all duration-200 select-none h-full w-full min-h-0 flex flex-col items-center justify-center p-1 active:scale-95 ${
                   isLit
                     ? "ring-4 ring-primary shadow-[0_0_35px_rgba(245,158,11,0.85)] scale-[1.02] z-20 border-primary"
                     : hasBet
@@ -548,7 +548,7 @@ function Index() {
 
                 {/* Bet Badge */}
                 {hasBet && (
-                  <span className="absolute right-1.5 top-1.5 z-20 rounded-full bg-primary px-2 py-0.5 text-[10px] sm:text-xs font-black text-primary-foreground shadow-gold flex items-center gap-1">
+                  <span className="absolute right-1.5 top-1.5 z-20 rounded-full bg-primary px-2 py-0.5 text-[10px] sm:text-xs font-black text-primary-foreground shadow-gold flex items-center gap-1 animate-bounce-short">
                     <span>🪙</span> {bets[i]}
                   </span>
                 )}
@@ -557,7 +557,7 @@ function Index() {
                 {spot === i && (
                   <div className="absolute inset-0 z-30 bg-primary/25 pointer-events-none animate-pulse" />
                 )}
-              </div>
+              </button>
             );
           })}
         </div>
