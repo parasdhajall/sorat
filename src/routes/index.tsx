@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import kite from "@/assets/kite.jpg";
 import umbrella from "@/assets/umbrella.jpg";
 import ball from "@/assets/ball.jpg";
@@ -48,6 +48,91 @@ function Index() {
   const [won, setWon] = useState(0);
   const [players, setPlayers] = useState(15);
   const [pool, setPool] = useState(128700);
+  const [soundEnabled, setSoundEnabled] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  // Initialize Audio Context on user interaction
+  const getAudioContext = () => {
+    if (typeof window === "undefined") return null;
+    if (!audioCtxRef.current) {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (AudioCtx) audioCtxRef.current = new AudioCtx();
+    }
+    if (audioCtxRef.current && audioCtxRef.current.state === "suspended") {
+      audioCtxRef.current.resume();
+    }
+    return audioCtxRef.current;
+  };
+
+  const playBeep = (freq = 440, duration = 0.08, type: OscillatorType = "sine") => {
+    if (!soundEnabled) return;
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, now);
+      gain.gain.setValueAtTime(0.08, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + duration + 0.02);
+    } catch {
+      // Audio not permitted or failed
+    }
+  };
+
+  const playVictoryFanfare = () => {
+    if (!soundEnabled) return;
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+      notes.forEach((freq, idx) => {
+        const now = ctx.currentTime + idx * 0.12;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, now);
+        gain.gain.setValueAtTime(0.12, now);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.5);
+      });
+    } catch {}
+  };
+
+  const toggleSound = () => {
+    const next = !soundEnabled;
+    setSoundEnabled(next);
+    if (next) {
+      getAudioContext();
+      playBeep(660, 0.1, "sine");
+    }
+  };
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen().catch(() => {});
+      setIsFullscreen(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleFsChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", handleFsChange);
+    return () => document.removeEventListener("fullscreenchange", handleFsChange);
+  }, []);
 
   useEffect(() => {
     const id = setInterval(() => setT((x) => x - 1), 1000);
@@ -57,111 +142,358 @@ function Index() {
   useEffect(() => {
     if (t > 0) {
       if (phase === "bet" && t % 3 === 0) setPlayers((p) => Math.max(5, p + Math.floor(Math.random() * 7) - 2));
+
+      // Audio countdown cues in final seconds
+      if (phase === "bet" && t <= 5 && t > 0) {
+        playBeep(880, 0.12, "sawtooth");
+      }
       return;
     }
-    if (phase === "bet") { setPhase("select"); setT(SELECT_TIME); }
-    else if (phase === "select") {
+
+    if (phase === "bet") {
+      setPhase("select");
+      setT(SELECT_TIME);
+      playBeep(520, 0.15, "triangle");
+    } else if (phase === "select") {
       const w = Math.floor(Math.random() * 12);
       const prize = (bets[w] ?? 0) * PAYOUT;
-      setWinner(w); setWon(prize); setBalance((b) => b + prize);
-      setPhase("result"); setT(RESULT_TIME);
+      setWinner(w);
+      setWon(prize);
+      setBalance((b) => b + prize);
+      setPhase("result");
+      setT(RESULT_TIME);
+      playVictoryFanfare();
     } else {
-      setPhase("bet"); setT(BET_TIME); setBets({}); setWinner(null); setSpot(null);
+      setPhase("bet");
+      setT(BET_TIME);
+      setBets({});
+      setWinner(null);
+      setSpot(null);
       setPool(Math.floor(50000 + Math.random() * 150000) / 100 * 100);
     }
-  }, [t, phase, bets]);
+  }, [t, phase, bets, soundEnabled]);
 
   useEffect(() => {
     if (phase !== "select") return;
-    const id = setInterval(() => setSpot(Math.floor(Math.random() * 12)), 120);
+    const id = setInterval(() => {
+      setSpot(Math.floor(Math.random() * 12));
+      playBeep(580 + Math.random() * 200, 0.04, "sine");
+    }, 120);
     return () => clearInterval(id);
-  }, [phase]);
+  }, [phase, soundEnabled]);
 
   const place = (i: number) => {
     if (phase !== "bet" || balance < stake) return;
     setBalance((b) => b - stake);
     setBets((b) => ({ ...b, [i]: (b[i] ?? 0) + stake }));
+    playBeep(700, 0.06, "sine");
   };
+
   const hurry = phase === "bet" && t <= 5;
   const totalBet = Object.values(bets).reduce((a, b) => a + b, 0);
   const total = phase === "bet" ? BET_TIME : phase === "select" ? SELECT_TIME : RESULT_TIME;
 
   return (
-    <main className="min-h-screen bg-background text-foreground md:flex">
-      <aside className="w-full space-y-4 border-b border-border bg-sidebar p-4 md:sticky md:top-0 md:h-screen md:w-80 md:border-b-0 md:border-r">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="grid h-10 w-10 place-items-center rounded-lg bg-gradient-gold font-display text-sm text-primary-foreground">S</div>
-            <span className="font-display text-2xl italic tracking-wide">SORAT</span>
-            <span className="flex items-center gap-1 text-[10px] font-bold text-destructive"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-destructive" />LIVE</span>
-          </div>
-          <span className="rounded-md bg-muted px-3 py-1 text-sm font-bold">🪙 {balance}</span>
-        </div>
-        <span className="inline-block rounded bg-success px-2 py-0.5 text-xs font-bold text-success-foreground">DEMO TOKENS</span>
+    <main className={`relative min-h-screen overflow-x-hidden bg-background text-foreground md:flex ${hurry ? "shadow-[inset_0_0_90px_rgba(239,68,68,0.35)]" : ""}`}>
+      {/* ============================================================== */}
+      {/* BIG SCREEN AMBIENT LIGHTING & DYNAMIC EFFECTS LAYER            */}
+      {/* ============================================================== */}
+      <div className="pointer-events-none fixed inset-0 overflow-hidden z-0">
+        {/* Floating Ambient Glowing Light Orbs */}
+        <div className="ambient-orb-1 absolute -top-24 -left-24 h-[520px] w-[520px] rounded-full bg-gradient-to-br from-amber-500/20 via-yellow-600/10 to-transparent blur-[120px]" />
+        <div className="ambient-orb-2 absolute top-1/3 -right-32 h-[580px] w-[580px] rounded-full bg-gradient-to-tl from-indigo-500/20 via-purple-600/10 to-transparent blur-[140px]" />
+        <div className="ambient-orb-3 absolute -bottom-24 left-1/4 h-[480px] w-[480px] rounded-full bg-gradient-to-tr from-emerald-500/15 via-teal-600/10 to-transparent blur-[130px]" />
 
-        <div className={`rounded-xl border bg-card p-5 text-center ${hurry ? "border-primary shadow-gold" : "border-border"}`}>
-          <div className="relative mx-auto h-14 w-14">
-            <svg viewBox="0 0 36 36" className="h-14 w-14 -rotate-90">
-              <circle cx="18" cy="18" r="15" fill="none" className="stroke-muted" strokeWidth="3" />
-              <circle cx="18" cy="18" r="15" fill="none" strokeWidth="3" strokeLinecap="round"
-                className={phase === "bet" && !hurry ? "stroke-success" : "stroke-primary"}
-                strokeDasharray={`${(t / total) * 94} 94`} />
-            </svg>
-            <span className="absolute inset-0 grid place-items-center text-sm font-bold">{t}s</span>
-          </div>
-          <p className="mt-3 text-sm font-extrabold tracking-wider">
-            {phase === "bet" ? (hurry ? "⏳ HURRY UP" : "🟢 BETS OPEN") : phase === "select" ? "⚡ SELECTING SLOT" : "🏆 RESULT"}
-          </p>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            {phase === "bet" ? (hurry ? "Time is running out" : "Place your tokens on any slot") : phase === "select" ? "Calculating result..." : "Next round soon"}
-          </p>
-        </div>
+        {/* Urgent Alarm Lighting - Activates in Last 5 Seconds of Timer */}
+        {hurry && (
+          <div className="urgent-alarm-glow fixed inset-0 bg-gradient-to-b from-red-600/15 via-amber-600/10 to-red-950/20" />
+        )}
 
-        <div className="flex items-center justify-between rounded-xl bg-card p-3 text-xs font-bold">
-          <span>{players} PLAYERS</span>
-          <span>POOL: ₹{pool.toLocaleString("en-IN")}</span>
-        </div>
+        {/* Slot Selection Laser Beam Sweeper */}
+        {phase === "select" && (
+          <div className="laser-sweep-beam absolute -top-[50%] -left-[50%] h-[200%] w-[200%] bg-[conic-gradient(from_0deg_at_50%_50%,rgba(245,158,11,0.18)_0deg,transparent_60deg,transparent_360deg)]" />
+        )}
 
-        <div>
-          <div className="mb-2 flex justify-between text-sm font-bold"><span>STAKES:</span><span className="text-primary">🪙 {stake}</span></div>
-          <div className="grid grid-cols-5 gap-2">
-            {STAKES.map((s) => (
-              <button key={s} onClick={() => setStake(s)}
-                className={`rounded-lg py-2 text-sm font-bold transition ${s === stake ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-accent"}`}>
-                {s}
+        {/* Victory Burst Aura */}
+        {phase === "result" && (
+          <div className="victory-glow-burst fixed inset-0 bg-radial from-amber-400/25 via-primary/10 to-transparent" />
+        )}
+      </div>
+
+      {/* ============================================================== */}
+      {/* SIDEBAR CONTROL & LIVE STATS PANEL                             */}
+      {/* ============================================================== */}
+      <aside className="relative z-10 w-full space-y-4 border-b border-border/70 bg-sidebar/95 backdrop-blur-md p-4 md:sticky md:top-0 md:h-screen md:w-84 md:border-b-0 md:border-r shadow-2xl flex flex-col justify-between">
+        <div className="space-y-4">
+          {/* Top Brand Header & Controls */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-gold font-display text-base text-primary-foreground shadow-gold">
+                S
+              </div>
+              <div>
+                <span className="font-display text-2xl italic tracking-wider block leading-tight">SORAT</span>
+                <span className="flex items-center gap-1.5 text-[10px] font-bold tracking-widest text-destructive">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-destructive shadow-[0_0_8px_#ef4444]" />
+                  LIVE ARENA
+                </span>
+              </div>
+            </div>
+
+            {/* Big Screen Quick Actions: Sound & Fullscreen */}
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={toggleSound}
+                title={soundEnabled ? "Mute Sound" : "Enable Sound FX"}
+                className={`p-2 rounded-lg text-xs font-bold transition border ${
+                  soundEnabled ? "bg-primary/20 border-primary text-primary" : "bg-muted border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {soundEnabled ? "🔊" : "🔇"}
               </button>
-            ))}
+              <button
+                onClick={toggleFullscreen}
+                title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen (Big Screen TV Mode)"}
+                className="p-2 rounded-lg text-xs font-bold transition border bg-muted border-border text-muted-foreground hover:text-foreground"
+              >
+                {isFullscreen ? "🗗" : "⛶"}
+              </button>
+            </div>
           </div>
-          <p className="mt-3 text-xs text-muted-foreground">Your bets this round: 🪙 {totalBet} · Win pays {PAYOUT}x</p>
+
+          {/* Balance & Token Status */}
+          <div className="flex items-center justify-between rounded-xl border border-border/80 bg-card/80 p-3 shadow-sm">
+            <div className="space-y-0.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Wallet Balance</span>
+              <div className="text-xl font-display text-primary flex items-center gap-1">
+                <span>🪙</span> {balance.toLocaleString("en-IN")}
+              </div>
+            </div>
+            <span className="rounded-full bg-success/20 border border-success/40 px-2.5 py-1 text-[11px] font-extrabold text-success tracking-wide">
+              DEMO TOKENS
+            </span>
+          </div>
+
+          {/* Animated Big-Screen Countdown Gauge */}
+          <div
+            className={`relative overflow-hidden rounded-2xl border p-5 text-center transition-all duration-300 ${
+              hurry
+                ? "border-destructive bg-destructive/10 shadow-[0_0_35px_rgba(239,68,68,0.4)]"
+                : phase === "select"
+                ? "border-primary bg-primary/10 shadow-gold"
+                : "border-border bg-card/90 shadow-lg"
+            }`}
+          >
+            {/* Ambient Timer Glow Effect */}
+            <div
+              className={`relative mx-auto h-20 w-20 rounded-full flex items-center justify-center ${
+                hurry ? "timer-glow-urgent" : "timer-glow-normal"
+              }`}
+            >
+              <svg viewBox="0 0 36 36" className="h-20 w-20 -rotate-90">
+                <circle cx="18" cy="18" r="15" fill="none" className="stroke-muted/50" strokeWidth="3" />
+                <circle
+                  cx="18"
+                  cy="18"
+                  r="15"
+                  fill="none"
+                  strokeWidth="3.2"
+                  strokeLinecap="round"
+                  className={
+                    hurry
+                      ? "stroke-destructive transition-all duration-300"
+                      : phase === "bet"
+                      ? "stroke-primary transition-all duration-300"
+                      : "stroke-yellow-400 animate-spin"
+                  }
+                  strokeDasharray={`${(t / total) * 94} 94`}
+                />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className={`font-display text-2xl font-extrabold tracking-tight ${hurry ? "text-destructive scale-110 animate-ping-short" : "text-foreground"}`}>
+                  {t}s
+                </span>
+              </div>
+            </div>
+
+            {/* Dynamic Status Badges */}
+            <p className={`mt-3 text-base font-extrabold tracking-wider ${hurry ? "text-destructive animate-pulse" : "text-foreground"}`}>
+              {phase === "bet"
+                ? hurry
+                  ? "⏳ HURRY UP! CLOSING"
+                  : "🟢 BETS OPEN"
+                : phase === "select"
+                ? "⚡ SELECTING LUCKY CARD"
+                : "🏆 WINNER ANNOUNCED"}
+            </p>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mt-0.5">
+              {phase === "bet"
+                ? hurry
+                  ? "Place your final tokens now!"
+                  : "Pick cards & test your luck"
+                : phase === "select"
+                ? "Wheel is spinning..."
+                : "Next round starts shortly"}
+            </p>
+          </div>
+
+          {/* Live Arena Metrics */}
+          <div className="flex items-center justify-between rounded-xl border border-border/80 bg-card/70 p-3 text-xs font-bold">
+            <span className="flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+              {players} ACTIVE PLAYERS
+            </span>
+            <span className="text-primary font-display tracking-wide">POOL: ₹{pool.toLocaleString("en-IN")}</span>
+          </div>
+
+          {/* Stake Selector */}
+          <div>
+            <div className="mb-2 flex justify-between items-center text-sm font-bold">
+              <span className="tracking-wider text-xs uppercase text-muted-foreground">Select Stake:</span>
+              <span className="text-primary font-display text-base">🪙 {stake}</span>
+            </div>
+            <div className="grid grid-cols-5 gap-1.5">
+              {STAKES.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => {
+                    setStake(s);
+                    playBeep(480, 0.05, "sine");
+                  }}
+                  className={`rounded-lg py-2.5 text-sm font-extrabold transition shadow-sm ${
+                    s === stake
+                      ? "bg-primary text-primary-foreground shadow-gold scale-105 ring-2 ring-primary/50"
+                      : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+            <div className="mt-2.5 flex justify-between text-xs text-muted-foreground">
+              <span>This round: 🪙 {totalBet}</span>
+              <span className="font-bold text-primary">Win pays {PAYOUT}x</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer info */}
+        <div className="pt-2 text-[10px] text-center text-muted-foreground/70 uppercase tracking-widest border-t border-border/40">
+          Big Screen TV Display Edition · 12 Pictures
         </div>
       </aside>
 
-      <section className="grid flex-1 grid-cols-3 gap-3 p-3 sm:grid-cols-4">
-        {CARDS.map((c, i) => {
-          const lit = spot === i || winner === i;
-          return (
-            <button key={i} onClick={() => place(i)}
-              className={`card-tile relative overflow-hidden rounded-xl text-left ${lit ? "ring-4 ring-primary scale-[1.02]" : ""} ${phase === "result" && winner !== i ? "opacity-50" : ""}`}>
-              <img src={c.img} alt={c.name} width={816} height={816} loading="lazy" className="aspect-square w-full object-cover" />
-              <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background/90 to-transparent pb-1.5 pt-6 text-center text-sm font-bold">{c.name}</span>
-              {bets[i] && <span className="absolute right-2 top-2 rounded-full bg-primary px-2 py-0.5 text-xs font-bold text-primary-foreground">🪙 {bets[i]}</span>}
-            </button>
-          );
-        })}
+      {/* ============================================================== */}
+      {/* 12-CARD GAME ARENA GRID                                        */}
+      {/* ============================================================== */}
+      <section className="relative z-10 flex-1 p-3 sm:p-5 flex flex-col justify-between">
+        {/* Top Casino LED Marquee Light Ticker */}
+        <div className="casino-marquee mb-3.5 h-3 w-full rounded-full border border-amber-500/40 opacity-85 shadow-[0_0_15px_rgba(245,158,11,0.5)]" />
+
+        {/* Picture Card Grid */}
+        <div className="grid flex-1 grid-cols-3 gap-3.5 sm:grid-cols-4 md:gap-4.5">
+          {CARDS.map((c, i) => {
+            const isLit = spot === i || winner === i;
+            const hasBet = Boolean(bets[i]);
+
+            return (
+              <button
+                key={i}
+                onClick={() => place(i)}
+                disabled={phase !== "bet"}
+                className={`card-tile group relative overflow-hidden rounded-2xl border text-left transition-all duration-200 select-none ${
+                  isLit
+                    ? "ring-4 ring-primary shadow-[0_0_40px_rgba(245,158,11,0.85)] scale-[1.03] z-20 border-primary"
+                    : hasBet
+                    ? "border-primary/80 ring-2 ring-primary/40 shadow-[0_0_20px_rgba(245,158,11,0.3)] bg-card"
+                    : "border-border/80 bg-card hover:border-primary/50"
+                } ${phase === "result" && winner !== i ? "opacity-35 grayscale-[20%]" : ""}`}
+              >
+                {/* Ambient breathing light on active betting */}
+                {phase === "bet" && (
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent z-10" />
+                )}
+
+                {/* Card Picture */}
+                <img
+                  src={c.img}
+                  alt={c.name}
+                  width={816}
+                  height={816}
+                  loading="lazy"
+                  className="aspect-square w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                />
+
+                {/* Marathi Label Overlay */}
+                <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-background via-background/80 to-transparent pb-2 pt-6 text-center">
+                  <span className="font-display text-base sm:text-lg tracking-wide font-extrabold text-foreground drop-shadow-md">
+                    {c.name}
+                  </span>
+                </div>
+
+                {/* Bet Badge */}
+                {hasBet && (
+                  <span className="absolute right-2 top-2 z-20 rounded-full bg-primary px-2.5 py-1 text-xs font-black text-primary-foreground shadow-gold flex items-center gap-1 animate-bounce-short">
+                    <span>🪙</span> {bets[i]}
+                  </span>
+                )}
+
+                {/* Selection Spotlight Flash Indicator */}
+                {spot === i && (
+                  <div className="absolute inset-0 z-30 bg-primary/25 pointer-events-none animate-pulse" />
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Bottom Casino LED Marquee Light Ticker */}
+        <div className="casino-marquee mt-3.5 h-3 w-full rounded-full border border-amber-500/40 opacity-85 shadow-[0_0_15px_rgba(245,158,11,0.5)]" />
       </section>
 
+      {/* ============================================================== */}
+      {/* WINNER CELEBRATION MODAL                                       */}
+      {/* ============================================================== */}
       {phase === "result" && winner !== null && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-background/70 p-4 backdrop-blur-md">
-          <div className="w-full max-w-md rounded-2xl border-2 border-primary bg-card p-8 text-center shadow-gold">
-            <img src={CARDS[winner]!.img} alt="" className="mx-auto h-24 w-24 rounded-xl" />
-            <p className="mt-4 text-xs font-extrabold tracking-[0.3em] text-primary">WINNING CARD</p>
-            <p className="font-display text-4xl">{CARDS[winner]!.name}</p>
-            <p className="mt-3 text-sm font-semibold text-muted-foreground">
-              {totalBet === 0 ? "NO BETS PLACED THIS ROUND" : won > 0 ? `YOU WON 🪙 ${won}!` : "BETTER LUCK NEXT ROUND"}
-            </p>
+        <div className="fixed inset-0 z-50 grid place-items-center bg-background/80 p-4 backdrop-blur-xl animate-fade-in">
+          <div className="relative w-full max-w-md rounded-3xl border-2 border-primary bg-card/95 p-8 text-center shadow-[0_0_80px_rgba(245,158,11,0.6)]">
+            {/* Victory Ambient Glow Ring */}
+            <div className="absolute -inset-1 rounded-3xl bg-gradient-to-r from-amber-500 via-yellow-300 to-amber-500 opacity-30 blur-xl animate-pulse" />
+
+            <div className="relative z-10">
+              <div className="relative mx-auto h-32 w-32 overflow-hidden rounded-2xl border-2 border-primary shadow-gold">
+                <img src={CARDS[winner]!.img} alt="" className="h-full w-full object-cover" />
+              </div>
+
+              <p className="mt-5 text-xs font-black tracking-[0.35em] text-primary uppercase">
+                WINNING PICTURE
+              </p>
+              <p className="font-display text-5xl font-extrabold mt-1 text-foreground drop-shadow-lg">
+                {CARDS[winner]!.name}
+              </p>
+
+              <div className="mt-4 rounded-xl bg-background/80 border border-border p-3.5">
+                <p className="text-sm font-bold tracking-wide">
+                  {totalBet === 0 ? (
+                    <span className="text-muted-foreground">NO BETS PLACED THIS ROUND</span>
+                  ) : won > 0 ? (
+                    <span className="text-success text-base font-extrabold flex items-center justify-center gap-1.5 animate-bounce">
+                      🎉 CONGRATULATIONS! YOU WON 🪙 {won.toLocaleString("en-IN")}!
+                    </span>
+                  ) : (
+                    <span className="text-destructive font-bold">BETTER LUCK NEXT ROUND</span>
+                  )}
+                </p>
+              </div>
+
+              <p className="mt-3 text-xs text-muted-foreground uppercase tracking-widest">
+                Starting next round in {t}s...
+              </p>
+            </div>
           </div>
         </div>
       )}
     </main>
   );
 }
+
