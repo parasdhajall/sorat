@@ -703,6 +703,52 @@ export default function TvArenaPage() {
           </div>
         </div>
       </footer>
+
+      {/* ============================================================== */}
+      {/* 4. MASSIVE WINNER 3D POP OVERLAY (POPS OUT IN CENTER OF SCREEN)*/}
+      {/* ============================================================== */}
+      {phase === "result" && winner !== null && CARDS[winner] && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in zoom-in-75 duration-300 pointer-events-none">
+          {/* Radial Light Burst & Starbeam */}
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(245,158,11,0.35)_0%,transparent_70%)]" />
+          <div className="laser-sweep-beam absolute -top-[50%] -left-[50%] h-[200%] w-[200%] bg-[conic-gradient(from_0deg_at_50%_50%,rgba(245,158,11,0.3)_0deg,transparent_60deg,transparent_360deg)] animate-spin duration-1000" />
+
+          {/* The Popping Winner Card Container */}
+          <div className="relative z-10 w-full max-w-sm sm:max-w-md bg-gradient-to-b from-amber-500/25 via-zinc-900 to-zinc-950 border-4 border-amber-400 rounded-3xl p-6 sm:p-8 text-center shadow-[0_0_100px_rgba(245,158,11,0.95)] animate-in zoom-in-50 duration-500">
+            
+            {/* Top Glowing Trophy Banner */}
+            <div className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-gradient-gold text-zinc-950 font-display text-sm sm:text-base font-black uppercase tracking-widest shadow-gold mb-3 animate-pulse">
+              <span>🏆</span>
+              <span>LUCKY WINNER • 10X PAYOUT</span>
+              <span>🏆</span>
+            </div>
+
+            {/* Giant Card Picture Frame */}
+            <div className="relative mx-auto w-52 h-52 sm:w-64 sm:h-64 my-2 rounded-2xl overflow-hidden border-4 border-amber-400/90 bg-zinc-950 shadow-[0_0_60px_rgba(245,158,11,0.8)] flex items-center justify-center p-3">
+              <img
+                src={CARDS[winner].img}
+                alt={CARDS[winner].name}
+                className="w-full h-full object-contain filter drop-shadow-2xl scale-110 animate-pulse"
+              />
+            </div>
+
+            {/* Huge Marathi Title */}
+            <h2 className="mt-3 font-display text-5xl sm:text-6xl font-black text-amber-400 tracking-wider drop-shadow-[0_4px_25px_rgba(245,158,11,0.9)]">
+              {CARDS[winner].name}
+            </h2>
+
+            {/* Round & Prize Information */}
+            <div className="mt-4 flex items-center justify-center gap-3 text-xs sm:text-sm font-mono font-bold">
+              <span className="px-3.5 py-1.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300">
+                ROUND {roundId}
+              </span>
+              <span className="px-3.5 py-1.5 rounded-xl bg-emerald-500/25 border border-emerald-500/50 text-emerald-400 font-black tracking-wide">
+                WIN PAYS 10X
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

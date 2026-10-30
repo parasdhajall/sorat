@@ -26,6 +26,7 @@ import {
   UserAccount,
 } from "@/lib/userStore";
 import { ThermalSlipModal } from "@/components/pos/ThermalSlipModal";
+import { PrinterSettingsModal } from "@/components/pos/PrinterSettingsModal";
 
 export const Route = createFileRoute("/agent")({
   head: () => ({
@@ -68,6 +69,10 @@ export default function AgentPage() {
   // Print Slip State
   const [printTicket, setPrintTicket] = useState<ThermalTicket | null>(null);
   const [showSlipModal, setShowSlipModal] = useState(false);
+  const [showPrinterModal, setShowPrinterModal] = useState(false);
+  const [printerName, setPrinterName] = useState(() =>
+    typeof window !== "undefined" ? localStorage.getItem("sorat_printer_name") || "POS-58" : "POS-58"
+  );
 
   // PWA Install State
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -250,6 +255,31 @@ export default function AgentPage() {
     }
   };
 
+  const handleTestPrint = () => {
+    const testTkt: ThermalTicket = {
+      id: "TEST-" + Math.random().toString(36).substring(2, 7).toUpperCase(),
+      dateStr: new Date().toISOString().split("T")[0],
+      timeStr: new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
+      roundId,
+      roundNumber,
+      agentId: agentUser.id,
+      agentName: agentUser.displayName,
+      customerName: "PRINTER TEST SLIP",
+      items: [
+        { cardIndex: 0, cardName: "पतंग (TEST OK)", stake: 10, potentialPayout: 100 },
+        { cardIndex: 11, cardName: "गाय (TEST OK)", stake: 10, potentialPayout: 100 },
+      ],
+      totalStake: 20,
+      totalAmount: 20,
+      maxPotentialPayout: 100,
+      isWinner: false,
+      isClaimed: false,
+      status: "SETTLED",
+    };
+    setPrintTicket(testTkt);
+    setShowSlipModal(true);
+  };
+
   const handleLoginSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
@@ -425,6 +455,16 @@ export default function AgentPage() {
             >
               📺
             </a>
+
+            <button
+              type="button"
+              onClick={() => setShowPrinterModal(true)}
+              className="px-2 py-1 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30 text-xs font-bold transition flex items-center gap-1 shadow-sm"
+              title="Thermal Printer Setup & Bluetooth Connect"
+            >
+              <span>🖨️</span>
+              <span className="text-[10px] hidden sm:inline">Printer</span>
+            </button>
           </div>
         </div>
 
@@ -536,7 +576,17 @@ export default function AgentPage() {
             }`}
           >
             <span>💼</span>
-            <span>My Shift</span>
+            <span>Shift</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowPrinterModal(true)}
+            className="px-2.5 py-1.5 text-center rounded-lg font-bold transition flex items-center justify-center gap-1 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25"
+            title="Printer Connect"
+          >
+            <span>🔌</span>
+            <span>Printer</span>
           </button>
         </div>
       </header>
@@ -823,6 +873,13 @@ export default function AgentPage() {
         ticket={printTicket}
         isOpen={showSlipModal}
         onClose={() => setShowSlipModal(false)}
+      />
+
+      {/* Bluetooth & USB Thermal Printer Settings Modal */}
+      <PrinterSettingsModal
+        isOpen={showPrinterModal}
+        onClose={() => setShowPrinterModal(false)}
+        onTestPrint={handleTestPrint}
       />
     </div>
   );
