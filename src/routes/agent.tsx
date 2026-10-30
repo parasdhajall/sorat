@@ -64,7 +64,7 @@ export default function AgentPage() {
   const [activeChip, setActiveChip] = useState<number>(10);
   const [selectedCards, setSelectedCards] = useState<Record<number, number>>({});
   const [ticketsList, setTicketsList] = useState<ThermalTicket[]>(() => getTickets());
-  const [activeTab, setActiveTab] = useState<"punch" | "tickets" | "shift">("punch");
+  const [activeTab, setActiveTab] = useState<"punch" | "tickets" | "shift" | "printer">("punch");
 
   // Print Slip State
   const [printTicket, setPrintTicket] = useState<ThermalTicket | null>(null);
@@ -458,12 +458,16 @@ export default function AgentPage() {
 
             <button
               type="button"
-              onClick={() => setShowPrinterModal(true)}
-              className="px-2 py-1 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30 text-xs font-bold transition flex items-center gap-1 shadow-sm"
+              onClick={() => {
+                setActiveTab("printer");
+                setShowPrinterModal(true);
+              }}
+              className="px-2.5 py-1 rounded-lg bg-emerald-500/25 border border-emerald-400 text-emerald-300 hover:bg-emerald-500/35 text-xs font-black transition flex items-center gap-1.5 shadow-sm active:scale-95"
               title="Thermal Printer Setup & Bluetooth Connect"
             >
+              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
               <span>🖨️</span>
-              <span className="text-[10px] hidden sm:inline">Printer</span>
+              <span className="text-[11px] font-bold">Printer</span>
             </button>
           </div>
         </div>
@@ -536,18 +540,18 @@ export default function AgentPage() {
         )}
 
         {/* App Sub-Navigation Tabs */}
-        <div className="flex items-center bg-muted/80 p-0.5 rounded-xl border border-border text-xs">
+        <div className="grid grid-cols-4 gap-1 bg-muted/80 p-1 rounded-xl border border-border text-xs">
           <button
             type="button"
             onClick={() => setActiveTab("punch")}
-            className={`flex-1 py-1.5 text-center rounded-lg font-bold transition flex items-center justify-center gap-1 ${
+            className={`py-2 text-center rounded-lg font-bold transition flex flex-col items-center justify-center gap-0.5 ${
               activeTab === "punch"
-                ? "bg-primary text-primary-foreground shadow-sm"
+                ? "bg-primary text-primary-foreground shadow-sm font-black"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            <span>🖨️</span>
-            <span>Punch Bet</span>
+            <span className="text-sm">🎯</span>
+            <span className="text-[10px] leading-tight">Bet Book</span>
           </button>
 
           <button
@@ -556,37 +560,44 @@ export default function AgentPage() {
               setTicketsList(getTickets());
               setActiveTab("tickets");
             }}
-            className={`flex-1 py-1.5 text-center rounded-lg font-bold transition flex items-center justify-center gap-1 ${
+            className={`py-2 text-center rounded-lg font-bold transition flex flex-col items-center justify-center gap-0.5 ${
               activeTab === "tickets"
-                ? "bg-primary text-primary-foreground shadow-sm"
+                ? "bg-primary text-primary-foreground shadow-sm font-black"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            <span>🎟️</span>
-            <span>Tickets ({ticketsList.length})</span>
+            <span className="text-sm">🎟️</span>
+            <span className="text-[10px] leading-tight">Tickets ({ticketsList.length})</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab("shift")}
-            className={`flex-1 py-1.5 text-center rounded-lg font-bold transition flex items-center justify-center gap-1 ${
+            className={`py-2 text-center rounded-lg font-bold transition flex flex-col items-center justify-center gap-0.5 ${
               activeTab === "shift"
-                ? "bg-primary text-primary-foreground shadow-sm"
+                ? "bg-primary text-primary-foreground shadow-sm font-black"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            <span>💼</span>
-            <span>Shift</span>
+            <span className="text-sm">💼</span>
+            <span className="text-[10px] leading-tight">Shift</span>
           </button>
 
           <button
             type="button"
-            onClick={() => setShowPrinterModal(true)}
-            className="px-2.5 py-1.5 text-center rounded-lg font-bold transition flex items-center justify-center gap-1 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25"
-            title="Printer Connect"
+            onClick={() => {
+              setActiveTab("printer");
+              setShowPrinterModal(true);
+            }}
+            className={`py-2 text-center rounded-lg font-bold transition flex flex-col items-center justify-center gap-0.5 border ${
+              activeTab === "printer"
+                ? "bg-emerald-500 text-zinc-950 border-emerald-400 font-black shadow-md"
+                : "bg-emerald-500/15 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/25"
+            }`}
+            title="Printer Connect & Bluetooth Settings"
           >
-            <span>🔌</span>
-            <span>Printer</span>
+            <span className="text-sm">🖨️</span>
+            <span className="text-[10px] leading-tight font-black">Printer</span>
           </button>
         </div>
       </header>
@@ -598,6 +609,35 @@ export default function AgentPage() {
         {/* TAB 1: PUNCH BETS */}
         {activeTab === "punch" && (
           <div className="space-y-3">
+            {/* Thermal Printer Quick-Connect Banner */}
+            <div className="flex items-center justify-between rounded-2xl bg-emerald-950/40 border border-emerald-500/40 p-2.5 shadow-sm">
+              <div className="flex items-center gap-2.5">
+                <div className="h-8 w-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 grid place-items-center text-base">
+                  🖨️
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-black text-emerald-300">
+                      {printerName || "POS-58 Bluetooth"}
+                    </span>
+                    <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 text-[9px] font-mono font-bold">
+                      READY
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-zinc-400 block">
+                    Bluetooth Thermal Slip (58mm / 80mm)
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPrinterModal(true)}
+                className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-black text-xs uppercase shadow transition active:scale-95 flex items-center gap-1 cursor-pointer"
+              >
+                <span>⚙️</span> Connect
+              </button>
+            </div>
+
             {/* Customer Name & Chips Selector */}
             <div className="space-y-2 bg-card p-2.5 rounded-2xl border border-border shadow-sm">
               <div className="relative">
@@ -687,6 +727,28 @@ export default function AgentPage() {
         {/* TAB 2: TICKETS LIST & CLAIM INAM */}
         {activeTab === "tickets" && (
           <div className="space-y-2.5">
+            {/* Quick Printer Status Banner in Tickets View */}
+            <div className="flex items-center justify-between rounded-xl bg-card border border-border p-2.5 shadow-sm text-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-base">🖨️</span>
+                <div>
+                  <span className="font-bold text-foreground text-xs block">
+                    Printer: {printerName || "POS-58"}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground block">
+                    Thermal Slip Ready (58mm / 80mm)
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPrinterModal(true)}
+                className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px] font-black uppercase hover:bg-emerald-500/30 transition active:scale-95 cursor-pointer"
+              >
+                ⚙️ Printer Setup
+              </button>
+            </div>
+
             <div className="flex items-center justify-between px-1">
               <span className="text-xs font-bold text-muted-foreground">
                 Recent Issued Slips ({ticketsList.length})
@@ -818,6 +880,98 @@ export default function AgentPage() {
             </div>
           </div>
         )}
+
+        {/* TAB 4: DEDICATED THERMAL PRINTER SETTINGS & BLUETOOTH CONNECT */}
+        {activeTab === "printer" && (
+          <div className="space-y-3">
+            <div className="rounded-3xl border border-emerald-500/40 bg-zinc-900/90 p-4 space-y-4 shadow-xl">
+              <div className="flex items-center justify-between border-b border-border/80 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="h-10 w-10 rounded-2xl bg-gradient-gold grid place-items-center text-zinc-950 font-black text-xl shadow-gold">
+                    🖨️
+                  </div>
+                  <div>
+                    <h3 className="font-display text-base font-black text-foreground leading-tight">
+                      Thermal Printer Connect
+                    </h3>
+                    <span className="text-[10px] text-muted-foreground block leading-tight">
+                      Bluetooth & USB POS Settings
+                    </span>
+                  </div>
+                </div>
+                <span className="px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase font-mono border border-emerald-500/30 animate-pulse">
+                  ONLINE
+                </span>
+              </div>
+
+              {/* Active Printer Badge */}
+              <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-3 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <span className="h-3 w-3 rounded-full bg-emerald-400 animate-pulse" />
+                  <div>
+                    <span className="text-xs font-black text-emerald-300 block">
+                      {printerName || "POS-58 Bluetooth Thermal"}
+                    </span>
+                    <span className="text-[10px] text-emerald-400/80 font-mono block">
+                      ESC/POS Standard • Ready to Print
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowPrinterModal(true)}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-500 text-zinc-950 font-black text-[10px] uppercase shadow hover:brightness-110 active:scale-95 transition cursor-pointer"
+                >
+                  Configure
+                </button>
+              </div>
+
+              {/* Big 1-Tap Connect Bluetooth Printer Button */}
+              <button
+                type="button"
+                onClick={() => setShowPrinterModal(true)}
+                className="w-full py-3.5 rounded-2xl bg-gradient-gold text-zinc-950 font-black text-sm uppercase tracking-wide shadow-gold hover:brightness-110 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <span>🔌</span>
+                <span>SCAN & PAIR BLUETOOTH PRINTER</span>
+              </button>
+
+              {/* Test Print Slip Button */}
+              <button
+                type="button"
+                onClick={handleTestPrint}
+                className="w-full py-3 rounded-2xl border border-border bg-card hover:bg-muted text-foreground font-black text-xs transition flex items-center justify-center gap-2 active:scale-95 cursor-pointer shadow-sm"
+              >
+                <span>🧾</span>
+                <span>PRINT TEST ALIGNMENT SLIP</span>
+              </button>
+
+              {/* Step-by-Step Hindi Guide */}
+              <div className="rounded-2xl bg-background/80 border border-border p-3.5 text-xs text-muted-foreground space-y-2">
+                <span className="font-bold text-primary block uppercase tracking-wider text-[11px] flex items-center gap-1">
+                  <span>💡</span> Bluetooth Thermal Printer Kaise Connect Karein:
+                </span>
+                <p className="leading-relaxed">
+                  1. Apne <strong>Bluetooth Thermal Printer</strong> ka power button ON karein.
+                </p>
+                <p className="leading-relaxed">
+                  2. Apne mobile phone ki <strong>Bluetooth Settings</strong> me jayein aur naya device pair karein (Printer name: <em>POS-58</em>, <em>MTP-2</em>, <em>InnerPrinter</em>, PIN: <strong>0000</strong> ya <strong>1234</strong>).
+                </p>
+                <p className="leading-relaxed">
+                  3. Pair hote hi upar <strong>"PRINT TEST ALIGNMENT SLIP"</strong> dabayein, parchi turant bahar aa jayegi!
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab("punch")}
+                className="w-full py-2.5 rounded-xl bg-muted text-muted-foreground hover:text-foreground font-bold text-xs transition cursor-pointer"
+              >
+                ← Wapas Bet Counter Par Jayein
+              </button>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* ============================================================== */}
@@ -848,23 +1002,38 @@ export default function AgentPage() {
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={handlePunchAndPrint}
-            disabled={totalTicketStake <= 0 || !isBalanceEnough || phase !== "bet"}
-            className="w-full py-3.5 px-4 rounded-2xl bg-gradient-gold text-primary-foreground font-display text-sm font-black shadow-gold hover:opacity-90 transition active:scale-95 flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-          >
-            <span>🖨️</span>
-            <span>
-              {phase !== "bet"
-                ? "BETTING CLOSED (WAIT FOR ROUND)"
-                : totalTicketStake <= 0
-                ? "SELECT CARDS TO BET"
-                : !isBalanceEnough
-                ? "INSUFFICIENT BALANCE (RECHARGE)"
-                : `PUNCH BET & PRINT SLIP (₹${totalTicketStake})`}
-            </span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab("printer");
+                setShowPrinterModal(true);
+              }}
+              className="h-12 w-14 rounded-2xl border border-emerald-500/40 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 font-bold flex flex-col items-center justify-center shrink-0 transition active:scale-95 shadow-sm cursor-pointer"
+              title="Bluetooth Printer Setup"
+            >
+              <span className="text-base leading-none">🖨️</span>
+              <span className="text-[8px] font-black uppercase mt-0.5 tracking-tight">Printer</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handlePunchAndPrint}
+              disabled={totalTicketStake <= 0 || !isBalanceEnough || phase !== "bet"}
+              className="flex-1 py-3.5 px-4 rounded-2xl bg-gradient-gold text-primary-foreground font-display text-sm font-black shadow-gold hover:opacity-90 transition active:scale-95 flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <span>🎟️</span>
+              <span>
+                {phase !== "bet"
+                  ? "BETTING CLOSED (WAIT FOR ROUND)"
+                  : totalTicketStake <= 0
+                  ? "SELECT CARDS TO BET"
+                  : !isBalanceEnough
+                  ? "INSUFFICIENT BALANCE (RECHARGE)"
+                  : `PUNCH BET & PRINT SLIP (₹${totalTicketStake})`}
+              </span>
+            </button>
+          </div>
         </footer>
       )}
 
