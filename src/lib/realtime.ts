@@ -251,6 +251,10 @@ export class TVHostSync {
     });
   }
 
+  connect() {
+    this.start();
+  }
+
   start() {
     this.isDestroyed = false;
     this.onStatusChange("connected");
