@@ -72,6 +72,8 @@ describe("User Store & Financial Profit Engine", () => {
     expect(settledBet.status).toBe("SETTLED");
     expect(settledBet.isWin).toBe(true);
     expect(settledBet.payout).toBe(1000);
+    // In Prepaid Burn model, user's wagering balance is consumed from 1000 down to 900 (not re-inflated)
+    expect(updated.balance).toBe(900);
 
     const stats = getUserProfitStats(updated);
     // Net profit from bets: 1000 won - 100 staked = +900

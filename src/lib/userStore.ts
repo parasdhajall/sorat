@@ -714,12 +714,14 @@ export function recordUserBet(
 /**
  * Settles all pending bets for a round when the winner card is declared.
  * Winning payout = 10x stake.
- * Credits user balance for winnings.
+ * In Prepaid Burn Model, creditBalance is false by default so the agent wallet strictly
+ * consumes downwards without auto-inflating, requiring top-up when empty!
  */
 export function settleRoundBets(
   roundId: string,
   winningCardIndex: number,
-  winningCardName: string
+  winningCardName: string,
+  creditBalance = false
 ): void {
   const users = getUsers();
   let changed = false;
@@ -735,7 +737,7 @@ export function settleRoundBets(
           const isWin = bet.cardIndex === winningCardIndex;
           const payout = isWin ? bet.stake * 10 : 0;
 
-          if (isWin) {
+          if (isWin && creditBalance) {
             user.balance += payout;
           }
 

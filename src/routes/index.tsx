@@ -401,12 +401,13 @@ function Index() {
       // Book accounting payouts
       if (prize > 0) {
         setTotalPayouts((p) => p + prize);
-        setAgentBalance((b) => b + prize);
+        // Note: In Prepaid Burn Model, agent's wagering points balance is NOT re-inflated upon wins.
+        // Balance strictly consumes down to 0, requiring top-up from Owner!
       }
 
-      // Settle bets in userStore
+      // Settle bets in userStore (Prepaid Burn Model: creditBalance = false)
       try {
-        settleRoundBets(roundId, w, CARDS[w].name);
+        settleRoundBets(roundId, w, CARDS[w].name, false);
         const updated = getActiveUser();
         setActiveUser(updated);
         setAgentBalance(updated.balance);
