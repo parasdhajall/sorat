@@ -61,10 +61,8 @@ export function ThermalSlipModal({
 
           {/* Realistic Paper Thermal Receipt Card */}
           <div className="bg-white text-black p-3.5 rounded-xl border border-zinc-300 font-mono text-[11px] leading-tight space-y-2 shadow-inner select-all">
-            <div className="text-center space-y-0.5 border-b border-dashed border-zinc-400 pb-2">
+            <div className="text-center border-b border-dashed border-zinc-400 pb-2">
               <div className="font-black text-sm tracking-wider">SORAT LIVE ARENA</div>
-              <div className="text-[10px] text-zinc-600">OFFICIAL COUNTER BET SLIP</div>
-              <div className="text-[9px] text-zinc-500 font-bold">12-PICTURE TRADITIONAL GAME</div>
             </div>
 
             <div className="space-y-1 text-[10px] pt-1">
@@ -104,15 +102,11 @@ export function ThermalSlipModal({
               ))}
             </div>
 
-            {/* Totals & Payout Rule */}
+            {/* Totals */}
             <div className="space-y-1 text-[11px]">
               <div className="flex justify-between font-black text-xs">
                 <span>TOTAL STAKE:</span>
                 <span>₹{ticket.totalAmount}</span>
-              </div>
-              <div className="flex justify-between text-[10px] text-zinc-600">
-                <span>PAYOUT RATIO:</span>
-                <span className="font-bold text-zinc-800">10X PAYOUT</span>
               </div>
               <div className="flex justify-between text-[10px] font-bold text-zinc-800">
                 <span>MAX WIN POTENTIAL:</span>
@@ -127,10 +121,6 @@ export function ThermalSlipModal({
               </div>
               <div className="text-[9px] text-zinc-600 tracking-wider">
                 *{ticket.barcode}*
-              </div>
-              <div className="text-[8px] text-zinc-500 pt-1 leading-tight">
-                Watch live result on Big TV Arena display.<br />
-                Claim winning ticket at counter within 24 hours.
               </div>
             </div>
           </div>
@@ -169,7 +159,6 @@ export function ThermalSlipModal({
       <div className="thermal-slip-print-area">
         <div style={{ textAlign: "center", borderBottom: "1px dashed #000", paddingBottom: "4px", marginBottom: "4px" }}>
           <div style={{ fontWeight: 900, fontSize: "14px", letterSpacing: "1px" }}>SORAT LIVE ARENA</div>
-          <div style={{ fontSize: "10px", fontWeight: "bold" }}>OFFICIAL BET SLIP (पर्ची)</div>
         </div>
 
         <div style={{ fontSize: "10px", lineHeight: 1.3 }}>
@@ -198,10 +187,6 @@ export function ThermalSlipModal({
             <span>TOTAL BET:</span>
             <span>Rs {ticket.totalAmount}</span>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px" }}>
-            <span>PAYOUT:</span>
-            <span>10X ON WIN</span>
-          </div>
         </div>
 
         <div style={{ textAlign: "center", borderTop: "1px dashed #000", marginTop: "6px", paddingTop: "5px" }}>
@@ -209,10 +194,6 @@ export function ThermalSlipModal({
             ||| | ||||| || |||
           </div>
           <div style={{ fontSize: "9px" }}>*{ticket.barcode}*</div>
-          <div style={{ fontSize: "8px", marginTop: "4px" }}>
-            Live result on TV display.<br />
-            Valid for 24 hours.
-          </div>
         </div>
       </div>
     </>

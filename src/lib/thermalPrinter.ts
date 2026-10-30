@@ -184,9 +184,7 @@ export function buildEscPosBytes(ticket: ThermalTicket, paperWidth: "58mm" | "80
   push(0x1d, 0x21, 0x11); // Double width & height
   line("SORAT ARENA");
   push(0x1d, 0x21, 0x00); // Normal size
-  line("OFFICIAL BET RECEIPT");
   push(0x1b, 0x45, 0x00); // Bold OFF
-  line("12-Picture Traditional Game");
   line(divider);
 
   // 3. Left Align Meta Info
@@ -232,9 +230,6 @@ export function buildEscPosBytes(ticket: ThermalTicket, paperWidth: "58mm" | "80
   // 6. Barcode & Footer
   push(0x1b, 0x61, 0x01); // Center align
   line(`*${ticket.barcode}*`);
-  line("Watch Live Result on TV Screen");
-  line("Claim within 24 Hours");
-  line("=== THANK YOU ===");
 
   // 7. Feed 4 lines & Partial Paper Cut
   push(0x0a, 0x0a, 0x0a, 0x0a);
@@ -325,3 +320,4 @@ export async function executeDirectPrint(
 
   return { method: "system_print", success: false };
 }
+
