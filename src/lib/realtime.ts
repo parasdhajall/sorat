@@ -186,6 +186,9 @@ export type GameMessage =
   | { type: "RECHARGE_AGENT"; amount: number }
   | { type: "SET_AGENT_BALANCE"; balance: number }
   | { type: "RESET_FINANCIALS" }
+  | { type: "USER_DEPOSIT"; userId: string; amount: number; note?: string }
+  | { type: "SWITCH_ACTIVE_USER"; userId: string }
+  | { type: "SYNC_USERS" }
   | {
       type: "SYNC_FROM_TV";
       roundNumber: number;

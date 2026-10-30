@@ -11,6 +11,14 @@ import {
   RESULT_DURATION,
   ROUND_DURATION,
 } from "@/lib/realtime";
+import {
+  getActiveUser,
+  getUsers,
+  setActiveUserId,
+  recordUserBet,
+  settleRoundBets,
+  UserAccount,
+} from "@/lib/userStore";
 import kite from "@/assets/kite.jpg";
 import umbrella from "@/assets/umbrella.jpg";
 import ball from "@/assets/ball.jpg";
@@ -56,13 +64,15 @@ function Index() {
   const [t, setT] = useState(initialSync.timeLeft);
   const [stake, setStake] = useState(10);
 
+  // User Account Management State
+  const [activeUser, setActiveUser] = useState<UserAccount>(() => getActiveUser());
+  const [allUsers, setAllUsers] = useState<UserAccount[]>(() => getUsers());
+  const [showUserModal, setShowUserModal] = useState(false);
+
   // Agent Wallet & Business Model Financials (Persisted in localStorage)
   const [agentBalance, setAgentBalance] = useState<number>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("sorat_agent_balance");
-      if (saved) return Number(saved);
-    }
-    return 1000;
+    const u = getActiveUser();
+    return u ? u.balance : 1000;
   });
   const [totalTurnover, setTotalTurnover] = useState<number>(() => {
     if (typeof window !== "undefined") {
@@ -120,6 +130,18 @@ function Index() {
     }
   }, [totalPayouts]);
 
+  // Synchronize User Accounts from storage / admin actions
+  useEffect(() => {
+    const handleSync = () => {
+      const u = getActiveUser();
+      setActiveUser(u);
+      setAgentBalance(u.balance);
+      setAllUsers(getUsers());
+    };
+    window.addEventListener("storage", handleSync);
+    return () => window.removeEventListener("storage", handleSync);
+  }, []);
+
   const houseProfit = totalTurnover - totalPayouts;
   const profitPercentage = totalTurnover > 0 ? Math.round(((totalTurnover - totalPayouts) / totalTurnover) * 100) : 100;
 
@@ -152,7 +174,7 @@ function Index() {
       gain.connect(ctx.destination);
       osc.start(now);
       osc.stop(now + duration + 0.02);
-    } catch {}
+    } catch { }
   };
 
   const playVictoryFanfare = () => {
@@ -174,7 +196,7 @@ function Index() {
         osc.start(now);
         osc.stop(now + 0.5);
       });
-    } catch {}
+    } catch { }
   };
 
   const toggleSound = () => {
@@ -188,10 +210,10 @@ function Index() {
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(() => {});
+      document.documentElement.requestFullscreen().catch(() => { });
       setIsFullscreen(true);
     } else {
-      document.exitFullscreen().catch(() => {});
+      document.exitFullscreen().catch(() => { });
       setIsFullscreen(false);
     }
   };
@@ -259,6 +281,17 @@ function Index() {
           return next;
         });
         playBeep(880, 0.15, "sine");
+      } else if (msg.type === "SWITCH_ACTIVE_USER") {
+        setActiveUserId(msg.userId);
+        const u = getActiveUser();
+        setActiveUser(u);
+        setAgentBalance(u.balance);
+        setAllUsers(getUsers());
+      } else if (msg.type === "SYNC_USERS") {
+        const u = getActiveUser();
+        setActiveUser(u);
+        setAgentBalance(u.balance);
+        setAllUsers(getUsers());
       } else if (msg.type === "RESET_FINANCIALS") {
         setTotalTurnover(0);
         setTotalPayouts(0);
@@ -371,6 +404,16 @@ function Index() {
         setAgentBalance((b) => b + prize);
       }
 
+      // Settle bets in userStore
+      try {
+        settleRoundBets(roundId, w, CARDS[w].name);
+        const updated = getActiveUser();
+        setActiveUser(updated);
+        setAgentBalance(updated.balance);
+      } catch (e) {
+        console.error(e);
+      }
+
       playVictoryFanfare();
     }
   }, [phase, roundNumber, forcedWinner, bets, totalTurnover, totalPayouts, soundEnabled]);
@@ -413,12 +456,27 @@ function Index() {
 
   // User / Operator places bet by clicking cards
   const place = (i: number) => {
-    if (phase !== "bet" || agentBalance < stake) return;
-    const nextAgentBalance = agentBalance - stake;
+    if (phase !== "bet" || activeUser.balance < stake) return;
+    const nextAgentBalance = activeUser.balance - stake;
     const nextTurnover = totalTurnover + stake;
     const newBets = { ...bets, [i]: (bets[i] ?? 0) + stake };
     const nextProfit = nextTurnover - totalPayouts;
     const nextProfitPct = nextTurnover > 0 ? Math.round((nextProfit / nextTurnover) * 100) : 100;
+
+    // Record bet under active user
+    try {
+      recordUserBet(activeUser.id, {
+        roundId,
+        roundNumber,
+        cardIndex: i,
+        cardName: CARDS[i].name,
+        stake,
+      });
+      const updated = getActiveUser();
+      setActiveUser(updated);
+    } catch (e) {
+      console.error(e);
+    }
 
     setAgentBalance(nextAgentBalance);
     setBets(newBets);
@@ -451,9 +509,8 @@ function Index() {
 
   return (
     <main
-      className={`relative h-screen max-h-screen w-full overflow-hidden bg-background text-foreground flex flex-col md:flex-row ${
-        hurry ? "shadow-[inset_0_0_90px_rgba(239,68,68,0.35)]" : ""
-      }`}
+      className={`relative h-screen max-h-screen w-full overflow-hidden bg-background text-foreground flex flex-col md:flex-row ${hurry ? "shadow-[inset_0_0_90px_rgba(239,68,68,0.35)]" : ""
+        }`}
     >
       {/* ============================================================== */}
       {/* BIG SCREEN AMBIENT LIGHTING & DYNAMIC EFFECTS LAYER            */}
@@ -500,14 +557,20 @@ function Index() {
               </div>
             </div>
 
-            {/* Big Screen Quick Actions: Sound & Fullscreen */}
+            {/* Big Screen Quick Actions: Sound & Fullscreen & Admin */}
             <div className="flex items-center gap-1">
+              <a
+                href="/admin"
+                title="Admin Control & User Accounts Panel"
+                className="p-1.5 rounded-lg text-xs font-bold transition border bg-primary/10 border-primary/30 text-primary hover:bg-primary/20"
+              >
+                ⚙️
+              </a>
               <button
                 onClick={toggleSound}
                 title={soundEnabled ? "Mute Sound" : "Enable Sound FX"}
-                className={`p-1.5 rounded-lg text-xs font-bold transition border ${
-                  soundEnabled ? "bg-primary/20 border-primary text-primary" : "bg-muted border-border text-muted-foreground hover:text-foreground"
-                }`}
+                className={`p-1.5 rounded-lg text-xs font-bold transition border ${soundEnabled ? "bg-primary/20 border-primary text-primary" : "bg-muted border-border text-muted-foreground hover:text-foreground"
+                  }`}
               >
                 {soundEnabled ? "🔊" : "🔇"}
               </button>
@@ -521,28 +584,45 @@ function Index() {
             </div>
           </div>
 
-          {/* Agent Wallet Balance Status */}
-          <div className="flex items-center justify-between rounded-xl border border-border/80 bg-card/80 px-3 py-2 shadow-sm">
-            <div className="space-y-0.5">
-              <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Agent Wallet</span>
-              <div className="text-base font-display text-primary flex items-center gap-1 leading-none">
-                <span>🪙</span> ₹{agentBalance.toLocaleString("en-IN")}
+          {/* Active Player Account & Wallet Balance Status */}
+          <div className="rounded-xl border border-border/80 bg-card/80 p-2.5 shadow-sm space-y-1.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-xs">👤</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground shrink-0">
+                  Player:
+                </span>
+                <span className="text-xs font-bold text-foreground truncate">
+                  {activeUser.displayName}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setAllUsers(getUsers());
+                  setShowUserModal(true);
+                }}
+                className="shrink-0 rounded-lg bg-primary/15 border border-primary/30 px-2 py-0.5 text-[10px] font-bold text-primary hover:bg-primary/25 transition active:scale-95"
+              >
+                Switch Player
+              </button>
+            </div>
+            <div className="flex items-center justify-between pt-1 border-t border-border/40">
+              <span className="text-[10px] uppercase font-bold text-muted-foreground">Wallet Balance:</span>
+              <div className="text-base font-display font-black text-primary flex items-center gap-1 leading-none">
+                <span>🪙</span> ₹{activeUser.balance.toLocaleString("en-IN")}
               </div>
             </div>
-            <span className="rounded-full bg-emerald-500/20 border border-emerald-500/40 px-2 py-0.5 text-[10px] font-extrabold text-emerald-400 tracking-wide">
-              ACTIVE
-            </span>
           </div>
 
           {/* Animated Big-Screen Countdown Gauge */}
           <div
-            className={`relative overflow-hidden rounded-xl border p-2.5 text-center transition-all duration-300 ${
-              hurry
+            className={`relative overflow-hidden rounded-xl border p-2.5 text-center transition-all duration-300 ${hurry
                 ? "border-destructive bg-destructive/10 shadow-[0_0_25px_rgba(239,68,68,0.35)]"
                 : phase === "select"
-                ? "border-primary bg-primary/10 shadow-gold"
-                : "border-border bg-card/90 shadow-md"
-            }`}
+                  ? "border-primary bg-primary/10 shadow-gold"
+                  : "border-border bg-card/90 shadow-md"
+              }`}
           >
             {/* Round Badge Indicator */}
             <div className="mb-2 flex items-center justify-between">
@@ -556,9 +636,8 @@ function Index() {
 
             {/* Ambient Timer Glow Effect */}
             <div
-              className={`relative mx-auto h-14 w-14 rounded-full flex items-center justify-center ${
-                hurry ? "timer-glow-urgent" : "timer-glow-normal"
-              }`}
+              className={`relative mx-auto h-14 w-14 rounded-full flex items-center justify-center ${hurry ? "timer-glow-urgent" : "timer-glow-normal"
+                }`}
             >
               <svg viewBox="0 0 36 36" className="h-14 w-14 -rotate-90">
                 <circle cx="18" cy="18" r="15" fill="none" className="stroke-muted/40" strokeWidth="3" />
@@ -573,8 +652,8 @@ function Index() {
                     hurry
                       ? "stroke-destructive transition-all duration-300"
                       : phase === "bet"
-                      ? "stroke-primary transition-all duration-300"
-                      : "stroke-yellow-400 animate-spin"
+                        ? "stroke-primary transition-all duration-300"
+                        : "stroke-yellow-400 animate-spin"
                   }
                   strokeDasharray={`${(t / total) * 94} 94`}
                 />
@@ -593,8 +672,8 @@ function Index() {
                   ? "⏳ HURRY UP! CLOSING"
                   : "🟢 BETS OPEN"
                 : phase === "select"
-                ? "⚡ SELECTING LUCKY CARD"
-                : "🏆 WINNER ANNOUNCED"}
+                  ? "⚡ SELECTING LUCKY CARD"
+                  : "🏆 WINNER ANNOUNCED"}
             </p>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               {phase === "bet"
@@ -602,8 +681,8 @@ function Index() {
                   ? "Time is running out!"
                   : "Pick cards & test your luck"
                 : phase === "select"
-                ? "Wheel is spinning..."
-                : "Next round soon"}
+                  ? "Wheel is spinning..."
+                  : "Next round soon"}
             </p>
           </div>
 
@@ -630,11 +709,10 @@ function Index() {
                     setStake(s);
                     playBeep(480, 0.05, "sine");
                   }}
-                  className={`rounded-lg py-1.5 text-xs font-extrabold transition shadow-sm ${
-                    s === stake
+                  className={`rounded-lg py-1.5 text-xs font-extrabold transition shadow-sm ${s === stake
                       ? "bg-primary text-primary-foreground shadow-gold ring-2 ring-primary/50"
                       : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
-                  }`}
+                    }`}
                 >
                   {s}
                 </button>
@@ -664,15 +742,14 @@ function Index() {
               <span>🎰</span> ROUND {roundId}
             </span>
             <span
-              className={`px-2 py-0.5 rounded-md text-[11px] sm:text-xs font-black tracking-wide ${
-                hurry
+              className={`px-2 py-0.5 rounded-md text-[11px] sm:text-xs font-black tracking-wide ${hurry
                   ? "bg-destructive/20 text-destructive border border-destructive/40 animate-pulse"
                   : phase === "bet"
-                  ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
-                  : phase === "select"
-                  ? "bg-amber-500/20 text-amber-400 border border-amber-500/40 animate-pulse"
-                  : "bg-purple-500/20 text-purple-400 border border-purple-500/40"
-              }`}
+                    ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+                    : phase === "select"
+                      ? "bg-amber-500/20 text-amber-400 border border-amber-500/40 animate-pulse"
+                      : "bg-purple-500/20 text-purple-400 border border-purple-500/40"
+                }`}
             >
               {phase === "bet" ? `⏳ ${t}s BETS OPEN` : phase === "select" ? `⚡ ${t}s WHEEL SPINNING` : `🏆 ${t}s WINNER`}
             </span>
@@ -704,13 +781,12 @@ function Index() {
                 key={i}
                 onClick={() => place(i)}
                 disabled={phase !== "bet"}
-                className={`card-tile group relative overflow-hidden rounded-xl sm:rounded-2xl border text-left transition-all duration-200 select-none h-full w-full min-h-0 flex flex-col items-center justify-center p-1 active:scale-95 ${
-                  isLit
+                className={`card-tile group relative overflow-hidden rounded-xl sm:rounded-2xl border text-left transition-all duration-200 select-none h-full w-full min-h-0 flex flex-col items-center justify-center p-1 active:scale-95 ${isLit
                     ? "ring-4 ring-primary shadow-[0_0_35px_rgba(245,158,11,0.85)] scale-[1.02] z-20 border-primary"
                     : hasBet
-                    ? "border-primary/80 ring-2 ring-primary/40 shadow-[0_0_15px_rgba(245,158,11,0.25)] bg-card"
-                    : "border-border/80 bg-card hover:border-primary/50"
-                } ${phase === "result" && winner !== i ? "opacity-35 grayscale-[20%]" : ""}`}
+                      ? "border-primary/80 ring-2 ring-primary/40 shadow-[0_0_15px_rgba(245,158,11,0.25)] bg-card"
+                      : "border-border/80 bg-card hover:border-primary/50"
+                  } ${phase === "result" && winner !== i ? "opacity-35 grayscale-[20%]" : ""}`}
               >
                 {/* Card Picture - Perfectly contained to never exceed row height */}
                 <img
@@ -785,6 +861,117 @@ function Index() {
               <p className="mt-2.5 text-[10px] text-muted-foreground uppercase tracking-widest">
                 Starting next round in {t}s...
               </p>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ============================================================== */}
+      {/* SWITCH ACTIVE PLAYER ACCOUNT MODAL                             */}
+      {/* ============================================================== */}
+      {showUserModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-border/60 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">👥</span>
+                <div>
+                  <h3 className="font-display text-base font-black text-foreground">
+                    Switch Player Account
+                  </h3>
+                  <span className="text-[10px] text-muted-foreground block">
+                    Choose which user places bets on this screen
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowUserModal(false)}
+                className="text-muted-foreground hover:text-foreground text-sm p-1 rounded-lg hover:bg-muted"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+              {allUsers.map((u) => {
+                const isActive = u.id === activeUser.id;
+                return (
+                  <div
+                    key={u.id}
+                    onClick={() => {
+                      setActiveUserId(u.id);
+                      setActiveUser(u);
+                      setAgentBalance(u.balance);
+                      setShowUserModal(false);
+                      hostSyncRef.current?.broadcast({
+                        type: "SYNC_FROM_TV",
+                        roundNumber,
+                        roundId,
+                        phase,
+                        t,
+                        bets,
+                        pool,
+                        winner,
+                        forcedWinner,
+                        agentBalance: u.balance,
+                        totalTurnover,
+                        totalPayouts,
+                        houseProfit,
+                        profitPercentage,
+                      });
+                    }}
+                    className={`p-3 rounded-xl border cursor-pointer transition flex items-center justify-between ${isActive
+                        ? "border-primary bg-primary/10 shadow-sm"
+                        : "border-border/80 bg-background/60 hover:border-primary/40 hover:bg-background/90"
+                      }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="h-8 w-8 rounded-full bg-gradient-gold grid place-items-center text-xs font-bold text-primary-foreground font-display">
+                        {u.displayName.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-display text-sm font-extrabold text-foreground">
+                            {u.displayName}
+                          </span>
+                          {isActive && (
+                            <span className="rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 px-1.5 py-0.2 text-[8px] font-black">
+                              ACTIVE
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[10px] font-mono text-muted-foreground block">
+                          @{u.username} {u.phone ? `• ${u.phone}` : ""}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="text-right">
+                      <span className="text-[9px] uppercase font-bold text-muted-foreground block">Balance</span>
+                      <span className="text-sm font-display font-black text-primary">
+                        ₹{u.balance.toLocaleString("en-IN")}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="pt-2 border-t border-border/60 flex items-center justify-between">
+              <a
+                href="/admin"
+                className="text-xs font-bold text-primary hover:underline flex items-center gap-1"
+              >
+                <span>⚙️</span>
+                <span>Open Full Admin Panel & Deposit</span>
+              </a>
+              <button
+                type="button"
+                onClick={() => setShowUserModal(false)}
+                className="py-1.5 px-3 rounded-xl bg-muted text-muted-foreground hover:text-foreground text-xs font-bold"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>
