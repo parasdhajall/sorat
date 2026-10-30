@@ -59,8 +59,27 @@ export default function AgentPage() {
   const [printTicket, setPrintTicket] = useState<ThermalTicket | null>(null);
   const [showSlipModal, setShowSlipModal] = useState(false);
 
+  // PWA Install State
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isStandalone, setIsStandalone] = useState(false);
+
   const clientSyncRef = useRef<AdminClientSync | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+
+  // Detect standalone PWA mode
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const isStandaloneMode = window.matchMedia("(display-mode: standalone)").matches || (window.navigator as any).standalone;
+      setIsStandalone(Boolean(isStandaloneMode));
+
+      const handler = (e: any) => {
+        e.preventDefault();
+        setDeferredPrompt(e);
+      };
+      window.addEventListener("beforeinstallprompt", handler);
+      return () => window.removeEventListener("beforeinstallprompt", handler);
+    }
+  }, []);
 
   // Sync Timer
   useEffect(() => {
@@ -292,6 +311,38 @@ export default function AgentPage() {
             </span>
           </div>
         </div>
+
+        {/* PWA App Install Banner */}
+        {!isStandalone && (
+          <div className="flex items-center justify-between rounded-xl bg-gradient-to-r from-amber-500/20 via-primary/15 to-amber-500/10 border border-primary/30 px-3 py-1.5 shadow-sm text-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-base">📲</span>
+              <div>
+                <span className="font-bold text-foreground block text-[11px] leading-tight">
+                  Phone me App Install Karein
+                </span>
+                <span className="text-[9px] text-muted-foreground block leading-tight">
+                  Bina browser ke screen par App icon ban jayega
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={async () => {
+                if (deferredPrompt) {
+                  deferredPrompt.prompt();
+                  const { outcome } = await deferredPrompt.userChoice;
+                  if (outcome === "accepted") setDeferredPrompt(null);
+                } else {
+                  alert("Apne phone me Chrome ke 3-dots (⋮) par click karein aur 'Install app' ya 'Add to Home screen' dabayein!");
+                }
+              }}
+              className="px-2.5 py-1 rounded-lg bg-primary text-primary-foreground font-black text-[10px] uppercase shadow hover:brightness-110 active:scale-95 transition"
+            >
+              Install App
+            </button>
+          </div>
+        )}
 
         {/* App Sub-Navigation Tabs */}
         <div className="flex items-center bg-muted/80 p-0.5 rounded-xl border border-border text-xs">
@@ -625,3 +676,4 @@ export default function AgentPage() {
     </div>
   );
 }
+
