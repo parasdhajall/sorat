@@ -1,41 +1,736 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="hi">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Sorat Agent POS</title>
+  <title>Sorat Agent POS - Counter Booking</title>
+  <link rel="stylesheet" href="./assets/styles-Dj4XmqHs.css" />
   <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body {
       background-color: #09090b;
       color: #f4f4f5;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       margin: 0;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      text-align: center;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      min-height: 100vh;
+      overflow-x: hidden;
     }
-    .spinner {
-      width: 48px;
-      height: 48px;
-      border: 4px solid rgba(245, 158, 11, 0.2);
-      border-top-color: #f59e0b;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-      margin-bottom: 16px;
+    .gold-gradient {
+      background: linear-gradient(135deg, #f59e0b, #d97706);
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    .gold-shadow {
+      box-shadow: 0 4px 20px rgba(245, 158, 11, 0.35);
+    }
+
+    /* Print Slip Styles (58mm Thermal Receipt) */
+    @media print {
+      body * { visibility: hidden !important; }
+      #printableSlip, #printableSlip * { visibility: visible !important; }
+      #printableSlip {
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 58mm !important;
+        margin: 0 !important;
+        padding: 4mm !important;
+        background: #fff !important;
+        color: #000 !important;
+        font-family: 'Courier New', monospace !important;
+        font-size: 11px !important;
+        line-height: 1.25 !important;
+      }
+      .no-print { display: none !important; }
+    }
   </style>
 </head>
-<body>
-  <div class="spinner"></div>
-  <h2 style="color: #f59e0b; margin: 0 0 6px 0;">SORAT POS</h2>
-  <p style="color: #a1a1aa; font-size: 13px; margin: 0;">Opening Counter Terminal...</p>
+<body class="bg-zinc-950 text-zinc-100 flex flex-col justify-between min-h-screen max-w-md mx-auto border-x border-zinc-800 shadow-2xl">
+
+  <!-- ============================================================== -->
+  <!-- SCREEN 1: AGENT LOGIN SCREEN                                    -->
+  <!-- ============================================================== -->
+  <div id="loginScreen" class="flex-1 flex flex-col justify-center items-center p-4">
+    <div class="w-full bg-zinc-900/95 border border-amber-500/30 rounded-3xl p-6 shadow-2xl space-y-6">
+      <div class="text-center space-y-2">
+        <div class="h-16 w-16 mx-auto rounded-2xl gold-gradient grid place-items-center font-black text-3xl text-zinc-950 gold-shadow">
+          S
+        </div>
+        <h1 class="text-2xl font-black tracking-wide text-zinc-100">
+          SORAT AGENT POS
+        </h1>
+        <p class="text-xs text-zinc-400 font-medium">
+          Counter Booking & Thermal Printer Terminal
+        </p>
+        <div id="loginRoundTicker" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-bold font-mono">
+          <span>🎰 Live Round:</span> <span id="loginRoundId">#0001</span> • <span id="loginTimer">50s</span>
+        </div>
+      </div>
+
+      <form id="loginForm" onsubmit="handleAgentLogin(event)" class="space-y-4">
+        <div class="space-y-1.5 text-left">
+          <label class="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+            Agent ID / Username
+          </label>
+          <input
+            type="text"
+            id="loginId"
+            required
+            value="agent1"
+            placeholder="Jaise agent1, agent2"
+            class="w-full bg-zinc-950 border border-zinc-800 focus:border-amber-500 rounded-xl px-4 py-3 text-sm font-bold text-zinc-100 placeholder:text-zinc-600 outline-none transition"
+          />
+        </div>
+
+        <div class="space-y-1.5 text-left">
+          <label class="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+            4-Digit Password / PIN
+          </label>
+          <input
+            type="password"
+            id="loginPin"
+            required
+            maxlength="8"
+            value="1234"
+            placeholder="••••"
+            class="w-full bg-zinc-950 border border-zinc-800 focus:border-amber-500 rounded-xl px-4 py-3 text-sm font-bold text-zinc-100 tracking-widest placeholder:tracking-normal placeholder:text-zinc-600 outline-none transition"
+          />
+        </div>
+
+        <div id="loginError" class="hidden rounded-xl bg-red-500/15 border border-red-500/40 p-2.5 text-xs text-red-400 font-bold text-center">
+        </div>
+
+        <button
+          type="submit"
+          class="w-full py-3.5 rounded-xl gold-gradient text-zinc-950 font-black text-sm tracking-wide gold-shadow hover:brightness-110 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer"
+        >
+          <span>🔐</span>
+          <span>LOGIN & OPEN COUNTER</span>
+        </button>
+      </form>
+
+      <!-- Quick Demo Login Selection -->
+      <div class="border-t border-zinc-800/80 pt-4 space-y-2 text-center">
+        <span class="text-[10px] font-bold text-zinc-500 uppercase tracking-widest block">
+          Quick 1-Tap Test Login
+        </span>
+        <div class="grid grid-cols-3 gap-2">
+          <button
+            type="button"
+            onclick="setQuickLogin('agent1', '1234')"
+            class="p-2 rounded-xl bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/60 text-left transition"
+          >
+            <div class="text-[11px] font-black text-zinc-200">Rahul</div>
+            <div class="text-[9px] text-amber-400 font-mono font-bold">ID: agent1</div>
+            <div class="text-[9px] text-zinc-400 font-mono">PIN: 1234</div>
+          </button>
+          <button
+            type="button"
+            onclick="setQuickLogin('agent2', '1234')"
+            class="p-2 rounded-xl bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/60 text-left transition"
+          >
+            <div class="text-[11px] font-black text-zinc-200">Amit</div>
+            <div class="text-[9px] text-amber-400 font-mono font-bold">ID: agent2</div>
+            <div class="text-[9px] text-zinc-400 font-mono">PIN: 1234</div>
+          </button>
+          <button
+            type="button"
+            onclick="setQuickLogin('agent3', '1234')"
+            class="p-2 rounded-xl bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/60 text-left transition"
+          >
+            <div class="text-[11px] font-black text-zinc-200">Suresh</div>
+            <div class="text-[9px] text-amber-400 font-mono font-bold">ID: agent3</div>
+            <div class="text-[9px] text-zinc-400 font-mono">PIN: 1234</div>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- SCREEN 2: MAIN AGENT COUNTER POS TERMINAL                      -->
+  <!-- ============================================================== -->
+  <div id="mainScreen" class="hidden flex-1 flex flex-col justify-between">
+    
+    <!-- Header -->
+    <header class="sticky top-0 z-30 bg-zinc-900/95 backdrop-blur-md border-b border-zinc-800 p-2.5 shadow-md space-y-2">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <div class="h-8 w-8 rounded-xl gold-gradient grid place-items-center font-black text-sm text-zinc-950 gold-shadow">
+            S
+          </div>
+          <div>
+            <span class="text-xs font-black text-zinc-100 tracking-wide block leading-tight">
+              SORAT POS
+            </span>
+            <span class="text-[9px] font-bold text-zinc-400 uppercase tracking-widest block leading-tight">
+              Counter Booking
+            </span>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-1.5">
+          <span id="headerRoundId" class="rounded-lg bg-amber-500/20 border border-amber-500/40 px-2 py-0.5 text-xs font-mono font-black text-amber-400">
+            🎰 #0001
+          </span>
+          <span id="headerTimerBadge" class="text-xs font-mono font-black px-2 py-0.5 rounded-lg border bg-emerald-500/20 text-emerald-400 border-emerald-500/40">
+            ⏳ 50s
+          </span>
+        </div>
+      </div>
+
+      <!-- Live Balance Card -->
+      <div class="flex items-center justify-between rounded-xl bg-zinc-950 border border-zinc-800 px-3 py-1.5">
+        <div>
+          <span class="text-[9px] uppercase font-bold text-zinc-500 block">
+            Counter Balance
+          </span>
+          <div class="text-lg font-black text-amber-400 leading-none mt-0.5 flex items-center gap-1">
+            <span>🪙</span> <span id="displayBalance">₹1,450</span>
+          </div>
+        </div>
+
+        <div class="text-right flex items-center gap-2">
+          <div>
+            <span class="text-[9px] uppercase font-bold text-zinc-500 block">
+              Active Counter
+            </span>
+            <span id="displayAgentName" class="text-xs font-bold text-zinc-200 truncate max-w-[110px] block leading-tight">
+              Rahul Sharma
+            </span>
+            <span id="displayAgentId" class="text-[10px] font-mono text-amber-400 font-bold block leading-tight">
+              @agent1
+            </span>
+          </div>
+          <button
+            type="button"
+            onclick="handleAgentLogout()"
+            class="p-1.5 rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-400 border border-red-500/30 text-xs font-bold transition flex items-center gap-1"
+            title="Logout"
+          >
+            <span>🚪</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- App Tabs -->
+      <div class="flex items-center bg-zinc-950 p-0.5 rounded-xl border border-zinc-800 text-xs">
+        <button
+          type="button"
+          onclick="switchTab('punch')"
+          id="tabBtnPunch"
+          class="flex-1 py-1.5 text-center rounded-lg font-bold bg-amber-500 text-zinc-950 shadow-sm transition"
+        >
+          🖨️ Punch Bet
+        </button>
+        <button
+          type="button"
+          onclick="switchTab('tickets')"
+          id="tabBtnTickets"
+          class="flex-1 py-1.5 text-center rounded-lg font-bold text-zinc-400 hover:text-zinc-200 transition"
+        >
+          🎟️ Tickets & Claim
+        </button>
+      </div>
+    </header>
+
+    <!-- TAB 1: PUNCH BETS VIEW -->
+    <main id="tabViewPunch" class="flex-1 p-2 space-y-2 overflow-y-auto">
+      
+      <!-- Chip Selectors -->
+      <div class="flex items-center justify-between gap-1.5 bg-zinc-900/90 p-1.5 rounded-2xl border border-zinc-800">
+        <span class="text-[10px] font-bold uppercase text-zinc-400 px-1">CHIP:</span>
+        <div class="flex items-center gap-1 flex-1 justify-end">
+          <button type="button" onclick="selectChip(5)" class="chip-btn px-2.5 py-1 rounded-xl text-xs font-black border border-zinc-700 bg-zinc-800 text-zinc-300">₹5</button>
+          <button type="button" onclick="selectChip(10)" class="chip-btn px-2.5 py-1 rounded-xl text-xs font-black border border-amber-500 bg-amber-500 text-zinc-950">₹10</button>
+          <button type="button" onclick="selectChip(20)" class="chip-btn px-2.5 py-1 rounded-xl text-xs font-black border border-zinc-700 bg-zinc-800 text-zinc-300">₹20</button>
+          <button type="button" onclick="selectChip(50)" class="chip-btn px-2.5 py-1 rounded-xl text-xs font-black border border-zinc-700 bg-zinc-800 text-zinc-300">₹50</button>
+          <button type="button" onclick="selectChip(100)" class="chip-btn px-2.5 py-1 rounded-xl text-xs font-black border border-zinc-700 bg-zinc-800 text-zinc-300">₹100</button>
+          <button type="button" onclick="selectChip(500)" class="chip-btn px-2.5 py-1 rounded-xl text-xs font-black border border-zinc-700 bg-zinc-800 text-zinc-300">₹500</button>
+        </div>
+      </div>
+
+      <!-- 12 CARDS GRID -->
+      <div id="cardsGrid" class="grid grid-cols-4 gap-1.5">
+        <!-- Card items populated by JS -->
+      </div>
+
+      <!-- Customer Name & Selected Total Summary -->
+      <div class="bg-zinc-900/90 p-2.5 rounded-2xl border border-zinc-800 space-y-2">
+        <div class="flex items-center gap-2">
+          <input
+            type="text"
+            id="customerNameInput"
+            placeholder="Customer Name / Mobile (Optional)"
+            class="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-1.5 text-xs font-bold text-zinc-200 outline-none focus:border-amber-500 placeholder:text-zinc-600"
+          />
+          <button
+            type="button"
+            onclick="clearAllBets()"
+            class="px-2.5 py-1.5 rounded-xl border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold"
+          >
+            🗑️ Clear
+          </button>
+        </div>
+
+        <div class="flex items-center justify-between text-xs pt-1 border-t border-zinc-800">
+          <div>
+            <span class="text-zinc-400 text-[10px] block">TOTAL STAKE</span>
+            <span id="summaryTotalStake" class="text-base font-black text-amber-400">₹0</span>
+          </div>
+          <div class="text-right">
+            <span class="text-zinc-400 text-[10px] block">POTENTIAL WIN (10X)</span>
+            <span id="summaryPotentialWin" class="text-sm font-bold text-emerald-400">₹0</span>
+          </div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- TAB 2: TICKETS & CLAIM VIEW -->
+    <main id="tabViewTickets" class="hidden flex-1 p-2 space-y-2 overflow-y-auto">
+      <div class="bg-zinc-900/90 p-3 rounded-2xl border border-zinc-800 space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-black text-zinc-200 uppercase">🎟️ Today's Booked Tickets</span>
+          <span id="ticketsCountBadge" class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">0 Tickets</span>
+        </div>
+        <div id="ticketsListContainer" class="space-y-1.5 max-h-[60vh] overflow-y-auto pt-1">
+          <div class="text-center py-8 text-zinc-500 text-xs">Abhi koi ticket punch nahi hua hai.</div>
+        </div>
+      </div>
+    </main>
+
+    <!-- FOOTER / PUNCH BUTTON -->
+    <footer class="sticky bottom-0 z-30 bg-zinc-900/95 backdrop-blur-md border-t border-zinc-800 p-2.5 shadow-lg">
+      <button
+        type="button"
+        id="punchAndPrintBtn"
+        onclick="punchAndPrintTicket()"
+        disabled
+        class="w-full py-3.5 rounded-2xl gold-gradient text-zinc-950 font-black text-sm tracking-wide gold-shadow opacity-50 cursor-not-allowed hover:brightness-110 active:scale-95 transition flex items-center justify-center gap-2"
+      >
+        <span>🖨️</span>
+        <span id="punchBtnText">PUNCH & PRINT SLIP (₹0)</span>
+      </button>
+    </footer>
+
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- THERMAL RECEIPT SLIP MODAL (58mm PRINTABLE)                   -->
+  <!-- ============================================================== -->
+  <div id="slipModal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3">
+    <div class="bg-zinc-900 border border-zinc-700 rounded-3xl p-4 w-full max-w-xs space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-zinc-800 pb-2 no-print">
+        <span class="text-xs font-black text-amber-400 uppercase">🖨️ Thermal Print Receipt</span>
+        <button type="button" onclick="closeSlipModal()" class="text-zinc-400 hover:text-zinc-100 font-bold text-sm">✕</button>
+      </div>
+
+      <!-- 58mm Printable Paper Container -->
+      <div id="printableSlip" class="bg-white text-zinc-950 p-3 rounded-xl font-mono text-[11px] leading-tight shadow-inner">
+        <div class="text-center border-b border-dashed border-zinc-400 pb-1.5 mb-1.5">
+          <div class="font-black text-sm tracking-widest">★ SORAT LOTTERY ★</div>
+          <div class="text-[9px] uppercase">Official Counter Receipt</div>
+          <div id="slipTicketId" class="text-[10px] font-bold mt-1">TKT-00000000</div>
+          <div id="slipBarcode" class="font-mono text-xs tracking-widest my-1 font-black">||||| | |||| || |||</div>
+        </div>
+
+        <div class="space-y-0.5 text-[10px] border-b border-dashed border-zinc-400 pb-1.5 mb-1.5">
+          <div class="flex justify-between"><span>Date/Time:</span><span id="slipDateTime">--</span></div>
+          <div class="flex justify-between"><span>Round No:</span><strong id="slipRoundId">#0001</strong></div>
+          <div class="flex justify-between"><span>Counter:</span><span id="slipAgent">Rahul</span></div>
+          <div class="flex justify-between"><span>Customer:</span><span id="slipCustomer">Walk-in</span></div>
+        </div>
+
+        <div class="border-b border-dashed border-zinc-400 pb-1.5 mb-1.5">
+          <div class="flex justify-between font-bold text-[10px] mb-0.5">
+            <span>PICTURE CARD</span>
+            <span>BET (₹)</span>
+          </div>
+          <div id="slipItemsList" class="space-y-0.5">
+            <!-- populated by JS -->
+          </div>
+        </div>
+
+        <div class="flex justify-between font-black text-xs border-b border-zinc-400 pb-1 mb-1">
+          <span>TOTAL STAKE:</span>
+          <span id="slipTotalStake">₹0</span>
+        </div>
+
+        <div class="flex justify-between text-[10px] text-zinc-700">
+          <span>POTENTIAL WIN:</span>
+          <span id="slipPotentialWin" class="font-bold">₹0</span>
+        </div>
+
+        <div class="text-center text-[8px] text-zinc-600 mt-2 pt-1 border-t border-dashed border-zinc-300">
+          Good Luck! Claim winning within 30 min.<br />
+          No refund on cancelled rounds.
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="flex gap-2 no-print">
+        <button
+          type="button"
+          onclick="window.print()"
+          class="flex-1 py-2.5 rounded-xl gold-gradient text-zinc-950 font-black text-xs shadow hover:brightness-110 transition flex items-center justify-center gap-1.5"
+        >
+          <span>🖨️</span>
+          <span>PRINT SLIP NOW</span>
+        </button>
+        <button
+          type="button"
+          onclick="closeSlipModal()"
+          class="px-4 py-2.5 rounded-xl border border-zinc-700 bg-zinc-800 text-zinc-300 text-xs font-bold"
+        >
+          Done
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- APPLICATION JAVASCRIPT LOGIC                                   -->
+  <!-- ============================================================== -->
   <script>
-    window.location.replace("/agent");
+    // 12 Cards Definition
+    const CARDS = [
+      { id: 0, name: "पतंग", img: "./assets/kite-CoSshyEF.jpg" },
+      { id: 1, name: "छत्री", img: "./assets/umbrella-BAXxSKZM.jpg" },
+      { id: 2, name: "बॉल", img: "./assets/ball-DKr8Cfxh.jpg" },
+      { id: 3, name: "सूर्य", img: "./assets/sun-BxJ5MgfE.jpg" },
+      { id: 4, name: "गुलाब", img: "./assets/rose-D6u-oFgL.jpg" },
+      { id: 5, name: "दिवा", img: "./assets/diya-CoDfE3js.jpg" },
+      { id: 6, name: "फुलपाखरू", img: "./assets/butterfly-DhitDDDH.jpg" },
+      { id: 7, name: "चिमणी", img: "./assets/sparrow-B4c6wfIZ.jpg" },
+      { id: 8, name: "ससा", img: "./assets/rabbit-DGeDjgmM.jpg" },
+      { id: 9, name: "भोवरा", img: "./assets/top-DHa_b0lZ.jpg" },
+      { id: 10, name: "बादली", img: "./assets/bucket-Dfv04o2J.jpg" },
+      { id: 11, name: "गाय", img: "./assets/cow-D9-I4klS.jpg" }
+    ];
+
+    // Pre-configured Agent Accounts
+    const DEFAULT_AGENTS = {
+      "agent1": { name: "Rahul Sharma", pin: "1234", balance: 1450 },
+      "agent2": { name: "Amit Patel", pin: "1234", balance: 800 },
+      "agent3": { name: "Suresh Patil", pin: "1234", balance: 5200 }
+    };
+
+    // State
+    let currentAgent = null;
+    let selectedChip = 10;
+    let selectedBets = {}; // cardId -> amount
+    let tickets = [];
+
+    // Load saved session
+    try {
+      const savedAgent = localStorage.getItem("sorat_current_agent");
+      if (savedAgent) currentAgent = JSON.parse(savedAgent);
+      const savedTickets = localStorage.getItem("sorat_pos_tickets");
+      if (savedTickets) tickets = JSON.parse(savedTickets);
+    } catch (e) {}
+
+    // Initialize Card Grid
+    function renderCardGrid() {
+      const grid = document.getElementById("cardsGrid");
+      grid.innerHTML = "";
+      CARDS.forEach((card) => {
+        const betAmount = selectedBets[card.id] || 0;
+        const div = document.createElement("div");
+        div.className = `relative rounded-xl border overflow-hidden cursor-pointer transition active:scale-95 ${
+          betAmount > 0 ? "border-amber-500 bg-amber-500/10 shadow-lg shadow-amber-500/20" : "border-zinc-800 bg-zinc-900"
+        }`;
+        div.onclick = () => addCardBet(card.id);
+
+        div.innerHTML = `
+          <div class="aspect-square w-full relative bg-zinc-950">
+            <img src="${card.img}" alt="${card.name}" class="w-full h-full object-cover" onerror="this.src='./favicon.ico'" />
+            ${betAmount > 0 ? `
+              <div class="absolute inset-0 bg-black/60 flex flex-col items-center justify-center p-1">
+                <span class="text-[9px] font-bold text-amber-300">BET</span>
+                <span class="text-sm font-black text-amber-400">₹${betAmount}</span>
+              </div>
+            ` : ""}
+          </div>
+          <div class="p-1 text-center bg-zinc-900/90 border-t border-zinc-800">
+            <div class="text-[10px] font-black text-zinc-200 truncate">${card.name}</div>
+          </div>
+        `;
+        grid.appendChild(div);
+      });
+      updateSummary();
+    }
+
+    function selectChip(amount) {
+      selectedChip = amount;
+      document.querySelectorAll(".chip-btn").forEach((btn) => {
+        if (btn.innerText === `₹${amount}`) {
+          btn.className = "chip-btn px-2.5 py-1 rounded-xl text-xs font-black border border-amber-500 bg-amber-500 text-zinc-950";
+        } else {
+          btn.className = "chip-btn px-2.5 py-1 rounded-xl text-xs font-black border border-zinc-700 bg-zinc-800 text-zinc-300";
+        }
+      });
+    }
+
+    function addCardBet(cardId) {
+      const current = selectedBets[cardId] || 0;
+      selectedBets[cardId] = current + selectedChip;
+      renderCardGrid();
+    }
+
+    function clearAllBets() {
+      selectedBets = {};
+      renderCardGrid();
+    }
+
+    function updateSummary() {
+      const total = Object.values(selectedBets).reduce((a, b) => a + b, 0);
+      document.getElementById("summaryTotalStake").innerText = `₹${total}`;
+      document.getElementById("summaryPotentialWin").innerText = `₹${total * 10}`;
+      
+      const btn = document.getElementById("punchAndPrintBtn");
+      const btnText = document.getElementById("punchBtnText");
+      if (total > 0 && currentAgent && currentAgent.balance >= total) {
+        btn.disabled = false;
+        btn.className = "w-full py-3.5 rounded-2xl gold-gradient text-zinc-950 font-black text-sm tracking-wide gold-shadow hover:brightness-110 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer";
+        btnText.innerText = `PUNCH & PRINT SLIP (₹${total})`;
+      } else {
+        btn.disabled = true;
+        btn.className = "w-full py-3.5 rounded-2xl gold-gradient text-zinc-950 font-black text-sm tracking-wide gold-shadow opacity-50 cursor-not-allowed flex items-center justify-center gap-2";
+        if (currentAgent && currentAgent.balance < total) {
+          btnText.innerText = `INSUFFICIENT BALANCE (₹${total} > ₹${currentAgent.balance})`;
+        } else {
+          btnText.innerText = `PUNCH & PRINT SLIP (₹${total})`;
+        }
+      }
+    }
+
+    // IST Synchronized Clock
+    function getISTRoundState() {
+      const now = Date.now();
+      const epochSeconds = Math.floor(now / 1000);
+      const istSeconds = epochSeconds + 19800; // +5:30
+      const istDate = new Date(istSeconds * 1000);
+      const roundNum = istDate.getUTCHours() * 60 + istDate.getUTCMinutes() + 1;
+      const roundId = "#" + String(roundNum).padStart(4, "0");
+      const sec = istDate.getUTCSeconds();
+      const elapsed = sec % 60;
+
+      let phase = "bet";
+      let timeLeft = 50 - elapsed;
+      if (elapsed >= 50 && elapsed < 55) {
+        phase = "select";
+        timeLeft = 55 - elapsed;
+      } else if (elapsed >= 55) {
+        phase = "result";
+        timeLeft = 60 - elapsed;
+      }
+      return { roundId, phase, timeLeft };
+    }
+
+    // Tick Timer every second
+    setInterval(() => {
+      const state = getISTRoundState();
+      const timerStr = state.phase === "bet" ? `⏳ ${state.timeLeft}s` : `⚡ ${state.timeLeft}s RESULT`;
+      
+      document.getElementById("loginRoundId").innerText = state.roundId;
+      document.getElementById("loginTimer").innerText = timerStr;
+      
+      const headerRound = document.getElementById("headerRoundId");
+      if (headerRound) headerRound.innerText = `🎰 ${state.roundId}`;
+      const headerTimer = document.getElementById("headerTimerBadge");
+      if (headerTimer) {
+        headerTimer.innerText = timerStr;
+        if (state.phase !== "bet") {
+          headerTimer.className = "text-xs font-mono font-black px-2 py-0.5 rounded-lg border bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse";
+        } else {
+          headerTimer.className = "text-xs font-mono font-black px-2 py-0.5 rounded-lg border bg-emerald-500/20 text-emerald-400 border-emerald-500/40";
+        }
+      }
+    }, 500);
+
+    // Agent Login Handler
+    function handleAgentLogin(e) {
+      if (e) e.preventDefault();
+      const id = document.getElementById("loginId").value.trim().toLowerCase();
+      const pin = document.getElementById("loginPin").value.trim();
+      const errBox = document.getElementById("loginError");
+
+      const agent = DEFAULT_AGENTS[id];
+      if (!agent) {
+        errBox.innerText = `⚠️ Galat Agent ID "${id}"! Sahi ID daalein (jaise agent1, agent2).`;
+        errBox.classList.remove("hidden");
+        return;
+      }
+      if (agent.pin !== pin) {
+        errBox.innerText = "⚠️ Galat PIN! Default PIN: 1234";
+        errBox.classList.remove("hidden");
+        return;
+      }
+
+      errBox.classList.add("hidden");
+      currentAgent = { id, ...agent };
+      localStorage.setItem("sorat_current_agent", JSON.stringify(currentAgent));
+      initMainScreen();
+    }
+
+    function setQuickLogin(id, pin) {
+      document.getElementById("loginId").value = id;
+      document.getElementById("loginPin").value = pin;
+      handleAgentLogin();
+    }
+
+    function handleAgentLogout() {
+      if (confirm("Kya aap counter se logout karna chahte hain?")) {
+        currentAgent = null;
+        localStorage.removeItem("sorat_current_agent");
+        document.getElementById("mainScreen").classList.add("hidden");
+        document.getElementById("loginScreen").classList.remove("hidden");
+      }
+    }
+
+    function initMainScreen() {
+      document.getElementById("loginScreen").classList.add("hidden");
+      document.getElementById("mainScreen").classList.remove("hidden");
+      document.getElementById("displayAgentName").innerText = currentAgent.name;
+      document.getElementById("displayAgentId").innerText = `@${currentAgent.id}`;
+      document.getElementById("displayBalance").innerText = `₹${currentAgent.balance.toLocaleString("en-IN")}`;
+      renderCardGrid();
+      renderTicketsList();
+    }
+
+    // Punch & Print Ticket
+    function punchAndPrintTicket() {
+      const total = Object.values(selectedBets).reduce((a, b) => a + b, 0);
+      if (total <= 0) return;
+      if (currentAgent.balance < total) {
+        alert("Prepaid balance kam hai! Kripya recharge karein.");
+        return;
+      }
+
+      const clock = getISTRoundState();
+      const now = new Date();
+      const ticketId = "TKT-" + Math.random().toString(36).substring(2, 8).toUpperCase();
+      const custName = document.getElementById("customerNameInput").value.trim() || "Walk-in";
+
+      // Deduct balance (Burn model)
+      currentAgent.balance -= total;
+      localStorage.setItem("sorat_current_agent", JSON.stringify(currentAgent));
+      document.getElementById("displayBalance").innerText = `₹${currentAgent.balance.toLocaleString("en-IN")}`;
+
+      const items = Object.entries(selectedBets).map(([cId, amt]) => {
+        const card = CARDS.find(c => c.id === Number(cId));
+        return { cardId: Number(cId), cardName: card.name, amount: amt };
+      });
+
+      const newTicket = {
+        id: ticketId,
+        dateStr: now.toISOString().split("T")[0],
+        timeStr: now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
+        roundId: clock.roundId,
+        agentName: currentAgent.name,
+        agentId: currentAgent.id,
+        customerName: custName,
+        items,
+        totalAmount: total,
+        status: "PENDING"
+      };
+
+      tickets.unshift(newTicket);
+      localStorage.setItem("sorat_pos_tickets", JSON.stringify(tickets));
+
+      // Reset bets
+      selectedBets = {};
+      document.getElementById("customerNameInput").value = "";
+      renderCardGrid();
+      renderTicketsList();
+
+      // Open Slip Modal & Print
+      openSlipModal(newTicket);
+    }
+
+    function openSlipModal(ticket) {
+      document.getElementById("slipTicketId").innerText = ticket.id;
+      document.getElementById("slipDateTime").innerText = `${ticket.dateStr} ${ticket.timeStr}`;
+      document.getElementById("slipRoundId").innerText = ticket.roundId;
+      document.getElementById("slipAgent").innerText = ticket.agentName;
+      document.getElementById("slipCustomer").innerText = ticket.customerName;
+
+      const itemsDiv = document.getElementById("slipItemsList");
+      itemsDiv.innerHTML = ticket.items.map(it => `
+        <div class="flex justify-between">
+          <span>${it.cardName}</span>
+          <span class="font-bold">₹${it.amount}</span>
+        </div>
+      `).join("");
+
+      document.getElementById("slipTotalStake").innerText = `₹${ticket.totalAmount}`;
+      document.getElementById("slipPotentialWin").innerText = `₹${ticket.totalAmount * 10}`;
+      document.getElementById("slipModal").classList.remove("hidden");
+    }
+
+    function closeSlipModal() {
+      document.getElementById("slipModal").classList.add("hidden");
+    }
+
+    function switchTab(tab) {
+      if (tab === "punch") {
+        document.getElementById("tabViewPunch").classList.remove("hidden");
+        document.getElementById("tabViewTickets").classList.add("hidden");
+        document.getElementById("tabBtnPunch").className = "flex-1 py-1.5 text-center rounded-lg font-bold bg-amber-500 text-zinc-950 shadow-sm transition";
+        document.getElementById("tabBtnTickets").className = "flex-1 py-1.5 text-center rounded-lg font-bold text-zinc-400 hover:text-zinc-200 transition";
+      } else {
+        document.getElementById("tabViewPunch").classList.add("hidden");
+        document.getElementById("tabViewTickets").classList.remove("hidden");
+        document.getElementById("tabBtnPunch").className = "flex-1 py-1.5 text-center rounded-lg font-bold text-zinc-400 hover:text-zinc-200 transition";
+        document.getElementById("tabBtnTickets").className = "flex-1 py-1.5 text-center rounded-lg font-bold bg-amber-500 text-zinc-950 shadow-sm transition";
+        renderTicketsList();
+      }
+    }
+
+    function renderTicketsList() {
+      const container = document.getElementById("ticketsListContainer");
+      document.getElementById("ticketsCountBadge").innerText = `${tickets.length} Tickets`;
+      if (tickets.length === 0) {
+        container.innerHTML = `<div class="text-center py-8 text-zinc-500 text-xs">Abhi koi ticket punch nahi hua hai.</div>`;
+        return;
+      }
+      container.innerHTML = tickets.map(t => `
+        <div class="p-2.5 rounded-xl bg-zinc-950 border border-zinc-800 flex items-center justify-between">
+          <div>
+            <div class="flex items-center gap-1.5">
+              <span class="text-xs font-mono font-bold text-amber-400">${t.id}</span>
+              <span class="text-[9px] px-1.5 py-0.2 rounded bg-zinc-800 text-zinc-400 font-mono">${t.roundId}</span>
+            </div>
+            <div class="text-[10px] text-zinc-400 mt-0.5">
+              ${t.customerName} • ${t.timeStr} • ${t.items.length} card(s)
+            </div>
+          </div>
+          <div class="text-right flex items-center gap-2">
+            <div>
+              <span class="text-xs font-black text-zinc-100">₹${t.totalAmount}</span>
+              <span class="text-[9px] text-zinc-500 block uppercase font-bold">${t.status}</span>
+            </div>
+            <button
+              type="button"
+              onclick='openSlipModal(${JSON.stringify(t)})'
+              class="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs"
+              title="Reprint"
+            >
+              🖨️
+            </button>
+          </div>
+        </div>
+      `).join("");
+    }
+
+    // Auto load main screen if already logged in
+    if (currentAgent) {
+      initMainScreen();
+    } else {
+      renderCardGrid();
+    }
   </script>
 </body>
 </html>
-
