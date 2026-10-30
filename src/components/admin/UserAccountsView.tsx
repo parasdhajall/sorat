@@ -7,6 +7,7 @@ import {
   setUserBalance,
   createUser,
   deleteUser,
+  updateUserPin,
   getUserProfitStats,
   getCategorizedUserBets,
   setActiveUserId,
@@ -435,6 +436,76 @@ export function UserAccountsView({
                     🗑️
                   </button>
                 </div>
+              </div>
+            </div>
+
+            {/* AGENT APP LOGIN CREDENTIALS BANNER */}
+            <div className="rounded-2xl border border-primary/40 bg-gradient-to-r from-amber-500/15 via-primary/10 to-amber-500/5 p-3.5 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-primary/20 border border-primary/40 grid place-items-center text-lg">
+                  📱
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-display text-sm font-black text-foreground">
+                      Agent App Login Credentials
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-primary/20 border border-primary/40 text-[9px] font-mono font-black text-primary">
+                      POS READY
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 mt-1 text-xs">
+                    <div>
+                      <span className="text-muted-foreground text-[10px] uppercase font-bold block">Agent ID</span>
+                      <span className="font-mono font-black text-primary text-sm">@{selectedUser.username}</span>
+                    </div>
+                    <div className="h-5 w-px bg-border hidden sm:block" />
+                    <div>
+                      <span className="text-muted-foreground text-[10px] uppercase font-bold block">Login PIN</span>
+                      <span className="font-mono font-black text-emerald-400 text-sm">
+                        {selectedUser.pin || "1234"}
+                      </span>
+                    </div>
+                    <div className="h-5 w-px bg-border hidden sm:block" />
+                    <div>
+                      <span className="text-muted-foreground text-[10px] uppercase font-bold block">Prepaid Wallet</span>
+                      <span className="font-mono font-black text-foreground text-sm">
+                        ₹{selectedUser.balance.toLocaleString("en-IN")}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-stretch sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newPin = prompt(`Enter new 4-digit PIN for ${selectedUser.displayName}:`, selectedUser.pin || "1234");
+                    if (newPin && newPin.trim()) {
+                      updateUserPin(selectedUser.id, newPin.trim());
+                      onUsersChange();
+                      showNotification(`PIN updated to ${newPin.trim()} for ${selectedUser.displayName}`);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-xl border border-border bg-background hover:bg-muted text-xs font-bold text-foreground transition"
+                >
+                  🔑 Change PIN
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const text = `🎰 *SORAT AGENT POS LOGIN CREDENTIALS* 🎰\n\n👤 *Agent Name:* ${selectedUser.displayName}\n🆔 *Agent ID:* ${selectedUser.username}\n🔑 *Login PIN:* ${selectedUser.pin || "1234"}\n🪙 *Prepaid Balance:* ₹${selectedUser.balance.toLocaleString("en-IN")}\n\n📲 *Agent POS App Link:* ${window.location.origin}/agent\n\n_Is link ko open karein aur apna Agent ID aur PIN daal kar counter shuru karein._`;
+                    navigator.clipboard.writeText(text);
+                    showNotification("WhatsApp login details copied to clipboard!");
+                    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, "_blank");
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black shadow transition flex items-center gap-1.5"
+                >
+                  <span>📲</span>
+                  <span>Share on WhatsApp</span>
+                </button>
               </div>
             </div>
 

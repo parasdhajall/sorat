@@ -40,6 +40,8 @@ export interface UserAccount {
   createdAt: number;
   status: "ACTIVE" | "INACTIVE";
   notes?: string;
+  pin?: string; // 4-digit PIN for Agent app login (default: "1234")
+  agentCode?: string; // e.g. "AGENT-101"
 }
 
 export interface UserProfitStats {
@@ -120,15 +122,17 @@ function createInitialSeedUsers(): UserAccount[] {
   return [
     {
       id: "usr_rahul_01",
-      username: "rahul99",
-      displayName: "Rahul Sharma",
+      username: "agent1",
+      displayName: "Rahul Sharma (Agent 1)",
       phone: "+91 98765 43210",
+      pin: "1234",
+      agentCode: "AGENT-101",
       balance: 1450,
       totalDeposited: 3000,
       totalWithdrawn: 0,
       createdAt: now - 7 * 24 * 3600 * 1000,
       status: "ACTIVE",
-      notes: "Regular counter player",
+      notes: "Main counter agent",
       deposits: [
         {
           id: "dep_001",
@@ -252,15 +256,17 @@ function createInitialSeedUsers(): UserAccount[] {
     },
     {
       id: "usr_amit_02",
-      username: "amit_patel",
-      displayName: "Amit Patel",
+      username: "agent2",
+      displayName: "Amit Patel (Agent 2)",
       phone: "+91 98234 56789",
+      pin: "1234",
+      agentCode: "AGENT-102",
       balance: 800,
       totalDeposited: 2000,
       totalWithdrawn: 500,
       createdAt: now - 14 * 24 * 3600 * 1000,
       status: "ACTIVE",
-      notes: "VIP player",
+      notes: "Branch counter agent",
       deposits: [
         {
           id: "dep_003",
@@ -309,15 +315,17 @@ function createInitialSeedUsers(): UserAccount[] {
     },
     {
       id: "usr_suresh_03",
-      username: "suresh_patil",
-      displayName: "Suresh Patil",
+      username: "agent3",
+      displayName: "Suresh Patil (Agent 3)",
       phone: "+91 99887 76655",
+      pin: "1234",
+      agentCode: "AGENT-103",
       balance: 5200,
       totalDeposited: 5000,
       totalWithdrawn: 0,
       createdAt: now - 3 * 24 * 3600 * 1000,
       status: "ACTIVE",
-      notes: "High roller",
+      notes: "Market counter agent",
       deposits: [
         {
           id: "dep_004",
@@ -388,8 +396,13 @@ export function getUsers(): UserAccount[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        cachedUsers = parsed;
-        return parsed;
+        const enriched = parsed.map((u, i) => ({
+          ...u,
+          pin: u.pin || "1234",
+          agentCode: u.agentCode || `AGENT-${101 + i}`,
+        }));
+        cachedUsers = enriched;
+        return enriched;
       }
     }
   } catch (e) {
@@ -441,6 +454,81 @@ export function getActiveUser(): UserAccount {
   if (u) return u;
   const all = getUsers();
   return all[0] || createInitialSeedUsers()[0];
+}
+
+const LOGGED_IN_AGENT_KEY = "sorat_logged_in_agent_id_v1";
+
+export function getLoggedInAgent(): UserAccount | null {
+  if (typeof window === "undefined") return null;
+  const id = localStorage.getItem(LOGGED_IN_AGENT_KEY);
+  if (!id) return null;
+  return getUser(id) || null;
+}
+
+export function setLoggedInAgent(userId: string | null): void {
+  if (typeof window !== "undefined") {
+    if (userId) {
+      localStorage.setItem(LOGGED_IN_AGENT_KEY, userId);
+      setActiveUserId(userId);
+    } else {
+      localStorage.removeItem(LOGGED_IN_AGENT_KEY);
+    }
+    notifySync("AGENT_AUTH_CHANGED", userId);
+  }
+}
+
+export function authenticateAgent(
+  identifier: string,
+  pin: string
+): { success: boolean; user?: UserAccount; error?: string } {
+  const users = getUsers();
+  const cleanId = identifier.trim().toLowerCase();
+  const cleanPin = pin.trim();
+
+  if (!cleanId) return { success: false, error: "Kripya Agent ID daalein" };
+  if (!cleanPin) return { success: false, error: "Kripya 4-digit PIN daalein" };
+
+  const user = users.find((u) => {
+    const uName = (u.username || "").toLowerCase();
+    const uCode = (u.agentCode || "").toLowerCase();
+    const uPhone = (u.phone || "").replace(/\D/g, "");
+    const cleanPhone = cleanId.replace(/\D/g, "");
+
+    return (
+      uName === cleanId ||
+      uCode === cleanId ||
+      u.id.toLowerCase() === cleanId ||
+      (cleanPhone.length >= 4 && uPhone.includes(cleanPhone))
+    );
+  });
+
+  if (!user) {
+    return {
+      success: false,
+      error: `Galat Agent ID "${identifier}"! Kripya sahi ID daalein (jaise agent1, agent2).`,
+    };
+  }
+
+  const expectedPin = user.pin || "1234";
+  if (expectedPin !== cleanPin) {
+    return {
+      success: false,
+      error: "Galat PIN / Password! Kripya sahi 4-digit PIN daalein.",
+    };
+  }
+
+  setLoggedInAgent(user.id);
+  return { success: true, user };
+}
+
+export function updateUserPin(userId: string, newPin: string): UserAccount {
+  const users = getUsers();
+  const idx = users.findIndex((u) => u.id === userId);
+  if (idx === -1) throw new Error("User not found");
+  const target = { ...users[idx], pin: newPin.trim() };
+  users[idx] = target;
+  saveUsers(users);
+  return target;
 }
 
 /**
@@ -618,6 +706,8 @@ export function createUser(data: {
   phone?: string;
   initialDeposit: number;
   notes?: string;
+  pin?: string;
+  agentCode?: string;
 }): UserAccount {
   const users = getUsers();
   const now = Date.now();
@@ -629,6 +719,8 @@ export function createUser(data: {
     displayName: data.displayName.trim(),
     username: data.username.trim().toLowerCase().replace(/\s+/g, "_"),
     phone: data.phone?.trim() || "",
+    pin: data.pin?.trim() || "1234",
+    agentCode: data.agentCode?.trim() || `AGENT-${101 + users.length}`,
     balance: initialDep,
     totalDeposited: initialDep,
     totalWithdrawn: 0,

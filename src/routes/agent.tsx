@@ -17,9 +17,13 @@ import {
 } from "@/lib/ticketStore";
 import {
   getActiveUser,
+  getLoggedInAgent,
+  setLoggedInAgent,
+  authenticateAgent,
   recordUserBet,
   getUsers,
   settleRoundBets,
+  UserAccount,
 } from "@/lib/userStore";
 import { ThermalSlipModal } from "@/components/pos/ThermalSlipModal";
 
@@ -41,10 +45,16 @@ export default function AgentPage() {
   const [phase, setPhase] = useState<"bet" | "select" | "result">(initialSync.phase);
   const [timer, setTimer] = useState(initialSync.timeLeft);
 
+  // Agent Authentication State
+  const [loggedInAgent, setLoggedInAgentState] = useState<UserAccount | null>(() => getLoggedInAgent());
+  const [loginIdInput, setLoginIdInput] = useState("");
+  const [loginPinInput, setLoginPinInput] = useState("");
+  const [loginError, setLoginError] = useState<string | null>(null);
+
   // Active User / Agent Wallet Balance
-  const [agentUser, setAgentUser] = useState(() => getActiveUser());
+  const [agentUser, setAgentUser] = useState<UserAccount>(() => getLoggedInAgent() || getActiveUser());
   const [agentBalance, setAgentBalance] = useState<number>(() => {
-    const u = getActiveUser();
+    const u = getLoggedInAgent() || getActiveUser();
     return u ? u.balance : 1000;
   });
 
@@ -96,8 +106,13 @@ export default function AgentPage() {
   // Sync Storage
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === "sorat_users_v2" || e.key === "sorat_active_user_id_v2") {
-        const u = getActiveUser();
+      if (
+        e.key === "sorat_users_v2" ||
+        e.key === "sorat_active_user_id_v2" ||
+        e.key === "sorat_logged_in_agent_id_v1"
+      ) {
+        const u = getLoggedInAgent() || getActiveUser();
+        setLoggedInAgentState(getLoggedInAgent());
         setAgentUser(u);
         setAgentBalance(u.balance);
       }
@@ -235,11 +250,133 @@ export default function AgentPage() {
     }
   };
 
+  const handleLoginSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError(null);
+    const res = authenticateAgent(loginIdInput, loginPinInput);
+    if (res.success && res.user) {
+      setLoggedInAgentState(res.user);
+      setAgentUser(res.user);
+      setAgentBalance(res.user.balance);
+    } else {
+      setLoginError(res.error || "Login fail! Sahi Agent ID aur 4-digit PIN daalein.");
+    }
+  };
+
+  const handleLogout = () => {
+    if (confirm("Kya aap counter se logout karna chahte hain?")) {
+      setLoggedInAgent(null);
+      setLoggedInAgentState(null);
+      setLoginPinInput("");
+    }
+  };
+
   // Shift Stats
   const todayTickets = ticketsList.filter((t) => t.dateStr === initialSync.roundId || true);
   const totalSalesToday = ticketsList.reduce((sum, t) => sum + t.totalAmount, 0);
   const totalPayoutsToday = ticketsList.reduce((sum, t) => sum + (t.winningPayout || 0), 0);
   const agentCommission10 = Math.round(totalSalesToday * 0.10);
+
+  // =========================================================================
+  // IF NOT LOGGED IN: DISPLAY AGENT ID & PIN LOGIN SCREEN
+  // =========================================================================
+  if (!loggedInAgent) {
+    return (
+      <div className="min-h-screen bg-background text-foreground flex flex-col justify-center items-center p-4 max-w-md mx-auto select-none">
+        <div className="w-full bg-card/95 border border-primary/30 rounded-3xl p-6 shadow-2xl backdrop-blur-md space-y-6">
+          <div className="text-center space-y-2">
+            <div className="h-16 w-16 mx-auto rounded-2xl bg-gradient-gold grid place-items-center font-display text-3xl font-black text-primary-foreground shadow-gold">
+              S
+            </div>
+            <h1 className="font-display text-2xl font-black tracking-wide text-foreground">
+              SORAT AGENT POS
+            </h1>
+            <p className="text-xs text-muted-foreground font-medium">
+              Counter Booking & Thermal Printer App
+            </p>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/30 text-primary text-xs font-bold font-mono">
+              <span>🎰 Live Round:</span> {roundId} • <span>{timer}s</span>
+            </div>
+          </div>
+
+          <form onSubmit={handleLoginSubmit} className="space-y-4">
+            <div className="space-y-1.5 text-left">
+              <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                Agent ID / Username / Phone
+              </label>
+              <input
+                type="text"
+                required
+                value={loginIdInput}
+                onChange={(e) => setLoginIdInput(e.target.value)}
+                placeholder="Jaise agent1, agent2 ya Mobile No."
+                className="w-full bg-background border border-border focus:border-primary rounded-xl px-4 py-3 text-sm font-bold text-foreground placeholder:text-muted-foreground/50 outline-none transition"
+              />
+            </div>
+
+            <div className="space-y-1.5 text-left">
+              <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                4-Digit Password / PIN
+              </label>
+              <input
+                type="password"
+                required
+                maxLength={8}
+                value={loginPinInput}
+                onChange={(e) => setLoginPinInput(e.target.value)}
+                placeholder="•••• (Default: 1234)"
+                className="w-full bg-background border border-border focus:border-primary rounded-xl px-4 py-3 text-sm font-bold text-foreground tracking-widest placeholder:tracking-normal placeholder:text-muted-foreground/50 outline-none transition"
+              />
+            </div>
+
+            {loginError && (
+              <div className="rounded-xl bg-destructive/15 border border-destructive/40 p-3 text-xs text-destructive font-bold text-center">
+                ⚠️ {loginError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              className="w-full py-3.5 rounded-xl bg-gradient-gold text-primary-foreground font-display text-base font-black tracking-wide shadow-gold hover:brightness-110 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <span>🔐</span>
+              <span>LOGIN & OPEN COUNTER</span>
+            </button>
+          </form>
+
+          {/* Quick Demo Test Buttons */}
+          <div className="border-t border-border/80 pt-4 space-y-2 text-center">
+            <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest block">
+              Quick Test / Demo Login
+            </span>
+            <div className="grid grid-cols-3 gap-2">
+              {getUsers().slice(0, 3).map((u) => (
+                <button
+                  key={u.id}
+                  type="button"
+                  onClick={() => {
+                    setLoginIdInput(u.username);
+                    setLoginPinInput(u.pin || "1234");
+                    const res = authenticateAgent(u.username, u.pin || "1234");
+                    if (res.success && res.user) {
+                      setLoggedInAgentState(res.user);
+                      setAgentUser(res.user);
+                      setAgentBalance(res.user.balance);
+                    }
+                  }}
+                  className="p-2 rounded-xl bg-muted/60 hover:bg-muted border border-border text-left transition"
+                >
+                  <div className="text-[11px] font-black text-foreground truncate">{u.displayName.split(" ")[0]}</div>
+                  <div className="text-[9px] text-primary font-mono font-bold">ID: {u.username}</div>
+                  <div className="text-[9px] text-muted-foreground font-mono">PIN: {u.pin || "1234"}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col justify-between max-w-md mx-auto border-x border-border/60 shadow-2xl select-none">
@@ -302,13 +439,27 @@ export default function AgentPage() {
             </div>
           </div>
 
-          <div className="text-right">
-            <span className="text-[9px] uppercase font-bold text-muted-foreground block">
-              Agent / Counter
-            </span>
-            <span className="text-xs font-bold text-foreground truncate max-w-[120px] block">
-              {agentUser.displayName}
-            </span>
+          <div className="text-right flex items-center gap-2">
+            <div>
+              <span className="text-[9px] uppercase font-bold text-muted-foreground block">
+                Agent / Counter
+              </span>
+              <span className="text-xs font-bold text-foreground truncate max-w-[120px] block">
+                {agentUser.displayName}
+              </span>
+              <span className="text-[10px] font-mono text-primary font-black block">
+                ID: {agentUser.username}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="p-1.5 rounded-lg bg-destructive/15 hover:bg-destructive/25 text-destructive border border-destructive/30 text-xs font-bold transition flex items-center gap-1"
+              title="Logout from counter"
+            >
+              <span>🚪</span>
+              <span className="text-[10px]">Exit</span>
+            </button>
           </div>
         </div>
 
