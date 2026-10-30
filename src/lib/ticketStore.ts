@@ -168,3 +168,4 @@ export function claimTicket(ticketId: string): ThermalTicket | null {
   saveTickets(tickets);
   return target;
 }
+
