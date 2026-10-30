@@ -213,3 +213,51 @@
   }
 }
 
+/* ============================================================== */
+/* 58MM / 80MM THERMAL PRINTER POS RECEIPT STYLES                */
+/* ============================================================== */
+.thermal-slip-print-area {
+  display: none;
+}
+
+@media print {
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .thermal-slip-print-area,
+  .thermal-slip-print-area * {
+    visibility: visible;
+  }
+
+  .thermal-slip-print-area {
+    display: block !important;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 58mm;
+    max-width: 58mm;
+    padding: 2mm 3mm;
+    margin: 0;
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-family: "Courier New", Courier, monospace !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  @page {
+    margin: 0;
+    size: 58mm auto;
+  }
+}
+

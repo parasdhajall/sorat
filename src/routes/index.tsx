@@ -19,6 +19,9 @@ import {
   settleRoundBets,
   UserAccount,
 } from "@/lib/userStore";
+import { CounterPosModal } from "@/components/pos/CounterPosModal";
+import { ThermalSlipModal } from "@/components/pos/ThermalSlipModal";
+import { settleTicketsForRound, ThermalTicket } from "@/lib/ticketStore";
 import kite from "@/assets/kite.jpg";
 import umbrella from "@/assets/umbrella.jpg";
 import ball from "@/assets/ball.jpg";
@@ -98,6 +101,11 @@ function Index() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showCounterModal, setShowCounterModal] = useState(false);
+
+  // Counter POS Terminal & Thermal Printer Slip State
+  const [showPosModal, setShowPosModal] = useState(false);
+  const [printSlipTicket, setPrintSlipTicket] = useState<ThermalTicket | null>(null);
+  const [showSlipModal, setShowSlipModal] = useState(false);
 
   // Round tracking references
   const lastProcessedRoundRef = useRef<number>(initialSync.roundNumber);
@@ -408,6 +416,7 @@ function Index() {
       // Settle bets in userStore (Prepaid Burn Model: creditBalance = false)
       try {
         settleRoundBets(roundId, w, CARDS[w].name, false);
+        settleTicketsForRound(roundId, w, CARDS[w].name);
         const updated = getActiveUser();
         setActiveUser(updated);
         setAgentBalance(updated.balance);
@@ -494,6 +503,65 @@ function Index() {
       t,
       bets: newBets,
       pool: pool + stake,
+      winner,
+      forcedWinner,
+      agentBalance: nextAgentBalance,
+      totalTurnover: nextTurnover,
+      totalPayouts,
+      houseProfit: nextProfit,
+      profitPercentage: nextProfitPct,
+    });
+  };
+
+  // Counter POS Terminal: Parchi Booking & Print Handler
+  const handlePosBetPlaced = (
+    betsDelta: Record<number, number>,
+    totalBet: number,
+    ticket: ThermalTicket
+  ) => {
+    const nextAgentBalance = Math.max(0, agentBalance - totalBet);
+    const nextTurnover = totalTurnover + totalBet;
+
+    const nextBets = { ...bets };
+    Object.entries(betsDelta).forEach(([idx, amt]) => {
+      const cardNum = Number(idx);
+      nextBets[cardNum] = (nextBets[cardNum] || 0) + amt;
+
+      try {
+        recordUserBet(activeUser.id, {
+          roundId,
+          roundNumber,
+          cardIndex: cardNum,
+          cardName: CARDS[cardNum]?.name || `Card ${cardNum}`,
+          stake: amt,
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    });
+
+    const nextProfit = nextTurnover - totalPayouts;
+    const nextProfitPct = nextTurnover > 0 ? Math.round((nextProfit / nextTurnover) * 100) : 100;
+
+    setAgentBalance(nextAgentBalance);
+    setBets(nextBets);
+    setTotalTurnover(nextTurnover);
+    setPool((p) => p + totalBet);
+
+    const updatedUser = getActiveUser();
+    setActiveUser(updatedUser);
+
+    playBeep(720, 0.08, "sine");
+
+    // Immediately push update to Admin Panel
+    hostSyncRef.current?.broadcast({
+      type: "SYNC_FROM_TV",
+      roundNumber,
+      roundId,
+      phase,
+      t,
+      bets: nextBets,
+      pool: pool + totalBet,
       winner,
       forcedWinner,
       agentBalance: nextAgentBalance,
@@ -615,6 +683,16 @@ function Index() {
               </div>
             </div>
           </div>
+
+          {/* POS COUNTER: PUNCH BET & PRINT PARCHI BUTTON */}
+          <button
+            type="button"
+            onClick={() => setShowPosModal(true)}
+            className="w-full py-2.5 px-3 rounded-xl bg-gradient-gold text-primary-foreground font-display text-xs font-black shadow-gold hover:opacity-90 transition active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            <span>🖨️</span>
+            <span>PUNCH BET & PRINT PARCHI</span>
+          </button>
 
           {/* Animated Big-Screen Countdown Gauge */}
           <div
@@ -977,6 +1055,28 @@ function Index() {
           </div>
         </div>
       )}
+
+      {/* ============================================================== */}
+      {/* COUNTER POS BOOKING & THERMAL PARCHI MODAL                      */}
+      {/* ============================================================== */}
+      <CounterPosModal
+        isOpen={showPosModal}
+        onClose={() => setShowPosModal(false)}
+        roundId={roundId}
+        roundNumber={roundNumber}
+        agentBalance={agentBalance}
+        onBetPlaced={handlePosBetPlaced}
+        onShowSlip={(ticket) => {
+          setPrintSlipTicket(ticket);
+          setShowSlipModal(true);
+        }}
+      />
+
+      <ThermalSlipModal
+        ticket={printSlipTicket}
+        isOpen={showSlipModal}
+        onClose={() => setShowSlipModal(false)}
+      />
     </main>
   );
 }
