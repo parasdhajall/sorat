@@ -3,6 +3,7 @@
 // ========================================================================
 
 import { ThermalTicket } from "./ticketStore";
+import { getCardPureRoman } from "./cards";
 
 export interface ConnectedPrinterInfo {
   name: string;
@@ -205,7 +206,8 @@ export function buildEscPosBytes(ticket: ThermalTicket, paperWidth: "58mm" | "80
   push(0x1b, 0x45, 0x00); // Bold OFF
 
   ticket.items.forEach((item, idx) => {
-    const left = `${idx + 1}. ${item.cardName}`;
+    const cardTitle = getCardPureRoman(item.cardName);
+    const left = `${idx + 1}. ${cardTitle}`;
     const right = `Rs ${item.amount}`;
     const pad = maxCols - left.length - right.length;
     line(`${left}${" ".repeat(Math.max(1, pad))}${right}`);

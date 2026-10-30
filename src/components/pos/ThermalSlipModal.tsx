@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { ThermalTicket } from "@/lib/ticketStore";
 import { executeDirectPrint, isDirectPrinterConnected } from "@/lib/thermalPrinter";
+import { getCardDisplayName } from "@/lib/cards";
 
 interface ThermalSlipModalProps {
   ticket: ThermalTicket | null;
@@ -91,12 +92,12 @@ export function ThermalSlipModal({
             {/* Table of Bet Items */}
             <div className="border-t border-b border-dashed border-zinc-400 py-1.5 my-1.5 space-y-1">
               <div className="flex justify-between font-black text-[10px] text-zinc-700">
-                <span>PICTURE (कार्ड)</span>
-                <span>BET (दाव)</span>
+                <span>PICTURE / CARD</span>
+                <span>BET (₹)</span>
               </div>
               {ticket.items.map((item, i) => (
                 <div key={i} className="flex justify-between font-bold text-[11px]">
-                  <span>{i + 1}. {item.cardName}</span>
+                  <span>{i + 1}. {getCardDisplayName(item.cardName)}</span>
                   <span>₹{item.amount}</span>
                 </div>
               ))}
@@ -171,12 +172,12 @@ export function ThermalSlipModal({
 
         <div style={{ borderTop: "1px dashed #000", borderBottom: "1px dashed #000", margin: "5px 0", padding: "4px 0" }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "10px" }}>
-            <span>CARD (फोटो)</span>
-            <span>AMT (दाव)</span>
+            <span>PICTURE / CARD</span>
+            <span>AMOUNT (Rs)</span>
           </div>
           {ticket.items.map((item, i) => (
             <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: "bold" }}>
-              <span>{item.cardName}</span>
+              <span>{i + 1}. {getCardDisplayName(item.cardName)}</span>
               <span>Rs {item.amount}</span>
             </div>
           ))}

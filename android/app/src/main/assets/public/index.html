@@ -792,6 +792,28 @@
       openSlipModal(newTicket);
     }
 
+    const ROMAN_CARD_MAP = {
+      "पतंग": "PATANG",
+      "छत्री": "CHHATRI",
+      "बॉल": "BALL",
+      "सूर्य": "SURYA",
+      "गुलाब": "GULAB",
+      "दिवा": "DIWA",
+      "फुलपाखरू": "PHULPAKHARU",
+      "चिमणी": "CHIMANI",
+      "ससा": "SASA",
+      "भोवरा": "BHOVARA",
+      "बादली": "BADLI",
+      "गाय": "GAAY"
+    };
+
+    function getCardTitlePrint(name) {
+      for (const [k, v] of Object.entries(ROMAN_CARD_MAP)) {
+        if (name && name.includes(k)) return `${v} (${k})`;
+      }
+      return name;
+    }
+
     function openSlipModal(ticket) {
       document.getElementById("slipTicketId").innerText = ticket.id;
       document.getElementById("slipDateTime").innerText = `${ticket.dateStr} ${ticket.timeStr}`;
@@ -802,7 +824,7 @@
       const itemsDiv = document.getElementById("slipItemsList");
       itemsDiv.innerHTML = ticket.items.map(it => `
         <div class="flex justify-between">
-          <span>${it.cardName}</span>
+          <span>${getCardTitlePrint(it.cardName)}</span>
           <span class="font-bold">₹${it.amount}</span>
         </div>
       `).join("");
