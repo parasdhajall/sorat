@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useState } from "react";
 import { ThermalTicket } from "@/lib/ticketStore";
+import { executeDirectPrint, isDirectPrinterConnected } from "@/lib/thermalPrinter";
 
 interface ThermalSlipModalProps {
   ticket: ThermalTicket | null;
@@ -13,11 +14,20 @@ export function ThermalSlipModal({
   isOpen,
   onClose,
 }: ThermalSlipModalProps) {
+  const [printStatus, setPrintStatus] = useState<string | null>(null);
+
   if (!isOpen || !ticket) return null;
 
-  const handlePrint = () => {
-    if (typeof window !== "undefined") {
-      window.print();
+  const handlePrint = async () => {
+    const paperWidth = ((typeof window !== "undefined" && localStorage.getItem("sorat_printer_width")) as any) || "58mm";
+    setPrintStatus("Printing...");
+    const res = await executeDirectPrint(ticket, paperWidth);
+    if (res.method === "direct_bluetooth") {
+      setPrintStatus("✓ Direct Slip Printed via Bluetooth!");
+    } else if (res.method === "rawbt") {
+      setPrintStatus("✓ Sent to Thermal Printer (RawBT)!");
+    } else {
+      setPrintStatus(null);
     }
   };
 
@@ -125,20 +135,26 @@ export function ThermalSlipModal({
             </div>
           </div>
 
+          {printStatus && (
+            <div className="rounded-xl bg-emerald-500/15 border border-emerald-500/40 p-2 text-center text-xs font-bold text-emerald-400">
+              {printStatus}
+            </div>
+          )}
+
           {/* Action Buttons */}
           <div className="flex items-center gap-2 pt-1">
             <button
               type="button"
               onClick={handlePrint}
-              className="flex-1 py-2.5 px-4 rounded-xl bg-primary text-primary-foreground font-display text-xs font-black shadow-gold hover:opacity-90 transition active:scale-95 flex items-center justify-center gap-1.5"
+              className="flex-1 py-2.5 px-4 rounded-xl bg-primary text-primary-foreground font-display text-xs font-black shadow-gold hover:opacity-90 transition active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <span>🖨️</span>
-              <span>PRINT THERMAL PARCHI</span>
+              <span>{isDirectPrinterConnected() ? "DIRECT PRINT (NO DIALOG)" : "PRINT THERMAL PARCHI"}</span>
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="py-2.5 px-3 rounded-xl bg-muted text-muted-foreground hover:text-foreground text-xs font-bold transition"
+              className="py-2.5 px-3 rounded-xl bg-muted text-muted-foreground hover:text-foreground text-xs font-bold transition cursor-pointer"
             >
               Done
             </button>

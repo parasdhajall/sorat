@@ -27,6 +27,10 @@ import {
 } from "@/lib/userStore";
 import { ThermalSlipModal } from "@/components/pos/ThermalSlipModal";
 import { PrinterSettingsModal } from "@/components/pos/PrinterSettingsModal";
+import {
+  executeDirectPrint,
+  isDirectPrinterConnected,
+} from "@/lib/thermalPrinter";
 
 export const Route = createFileRoute("/agent")({
   head: () => ({
@@ -242,9 +246,16 @@ export default function AgentPage() {
     setSelectedCards({});
     setCustomerName("");
 
-    // 5. Open Thermal Slip & Print
+    // 5. Direct Thermal Print or Preview Slip
     setPrintTicket(newTicket);
-    setShowSlipModal(true);
+    const paperWidth = ((typeof window !== "undefined" && localStorage.getItem("sorat_printer_width")) as any) || "58mm";
+    const autoPrint = typeof window !== "undefined" && localStorage.getItem("sorat_auto_print") !== "false";
+
+    if (autoPrint && isDirectPrinterConnected()) {
+      executeDirectPrint(newTicket, paperWidth);
+    } else {
+      setShowSlipModal(true);
+    }
   };
 
   const handleClaimPrize = (ticketId: string) => {
@@ -276,8 +287,13 @@ export default function AgentPage() {
       isClaimed: false,
       status: "SETTLED",
     };
-    setPrintTicket(testTkt);
-    setShowSlipModal(true);
+    const paperWidth = ((typeof window !== "undefined" && localStorage.getItem("sorat_printer_width")) as any) || "58mm";
+    if (isDirectPrinterConnected()) {
+      executeDirectPrint(testTkt, paperWidth);
+    } else {
+      setPrintTicket(testTkt);
+      setShowSlipModal(true);
+    }
   };
 
   const handleLoginSubmit = (e: React.FormEvent) => {
