@@ -15,22 +15,23 @@ export interface CardDef {
   index: number;
   name: string;
   englishName: string;
+  symbol: string;
   img: string;
 }
 
 export const CARDS: CardDef[] = [
-  { index: 0, name: "पतंग", englishName: "PATANG", img: kite },
-  { index: 1, name: "छत्री", englishName: "CHHATRI", img: umbrella },
-  { index: 2, name: "बॉल", englishName: "BALL", img: ball },
-  { index: 3, name: "सूर्य", englishName: "SURYA", img: sun },
-  { index: 4, name: "गुलाब", englishName: "GULAB", img: rose },
-  { index: 5, name: "दिवा", englishName: "DIWA", img: diya },
-  { index: 6, name: "फुलपाखरू", englishName: "PHULPAKHARU", img: butterfly },
-  { index: 7, name: "चिमणी", englishName: "CHIMANI", img: sparrow },
-  { index: 8, name: "ससा", englishName: "SASA", img: rabbit },
-  { index: 9, name: "भोवरा", englishName: "BHOVARA", img: top },
-  { index: 10, name: "बादली", englishName: "BADLI", img: bucket },
-  { index: 11, name: "गाय", englishName: "GAAY", img: cow },
+  { index: 0, name: "पतंग", englishName: "PATANG", symbol: "🪁", img: kite },
+  { index: 1, name: "छत्री", englishName: "CHHATRI", symbol: "☂️", img: umbrella },
+  { index: 2, name: "बॉल", englishName: "BALL", symbol: "⚽", img: ball },
+  { index: 3, name: "सूर्य", englishName: "SURYA", symbol: "☀️", img: sun },
+  { index: 4, name: "गुलाब", englishName: "GULAB", symbol: "🌹", img: rose },
+  { index: 5, name: "दिवा", englishName: "DIWA", symbol: "🪔", img: diya },
+  { index: 6, name: "फुलपाखरू", englishName: "PHULPAKHARU", symbol: "🦋", img: butterfly },
+  { index: 7, name: "चिमणी", englishName: "CHIMANI", symbol: "🐦", img: sparrow },
+  { index: 8, name: "ससा", englishName: "SASA", symbol: "🐰", img: rabbit },
+  { index: 9, name: "भोवरा", englishName: "BHOVARA", symbol: "🪀", img: top },
+  { index: 10, name: "बादली", englishName: "BADLI", symbol: "🪣", img: bucket },
+  { index: 11, name: "गाय", englishName: "GAAY", symbol: "🐄", img: cow },
 ];
 
 export const CARD_ROMAN_MAP: Record<string, string> = {
@@ -48,6 +49,41 @@ export const CARD_ROMAN_MAP: Record<string, string> = {
   "गाय": "GAAY",
 };
 
+export const CARD_SYMBOL_MAP: Record<string, string> = {
+  "पतंग": "🪁",
+  "छत्री": "☂️",
+  "बॉल": "⚽",
+  "सूर्य": "☀️",
+  "गुलाब": "🌹",
+  "दिवा": "🪔",
+  "फुलपाखरू": "🦋",
+  "चिमणी": "🐦",
+  "ससा": "🐰",
+  "भोवरा": "🪀",
+  "बादली": "🪣",
+  "गाय": "🐄",
+  "PATANG": "🪁",
+  "CHHATRI": "☂️",
+  "BALL": "⚽",
+  "SURYA": "☀️",
+  "GULAB": "🌹",
+  "DIWA": "🪔",
+  "PHULPAKHARU": "🦋",
+  "CHIMANI": "🐦",
+  "SASA": "🐰",
+  "BHOVARA": "🪀",
+  "BADLI": "🪣",
+  "GAAY": "🐄",
+};
+
+export function getCardSymbol(name: string): string {
+  if (!name) return "🎯";
+  for (const [k, sym] of Object.entries(CARD_SYMBOL_MAP)) {
+    if (name.includes(k)) return sym;
+  }
+  return "🎯";
+}
+
 export function getCardPureRoman(name: string): string {
   if (!name) return "CARD";
   for (const [hindi, roman] of Object.entries(CARD_ROMAN_MAP)) {
@@ -62,12 +98,13 @@ export function getCardPureRoman(name: string): string {
 
 export function getCardDisplayName(name: string): string {
   if (!name) return "CARD";
+  const sym = getCardSymbol(name);
   for (const [hindi, roman] of Object.entries(CARD_ROMAN_MAP)) {
     if (name.includes(hindi)) {
-      return `${roman} (${hindi})`;
+      return `${sym} ${roman} (${hindi})`;
     }
   }
-  return name;
+  return `${sym} ${name}`;
 }
 
 export function getCardByIndex(idx: number): CardDef {

@@ -215,18 +215,13 @@ export function buildEscPosBytes(ticket: ThermalTicket, paperWidth: "58mm" | "80
 
   line(divider);
 
-  // 5. Total Stake & Payout
+  // 5. Total Stake
   push(0x1b, 0x45, 0x01); // Bold ON
   const totalLeft = "TOTAL STAKE:";
   const totalRight = `Rs ${ticket.totalAmount}`;
   const totalPad = maxCols - totalLeft.length - totalRight.length;
   line(`${totalLeft}${" ".repeat(Math.max(1, totalPad))}${totalRight}`);
   push(0x1b, 0x45, 0x00); // Bold OFF
-
-  const winLeft = "MAX WIN (10X):";
-  const winRight = `Rs ${ticket.totalAmount * 10}`;
-  const winPad = maxCols - winLeft.length - winRight.length;
-  line(`${winLeft}${" ".repeat(Math.max(1, winPad))}${winRight}`);
   line(divider);
 
   // 6. Barcode & Footer

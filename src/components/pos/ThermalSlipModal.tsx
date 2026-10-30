@@ -109,10 +109,6 @@ export function ThermalSlipModal({
                 <span>TOTAL STAKE:</span>
                 <span>₹{ticket.totalAmount}</span>
               </div>
-              <div className="flex justify-between text-[10px] font-bold text-zinc-800">
-                <span>MAX WIN POTENTIAL:</span>
-                <span>Up to ₹{ticket.totalAmount * 10}</span>
-              </div>
             </div>
 
             {/* Barcode & Verification */}

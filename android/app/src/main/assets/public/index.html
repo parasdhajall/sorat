@@ -500,14 +500,9 @@
           </div>
         </div>
 
-        <div class="flex justify-between font-black text-xs border-b border-zinc-400 pb-1 mb-1">
+        <div class="flex justify-between font-black text-xs">
           <span>TOTAL STAKE:</span>
           <span id="slipTotalStake">₹0</span>
-        </div>
-
-        <div class="flex justify-between text-[10px] text-zinc-700">
-          <span>POTENTIAL WIN:</span>
-          <span id="slipPotentialWin" class="font-bold">₹0</span>
         </div>
       </div>
 
@@ -793,18 +788,18 @@
     }
 
     const ROMAN_CARD_MAP = {
-      "पतंग": "PATANG",
-      "छत्री": "CHHATRI",
-      "बॉल": "BALL",
-      "सूर्य": "SURYA",
-      "गुलाब": "GULAB",
-      "दिवा": "DIWA",
-      "फुलपाखरू": "PHULPAKHARU",
-      "चिमणी": "CHIMANI",
-      "ससा": "SASA",
-      "भोवरा": "BHOVARA",
-      "बादली": "BADLI",
-      "गाय": "GAAY"
+      "पतंग": "🪁 PATANG",
+      "छत्री": "☂️ CHHATRI",
+      "बॉल": "⚽ BALL",
+      "सूर्य": "☀️ SURYA",
+      "गुलाब": "🌹 GULAB",
+      "दिवा": "🪔 DIWA",
+      "फुलपाखरू": "🦋 PHULPAKHARU",
+      "चिमणी": "🐦 CHIMANI",
+      "ससा": "🐰 SASA",
+      "भोवरा": "🪀 BHOVARA",
+      "बादली": "🪣 BADLI",
+      "गाय": "🐄 GAAY"
     };
 
     function getCardTitlePrint(name) {
@@ -830,7 +825,6 @@
       `).join("");
 
       document.getElementById("slipTotalStake").innerText = `₹${ticket.totalAmount}`;
-      document.getElementById("slipPotentialWin").innerText = `₹${ticket.totalAmount * 10}`;
       document.getElementById("slipModal").classList.remove("hidden");
     }
 
