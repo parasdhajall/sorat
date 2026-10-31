@@ -175,8 +175,19 @@ export function calculateProfitGuaranteedWinner(
   };
 }
 
+/**
+ * Deterministic pseudo-random card index (0..11) for a given IST round number.
+ * Guarantees that any device (TV, Phone, APK) will compute the exact same baseline winner
+ * for round #1234 without requiring network messages if offline or latency occurs.
+ */
+export function getDeterministicRoundWinner(roundNumber: number): number {
+  const seed = (Math.abs(roundNumber) * 1103515245 + 12345) & 0x7fffffff;
+  return seed % 12;
+}
+
 export type GameMessage =
   | { type: "ADD_BET"; card: number; amount: number }
+  | { type: "ADD_TICKET_BETS"; bets: Record<number, number>; totalAmount: number; agentName?: string; roundId: string }
   | { type: "SUB_BET"; card: number; amount: number }
   | { type: "CLEAR_CARD"; card: number }
   | { type: "CLEAR_ALL_BETS" }

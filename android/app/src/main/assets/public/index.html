@@ -272,6 +272,23 @@
           Connect / Setup
         </button>
       </div>
+
+      <!-- Live Winner Result Banner in APK -->
+      <div id="apkWinnerBanner" class="hidden rounded-2xl border-2 border-emerald-400 bg-gradient-to-r from-emerald-950 via-zinc-900 to-emerald-950 p-2.5 text-center space-y-1 shadow-2xl animate-pulse">
+        <span class="text-[9px] font-mono uppercase tracking-widest text-emerald-400 font-bold block">
+          ⚡ ROUND <span id="apkWinnerRound">#0000</span> WINNER ⚡
+        </span>
+        <div class="flex items-center justify-center gap-2">
+          <span class="text-xl">🏆</span>
+          <span id="apkWinnerName" class="text-base font-black text-amber-300 tracking-wide">
+            पतंग
+          </span>
+          <span class="text-xl">🏆</span>
+        </div>
+        <span class="text-[10px] font-black text-emerald-300 block">
+          10X PAYOUT • TICKETS SETTLED!
+        </span>
+      </div>
       
       <!-- Chip Selectors -->
       <div class="flex items-center justify-between gap-1.5 bg-zinc-900/90 p-1.5 rounded-2xl border border-zinc-800">
@@ -674,8 +691,58 @@
         phase = "result";
         timeLeft = 60 - elapsed;
       }
-      return { roundId, phase, timeLeft };
+      return { roundId, roundNumber: roundNum, phase, timeLeft };
     }
+
+    let currentDeclaredWinner = null;
+    let lastSettledRoundNum = null;
+
+    function getDeterministicRoundWinner(roundNumber) {
+      const seed = (Math.abs(roundNumber) * 1103515245 + 12345) & 0x7fffffff;
+      return seed % 12;
+    }
+
+    function onTvWinnerDeclared(rId, winnerIdx) {
+      currentDeclaredWinner = winnerIdx;
+      let changed = false;
+      tickets.forEach(t => {
+        if (t.roundId === rId && t.status === "PENDING") {
+          const winBet = t.items.find(it => it.cardId === winnerIdx);
+          if (winBet) {
+            t.status = "WON";
+            t.winningPayout = winBet.amount * 10;
+          } else {
+            t.status = "LOST";
+          }
+          changed = true;
+        }
+      });
+      if (changed) {
+        localStorage.setItem("sorat_pos_tickets", JSON.stringify(tickets));
+        renderTicketsList();
+      }
+    }
+
+    // Connect to TV Cloud SSE stream for instant live results
+    try {
+      if (typeof window !== "undefined" && "EventSource" in window) {
+        const sse = new EventSource("https://ntfy.sh/sorat_arena_live_v2_99/sse");
+        sse.onmessage = (event) => {
+          try {
+            const ntfyMsg = JSON.parse(event.data);
+            if (ntfyMsg.event === "message" && ntfyMsg.message) {
+              const wire = JSON.parse(ntfyMsg.message);
+              if (wire && wire._from === "tv" && wire.payload) {
+                const p = wire.payload;
+                if (p.winner !== null && p.winner >= 0 && p.winner < 12) {
+                  onTvWinnerDeclared(p.roundId, p.winner);
+                }
+              }
+            }
+          } catch (e) {}
+        };
+      }
+    } catch (e) {}
 
     // Tick Timer every second
     setInterval(() => {
@@ -696,7 +763,31 @@
           headerTimer.className = "text-xs font-mono font-black px-2 py-0.5 rounded-lg border bg-emerald-500/20 text-emerald-400 border-emerald-500/40";
         }
       }
-    }, 500);
+
+      // Live Winner Settlement in Result Phase
+      const banner = document.getElementById("apkWinnerBanner");
+      if (state.phase === "result") {
+        if (lastSettledRoundNum !== state.roundNumber) {
+          lastSettledRoundNum = state.roundNumber;
+          const effWinner = currentDeclaredWinner ?? getDeterministicRoundWinner(state.roundNumber);
+          currentDeclaredWinner = effWinner;
+          onTvWinnerDeclared(state.roundId, effWinner);
+        }
+        if (banner && currentDeclaredWinner !== null) {
+          banner.classList.remove("hidden");
+          const roundEl = document.getElementById("apkWinnerRound");
+          if (roundEl) roundEl.innerText = state.roundId;
+          const winCard = CARDS[currentDeclaredWinner];
+          const nameEl = document.getElementById("apkWinnerName");
+          if (nameEl && winCard) nameEl.innerText = `${winCard.name}`;
+        }
+      } else {
+        if (banner) banner.classList.add("hidden");
+        if (state.phase === "bet") {
+          currentDeclaredWinner = null;
+        }
+      }
+    }, 250);
 
     // Agent Login Handler
     function handleAgentLogin(e) {
@@ -787,6 +878,24 @@
 
       tickets.unshift(newTicket);
       localStorage.setItem("sorat_pos_tickets", JSON.stringify(tickets));
+
+      // Broadcast ticket bets to TV Screen via Cloud channel
+      try {
+        fetch("https://ntfy.sh/sorat_arena_live_v2_99", {
+          method: "POST",
+          body: JSON.stringify({
+            _from: "admin",
+            payload: {
+              type: "ADD_TICKET_BETS",
+              bets: selectedBets,
+              totalAmount: total,
+              agentName: currentAgent.name,
+              roundId: clock.roundId
+            },
+            time: Date.now()
+          })
+        }).catch(() => {});
+      } catch (e) {}
 
       // Reset bets
       selectedBets = {};

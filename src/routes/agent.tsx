@@ -5,6 +5,7 @@ import {
   DEFAULT_ROOM_ID,
   GameMessage,
   getSynchronizedRoundState,
+  getDeterministicRoundWinner,
 } from "@/lib/realtime";
 import { CARDS } from "@/lib/cards";
 import {
@@ -24,6 +25,7 @@ import {
   getUsers,
   settleRoundBets,
   UserAccount,
+  deductAgentBalance,
 } from "@/lib/userStore";
 import { ThermalSlipModal } from "@/components/pos/ThermalSlipModal";
 import { PrinterSettingsModal } from "@/components/pos/PrinterSettingsModal";
@@ -50,6 +52,8 @@ export default function AgentPage() {
   const [roundId, setRoundId] = useState(initialSync.roundId);
   const [phase, setPhase] = useState<"bet" | "select" | "result">(initialSync.phase);
   const [timer, setTimer] = useState(initialSync.timeLeft);
+  const [declaredWinner, setDeclaredWinner] = useState<number | null>(null);
+  const lastSettledRoundRef = useRef<number | null>(null);
 
   // Agent Authentication State
   const [loggedInAgent, setLoggedInAgentState] = useState<UserAccount | null>(() => getLoggedInAgent());
@@ -101,7 +105,7 @@ export default function AgentPage() {
     }
   }, []);
 
-  // Sync Timer
+  // Sync Timer & Clock Rollover
   useEffect(() => {
     const id = setInterval(() => {
       const sync = getSynchronizedRoundState();
@@ -109,9 +113,25 @@ export default function AgentPage() {
       setRoundId(sync.roundId);
       setPhase(sync.phase);
       setTimer(sync.timeLeft);
+
+      // New round rollover: clear old winner
+      if (sync.phase === "bet" && declaredWinner !== null) {
+        setDeclaredWinner(null);
+      }
+
+      // If in result phase and winner has not been declared yet from TV:
+      if (sync.phase === "result" && lastSettledRoundRef.current !== sync.roundNumber) {
+        lastSettledRoundRef.current = sync.roundNumber;
+        const fallbackWinner = declaredWinner ?? getDeterministicRoundWinner(sync.roundNumber);
+        if (declaredWinner === null) {
+          setDeclaredWinner(fallbackWinner);
+        }
+        settleTicketsForRound(sync.roundId, fallbackWinner, CARDS[fallbackWinner]?.name || "");
+        setTicketsList(getTickets());
+      }
     }, 250);
     return () => clearInterval(id);
-  }, []);
+  }, [declaredWinner]);
 
   // Sync Storage
   useEffect(() => {
@@ -145,15 +165,18 @@ export default function AgentPage() {
         setRoundId(msg.roundId);
         setPhase(msg.phase);
         setTimer(msg.t);
-        if (msg.winner !== null && msg.phase === "result") {
-          // Settle tickets locally
+        // Accept winner immediately whether in select or result phase
+        if (msg.winner !== null && msg.winner >= 0 && msg.winner < 12) {
+          setDeclaredWinner(msg.winner);
           settleTicketsForRound(msg.roundId, msg.winner, CARDS[msg.winner]?.name || "");
           setTicketsList(getTickets());
         }
       } else if (msg.type === "SET_AGENT_BALANCE") {
         setAgentBalance(msg.balance);
+        setAgentUser((u) => ({ ...u, balance: msg.balance }));
       } else if (msg.type === "RECHARGE_AGENT") {
         setAgentBalance((b) => b + msg.amount);
+        setAgentUser((u) => ({ ...u, balance: u.balance + msg.amount }));
       }
     };
 
@@ -208,7 +231,25 @@ export default function AgentPage() {
       amount: amt,
     }));
 
-    // 2. Create Ticket
+    // 2. Atomically Deduct Balance & Persist in userStore
+    const deductRes = deductAgentBalance(
+      agentUser.id || agentUser.username,
+      totalTicketStake,
+      roundId,
+      roundNumber,
+      items
+    );
+
+    if (!deductRes.success) {
+      alert(deductRes.error || "Balance deduct nahi ho paya!");
+      return;
+    }
+
+    // 3. Immediately reflect deducted balance in React state
+    setAgentBalance(deductRes.newBalance);
+    setAgentUser((prev) => ({ ...prev, balance: deductRes.newBalance }));
+
+    // 4. Create Ticket
     const newTicket = createTicket({
       roundId,
       roundNumber,
@@ -217,32 +258,16 @@ export default function AgentPage() {
       items,
     });
 
-    // 3. Deduct from agent wallet (Prepaid Burn model)
-    const nextBalance = Math.max(0, agentBalance - totalTicketStake);
-    setAgentBalance(nextBalance);
-
-    // 4. Record bets in userStore & broadcast to TV and Admin
-    Object.entries(selectedCards).forEach(([idx, amt]) => {
-      const cardNum = Number(idx);
-      try {
-        recordUserBet(agentUser.id, {
-          roundId,
-          roundNumber,
-          cardIndex: cardNum,
-          cardName: CARDS[cardNum]?.name || `Card ${cardNum}`,
-          stake: amt,
-        });
-      } catch {}
-
-      // Send to TV Screen
-      clientSyncRef.current?.send({
-        type: "ADD_BET",
-        card: cardNum,
-        amount: amt,
-      });
+    // 5. Send single ATOMIC bet packet to TV Screen
+    clientSyncRef.current?.send({
+      type: "ADD_TICKET_BETS",
+      bets: { ...selectedCards },
+      totalAmount: totalTicketStake,
+      agentName: agentUser.displayName,
+      roundId,
     });
 
-    // Refresh tickets
+    // Refresh tickets & clear staged selection
     setTicketsList(getTickets());
     setSelectedCards({});
     setCustomerName("");
@@ -614,6 +639,25 @@ export default function AgentPage() {
         {/* TAB 1: PUNCH BETS */}
         {activeTab === "punch" && (
           <div className="space-y-3">
+            {/* Live Winner Result Pop Banner */}
+            {phase === "result" && declaredWinner !== null && (
+              <div className="rounded-2xl border-2 border-emerald-400 bg-gradient-to-r from-emerald-950 via-zinc-900 to-emerald-950 p-3.5 text-center space-y-1.5 shadow-2xl animate-in zoom-in-95 duration-300">
+                <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400 text-emerald-300 text-[10px] font-mono font-bold tracking-wider uppercase">
+                  <span>⚡</span> ROUND {roundId} WINNER RESULT <span>⚡</span>
+                </div>
+                <div className="flex items-center justify-center gap-2 pt-0.5">
+                  <span className="text-3xl animate-bounce">🏆</span>
+                  <span className="font-display text-xl font-black text-amber-300 tracking-wide drop-shadow-md">
+                    {CARDS[declaredWinner]?.name}
+                  </span>
+                  <span className="text-3xl animate-bounce">🏆</span>
+                </div>
+                <div className="text-[11px] font-black text-emerald-400">
+                  🎉 WINNING CARD: {CARDS[declaredWinner]?.englishName} (10X PAYOUT)
+                </div>
+              </div>
+            )}
+
             {/* Thermal Printer Quick-Connect Banner */}
             <div className="flex items-center justify-between rounded-2xl bg-emerald-950/40 border border-emerald-500/40 p-2.5 shadow-sm">
               <div className="flex items-center gap-2.5">
@@ -684,11 +728,19 @@ export default function AgentPage() {
                     key={i}
                     onClick={() => handleCardClick(i)}
                     className={`relative rounded-2xl border p-2 cursor-pointer transition active:scale-95 flex flex-col items-center justify-between text-center select-none ${
-                      staked > 0
+                      phase === "result" && declaredWinner === i
+                        ? "border-emerald-400 bg-emerald-500/30 ring-4 ring-emerald-400 shadow-2xl scale-[1.03] animate-pulse"
+                        : staked > 0
                         ? "border-primary bg-primary/20 ring-2 ring-primary shadow-gold"
                         : "border-border/80 bg-card hover:border-primary/50"
                     }`}
                   >
+                    {/* Winner Badge on declared card */}
+                    {phase === "result" && declaredWinner === i && (
+                      <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-emerald-500 text-zinc-950 font-black text-[9px] px-2 py-0.5 rounded-full shadow-lg border border-emerald-300 uppercase tracking-wider whitespace-nowrap animate-bounce z-10">
+                        🏆 WINNER 10X
+                      </div>
+                    )}
                     {/* Clear Cross */}
                     {staked > 0 && (
                       <button

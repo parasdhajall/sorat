@@ -221,7 +221,18 @@ export default function TvArenaPage() {
     hostSyncRef.current = host;
 
     host.onMessage = (msg: GameMessage) => {
-      if (msg.type === "ADD_BET") {
+      if (msg.type === "ADD_TICKET_BETS") {
+        setBets((prev) => {
+          const next = { ...prev };
+          Object.entries(msg.bets).forEach(([c, amt]) => {
+            const cardNum = Number(c);
+            next[cardNum] = (next[cardNum] ?? 0) + amt;
+          });
+          return next;
+        });
+        setTotalTurnover((t) => t + msg.totalAmount);
+        playBeep(720, 0.08, "sine");
+      } else if (msg.type === "ADD_BET") {
         setBets((prev) => ({
           ...prev,
           [msg.card]: (prev[msg.card] ?? 0) + msg.amount,
@@ -300,24 +311,18 @@ export default function TvArenaPage() {
         return next;
       });
 
-      // Settle tickets
-      try {
-        settleRoundBets(roundId, w, CARDS[w].name, false);
-        settleTicketsForRound(roundId, w, CARDS[w].name);
-      } catch (e) {}
-
-      // Broadcast to Agent Mobile POS Apps
+      // Broadcast to Agent Mobile POS Apps (early heads-up during spin)
       hostSyncRef.current?.broadcast({
         type: "SYNC_FROM_TV",
         roundNumber,
         roundId,
-        phase,
+        phase: "select",
         t,
         bets,
         pool: Object.values(bets).reduce((a, b) => a + b, 0),
         winner: w,
         forcedWinner: null,
-        agentBalance: tvAgent ? tvAgent.balance : 1000,
+        agentBalance: 0,
         totalTurnover,
         totalPayouts: totalPayouts + prize,
         houseProfit: totalTurnover - (totalPayouts + prize),
@@ -326,7 +331,29 @@ export default function TvArenaPage() {
 
       playVictoryFanfare();
     }
-  }, [phase, roundNumber, bets, totalTurnover, totalPayouts, tvAgent, soundEnabled]);
+  }, [phase, roundNumber, bets, totalTurnover, totalPayouts, soundEnabled]);
+
+  // Broadcast again when entering "result" phase so all agents reveal winner simultaneously
+  useEffect(() => {
+    if (phase === "result" && winner !== null) {
+      hostSyncRef.current?.broadcast({
+        type: "SYNC_FROM_TV",
+        roundNumber,
+        roundId,
+        phase: "result",
+        t,
+        bets,
+        pool: Object.values(bets).reduce((a, b) => a + b, 0),
+        winner,
+        forcedWinner: null,
+        agentBalance: 0,
+        totalTurnover,
+        totalPayouts,
+        houseProfit: totalTurnover - totalPayouts,
+        profitPercentage: 30,
+      });
+    }
+  }, [phase, winner]);
 
   // High-Speed Selection Animation during "select" phase
   useEffect(() => {

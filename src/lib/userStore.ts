@@ -389,8 +389,6 @@ export function getUsers(): UserAccount[] {
     return createInitialSeedUsers();
   }
 
-  if (cachedUsers) return cachedUsers;
-
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
@@ -408,6 +406,8 @@ export function getUsers(): UserAccount[] {
   } catch (e) {
     console.error("Failed to load users from localStorage", e);
   }
+
+  if (cachedUsers) return cachedUsers;
 
   const seed = createInitialSeedUsers();
   saveUsers(seed);
@@ -529,6 +529,63 @@ export function updateUserPin(userId: string, newPin: string): UserAccount {
   users[idx] = target;
   saveUsers(users);
   return target;
+}
+
+/**
+ * Atomically deducts stake from an agent account and records the bets in their ledger.
+ * Returns the updated balance and success status.
+ */
+export function deductAgentBalance(
+  agentIdentifier: string,
+  totalStake: number,
+  roundId: string,
+  roundNumber: number,
+  items: { cardIndex: number; cardName: string; amount: number }[]
+): { success: boolean; newBalance: number; error?: string } {
+  const users = getUsers();
+  const cleanId = (agentIdentifier || "").trim().toLowerCase();
+  const idx = users.findIndex(
+    (u) =>
+      u.id.toLowerCase() === cleanId ||
+      u.username.toLowerCase() === cleanId ||
+      (u.agentCode && u.agentCode.toLowerCase() === cleanId)
+  );
+
+  if (idx === -1) {
+    return { success: false, newBalance: 0, error: `Agent "${agentIdentifier}" not found` };
+  }
+
+  if (users[idx].balance < totalStake) {
+    return {
+      success: false,
+      newBalance: users[idx].balance,
+      error: `Balance kam hai: Needed ₹${totalStake}, Available ₹${users[idx].balance}`,
+    };
+  }
+
+  const newBalance = Math.max(0, users[idx].balance - totalStake);
+  users[idx].balance = newBalance;
+
+  const now = Date.now();
+  const betRecords: UserBetRecord[] = items.map((it) => ({
+    id: `bet_${now}_${Math.random().toString(36).slice(2, 6)}`,
+    roundId,
+    roundNumber,
+    timestamp: now,
+    dateStr: getTodayDateStr(new Date(now)),
+    timeStr: formatTime(now),
+    cardIndex: it.cardIndex,
+    cardName: it.cardName,
+    stake: it.amount,
+    payout: 0,
+    isWin: false,
+    status: "PENDING",
+  }));
+
+  users[idx].bets = [...betRecords, ...(users[idx].bets || [])];
+  saveUsers(users);
+
+  return { success: true, newBalance };
 }
 
 /**
