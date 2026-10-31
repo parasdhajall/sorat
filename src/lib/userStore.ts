@@ -42,6 +42,7 @@ export interface UserAccount {
   notes?: string;
   pin?: string; // 4-digit PIN for Agent app login (default: "1234")
   agentCode?: string; // e.g. "AGENT-101"
+  balanceUpdatedAt?: number; // timestamp to prevent stale balance overwrites
 }
 
 export interface UserProfitStats {
@@ -456,6 +457,7 @@ export function broadcastUsersToCloud(users: UserAccount[]): void {
       pin: u.pin || "1234",
       agentCode: u.agentCode,
       balance: u.balance,
+      balanceUpdatedAt: u.balanceUpdatedAt || Date.now(),
       totalDeposited: u.totalDeposited,
       status: u.status,
     }));
@@ -471,7 +473,42 @@ export function broadcastUsersToCloud(users: UserAccount[]): void {
 }
 
 /**
+ * Broadcasts dedicated atomic balance deduction event to the cloud channel so Admin & other devices reflect it immediately.
+ */
+export function broadcastBalanceDeductionToCloud(
+  agentId: string,
+  username: string,
+  agentName: string,
+  totalDeducted: number,
+  newBalance: number,
+  roundId: string,
+  balanceUpdatedAt: number
+): void {
+  if (typeof window === "undefined") return;
+  try {
+    fetch(`https://ntfy.sh/${CLOUD_ACCOUNTS_SYNC_TOPIC}`, {
+      method: "POST",
+      headers: { Title: "BALANCE_DEDUCT" },
+      body: JSON.stringify({
+        type: "AGENT_BALANCE_DEDUCT",
+        agentId,
+        username,
+        agentName,
+        totalDeducted,
+        newBalance,
+        balanceUpdatedAt,
+        roundId,
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  } catch (e) {
+    console.error("Cloud deduct broadcast error:", e);
+  }
+}
+
+/**
  * Pulls latest accounts snapshot from cloud topic and updates local store.
+ * Respects balanceUpdatedAt timestamps so local bet deductions are never clobbered by older snapshots.
  */
 export async function pullUsersFromCloud(): Promise<UserAccount[]> {
   if (typeof window === "undefined") return getUsers();
@@ -499,9 +536,16 @@ export async function pullUsersFromCloud(): Promise<UserAccount[]> {
                       (remoteU.username || "").toLowerCase().replace(/^@/, "")
                   );
                 if (existing) {
+                  const localUpdatedAt = existing.balanceUpdatedAt || 0;
+                  const remoteUpdatedAt = remoteU.balanceUpdatedAt || 0;
+                  const effBalance = remoteUpdatedAt >= localUpdatedAt ? remoteU.balance : existing.balance;
+                  const effUpdatedAt = Math.max(localUpdatedAt, remoteUpdatedAt);
+
                   mergedMap.set(existing.id, {
                     ...existing,
                     ...remoteU,
+                    balance: effBalance,
+                    balanceUpdatedAt: effUpdatedAt,
                     bets: existing.bets || [],
                     deposits: existing.deposits || [],
                   });
@@ -512,6 +556,7 @@ export async function pullUsersFromCloud(): Promise<UserAccount[]> {
                     totalWithdrawn: 0,
                     deposits: [],
                     bets: [],
+                    balanceUpdatedAt: remoteU.balanceUpdatedAt || Date.now(),
                   });
                 }
               });
@@ -534,8 +579,20 @@ export async function pullUsersFromCloud(): Promise<UserAccount[]> {
 
 /**
  * Subscribes to real-time cloud account changes via Server-Sent Events (SSE).
+ * Handles both ACCOUNTS_SYNC snapshots and atomic AGENT_BALANCE_DEDUCT transactions.
  */
-export function subscribeToCloudUsers(onUpdate?: (users: UserAccount[]) => void): () => void {
+export function subscribeToCloudUsers(
+  onUpdate?: (users: UserAccount[]) => void,
+  onDeduct?: (event: {
+    agentId: string;
+    username: string;
+    agentName: string;
+    totalDeducted: number;
+    newBalance: number;
+    roundId: string;
+    timestamp: number;
+  }) => void
+): () => void {
   if (typeof window === "undefined" || !("EventSource" in window)) {
     return () => {};
   }
@@ -546,6 +603,34 @@ export function subscribeToCloudUsers(onUpdate?: (users: UserAccount[]) => void)
         const item = JSON.parse(event.data);
         if (item.event === "message" && item.message) {
           const parsed = JSON.parse(item.message);
+
+          // 1. Direct Balance Deduction Event (e.g. phone placed bet)
+          if (parsed.type === "AGENT_BALANCE_DEDUCT") {
+            const current = getUsers();
+            const rawId = (parsed.username || parsed.agentId || "").toLowerCase();
+            const cleanId = rawId.replace(/^@/, "");
+            const target = current.find(
+              (u) =>
+                u.id.toLowerCase() === rawId ||
+                u.username.toLowerCase().replace(/^@/, "") === cleanId
+            );
+
+            if (target) {
+              const deductTime = parsed.balanceUpdatedAt || parsed.timestamp || Date.now();
+              if (deductTime >= (target.balanceUpdatedAt || 0)) {
+                target.balance = parsed.newBalance;
+                target.balanceUpdatedAt = deductTime;
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
+                cachedUsers = current;
+                notifySync("USERS_UPDATED", current);
+                onDeduct?.(parsed);
+                onUpdate?.(current);
+              }
+            }
+            return;
+          }
+
+          // 2. Full Snapshot Sync
           if (parsed.type === "ACCOUNTS_SYNC" && Array.isArray(parsed.users) && parsed.users.length > 0) {
             const current = getUsers();
             const mergedMap = new Map<string, UserAccount>();
@@ -560,9 +645,16 @@ export function subscribeToCloudUsers(onUpdate?: (users: UserAccount[]) => void)
                     (remoteU.username || "").toLowerCase().replace(/^@/, "")
                 );
               if (existing) {
+                const localUpdatedAt = existing.balanceUpdatedAt || 0;
+                const remoteUpdatedAt = remoteU.balanceUpdatedAt || 0;
+                const effBalance = remoteUpdatedAt >= localUpdatedAt ? remoteU.balance : existing.balance;
+                const effUpdatedAt = Math.max(localUpdatedAt, remoteUpdatedAt);
+
                 mergedMap.set(existing.id, {
                   ...existing,
                   ...remoteU,
+                  balance: effBalance,
+                  balanceUpdatedAt: effUpdatedAt,
                   bets: existing.bets || [],
                   deposits: existing.deposits || [],
                 });
@@ -573,6 +665,7 @@ export function subscribeToCloudUsers(onUpdate?: (users: UserAccount[]) => void)
                   totalWithdrawn: 0,
                   deposits: [],
                   bets: [],
+                  balanceUpdatedAt: remoteU.balanceUpdatedAt || Date.now(),
                 });
               }
             });
@@ -745,10 +838,11 @@ export function deductAgentBalance(
     };
   }
 
+  const now = Date.now();
   const newBalance = Math.max(0, users[idx].balance - totalStake);
   users[idx].balance = newBalance;
+  users[idx].balanceUpdatedAt = now;
 
-  const now = Date.now();
   const betRecords: UserBetRecord[] = items.map((it) => ({
     id: `bet_${now}_${Math.random().toString(36).slice(2, 6)}`,
     roundId,
@@ -766,6 +860,17 @@ export function deductAgentBalance(
 
   users[idx].bets = [...betRecords, ...(users[idx].bets || [])];
   saveUsers(users);
+
+  // Broadcast dedicated atomic balance deduction event to Admin & all devices
+  broadcastBalanceDeductionToCloud(
+    users[idx].id,
+    users[idx].username,
+    users[idx].displayName,
+    totalStake,
+    newBalance,
+    roundId,
+    now
+  );
 
   return { success: true, newBalance };
 }
@@ -799,6 +904,7 @@ export function depositToUser(
   };
 
   target.balance = newBalance;
+  target.balanceUpdatedAt = now;
   target.totalDeposited = (target.totalDeposited || 0) + amount;
   target.deposits = [depositRecord, ...(target.deposits || [])];
 
@@ -854,6 +960,7 @@ export function withdrawFromUser(
   if (target.balance < amount) throw new Error("Insufficient user balance");
 
   target.balance = target.balance - amount;
+  target.balanceUpdatedAt = Date.now();
   target.totalWithdrawn = (target.totalWithdrawn || 0) + amount;
 
   users[idx] = target;
@@ -901,6 +1008,7 @@ export function setUserBalance(userId: string, balance: number): UserAccount {
 
   const target = { ...users[idx] };
   target.balance = Math.max(0, balance);
+  target.balanceUpdatedAt = Date.now();
   users[idx] = target;
   saveUsers(users);
 

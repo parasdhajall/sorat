@@ -13,6 +13,8 @@ import {
   getActiveUserId,
   UserAccount,
   getActiveUser,
+  pullUsersFromCloud,
+  subscribeToCloudUsers,
 } from "@/lib/userStore";
 import { UserAccountsView } from "@/components/admin/UserAccountsView";
 import { OverviewView } from "@/components/admin/OverviewView";
@@ -101,6 +103,24 @@ export default function AdminPage() {
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
   }, [reloadUsers]);
+
+  // Real-time Cloud User Accounts & Live Bet Deduction Sync with Phone POS
+  useEffect(() => {
+    pullUsersFromCloud().then((cloudUsers) => {
+      setUsers([...cloudUsers]);
+    });
+
+    const unsub = subscribeToCloudUsers(
+      (updatedUsers) => {
+        setUsers([...updatedUsers]);
+      },
+      () => {
+        setUsers([...getUsers()]);
+      }
+    );
+
+    return () => unsub();
+  }, []);
 
   // Synchronized Game Clock Ticker
   useEffect(() => {

@@ -10,6 +10,8 @@ import {
   getCategorizedUserBets,
   getTodayDateStr,
   getYesterdayDateStr,
+  deductAgentBalance,
+  authenticateAgent,
 } from "@/lib/userStore";
 
 describe("User Store & Financial Profit Engine", () => {
@@ -98,6 +100,38 @@ describe("User Store & Financial Profit Engine", () => {
     expect(categorized.yesterday.length).toBeGreaterThan(0);
     expect(categorized.today.every((b) => b.dateStr === today)).toBe(true);
     expect(categorized.yesterday.every((b) => b.dateStr === yesterday)).toBe(true);
+  });
+
+  it("atomically deducts agent balance, stamps balanceUpdatedAt, and prevents negative balance", () => {
+    const ramu = authenticateAgent("@ram", "1212");
+    expect(ramu.success).toBe(true);
+    expect(ramu.user).toBeDefined();
+
+    const startBalance = ramu.user!.balance;
+    const res = deductAgentBalance(
+      "@ram",
+      startBalance,
+      "#1234",
+      1234,
+      [{ cardIndex: 0, cardName: "पतंग", amount: startBalance }]
+    );
+
+    expect(res.success).toBe(true);
+    expect(res.newBalance).toBe(0);
+
+    const reloaded = authenticateAgent("@ram", "1212");
+    expect(reloaded.user!.balance).toBe(0);
+    expect(reloaded.user!.balanceUpdatedAt).toBeGreaterThan(0);
+
+    // Over-draft fails
+    const failRes = deductAgentBalance(
+      "@ram",
+      10,
+      "#1234",
+      1234,
+      [{ cardIndex: 0, cardName: "पतंग", amount: 10 }]
+    );
+    expect(failRes.success).toBe(false);
   });
 });
 

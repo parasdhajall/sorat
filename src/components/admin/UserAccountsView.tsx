@@ -55,11 +55,6 @@ export function UserAccountsView({
     setTimeout(() => setActionSuccessMsg(null), 3500);
   };
 
-  // Broadcast all users to phone app cloud channel on mount or when users change
-  useEffect(() => {
-    broadcastUsersToCloud(users);
-  }, [users]);
-
   const handleManualCloudSync = () => {
     broadcastUsersToCloud(users);
     showNotification("☁️ All User Accounts Synced to Phone Apps & APK!");

@@ -601,13 +601,27 @@
       if (!u) return;
       const uName = (u.username || "").toLowerCase();
       const clean = uName.replace(/^@/, "");
+      const local = agentAccounts[uName] || agentAccounts[clean];
+      const localUpdatedAt = (local && local.balanceUpdatedAt) || 0;
+      const remoteUpdatedAt = u.balanceUpdatedAt || 0;
+
+      // Never let an older remote snapshot revert a newer local balance deduction!
+      let effBalance = Number(u.balance ?? 0);
+      let effUpdatedAt = remoteUpdatedAt;
+      if (local && localUpdatedAt > remoteUpdatedAt) {
+        effBalance = local.balance;
+        effUpdatedAt = localUpdatedAt;
+      }
+
       const obj = {
         id: u.id || uName,
         name: u.displayName || u.name || uName,
         pin: String(u.pin || "1234").trim(),
-        balance: Number(u.balance || 0),
+        balance: effBalance,
+        balanceUpdatedAt: effUpdatedAt,
         phone: u.phone || ""
       };
+
       if (uName) agentAccounts[uName] = obj;
       if (clean) agentAccounts[clean] = obj;
       if (u.id) agentAccounts[u.id.toLowerCase()] = obj;
@@ -618,6 +632,20 @@
       if (u.phone) {
         const cleanPhone = u.phone.replace(/\D/g, "");
         if (cleanPhone) agentAccounts[cleanPhone] = obj;
+      }
+
+      // If active current agent, keep UI updated
+      if (currentAgent) {
+        const cId = (currentAgent.id || "").toLowerCase();
+        const cClean = cId.replace(/^@/, "");
+        if (cId === uName || cClean === clean) {
+          currentAgent.balance = effBalance;
+          currentAgent.balanceUpdatedAt = effUpdatedAt;
+          localStorage.setItem("sorat_current_agent", JSON.stringify(currentAgent));
+          const el = document.getElementById("displayBalance");
+          if (el) el.innerText = `₹${effBalance.toLocaleString("en-IN")}`;
+          updateSummary();
+        }
       }
     }
 
@@ -680,7 +708,22 @@
     // Load saved session
     try {
       const savedAgent = localStorage.getItem("sorat_current_agent");
-      if (savedAgent) currentAgent = JSON.parse(savedAgent);
+      if (savedAgent) {
+        currentAgent = JSON.parse(savedAgent);
+        if (currentAgent && currentAgent.id) {
+          const cId = currentAgent.id.toLowerCase();
+          const clean = cId.replace(/^@/, "");
+          if (!currentAgent.balanceUpdatedAt) currentAgent.balanceUpdatedAt = Date.now();
+          if (agentAccounts[cId]) {
+            agentAccounts[cId].balance = currentAgent.balance;
+            agentAccounts[cId].balanceUpdatedAt = currentAgent.balanceUpdatedAt;
+          }
+          if (agentAccounts[clean]) {
+            agentAccounts[clean].balance = currentAgent.balance;
+            agentAccounts[clean].balanceUpdatedAt = currentAgent.balanceUpdatedAt;
+          }
+        }
+      }
       const savedTickets = localStorage.getItem("sorat_pos_tickets");
       if (savedTickets) tickets = JSON.parse(savedTickets);
     } catch (e) {}
@@ -972,13 +1015,66 @@
 
       const clock = getISTRoundState();
       const now = new Date();
+      const nowTs = Date.now();
       const ticketId = "TKT-" + Math.random().toString(36).substring(2, 8).toUpperCase();
       const custName = document.getElementById("customerNameInput").value.trim() || "Walk-in";
 
-      // Deduct balance (Burn model)
-      currentAgent.balance -= total;
+      // 1. Deduct balance and tag timestamp
+      currentAgent.balance = Math.max(0, currentAgent.balance - total);
+      currentAgent.balanceUpdatedAt = nowTs;
       localStorage.setItem("sorat_current_agent", JSON.stringify(currentAgent));
       document.getElementById("displayBalance").innerText = `₹${currentAgent.balance.toLocaleString("en-IN")}`;
+
+      // 2. Keep in-memory agent map in sync so refresh doesn't revert
+      const cId = (currentAgent.id || "").toLowerCase();
+      const cleanU = cId.replace(/^@/, "");
+      if (agentAccounts[cId]) {
+        agentAccounts[cId].balance = currentAgent.balance;
+        agentAccounts[cId].balanceUpdatedAt = nowTs;
+      }
+      if (agentAccounts[cleanU]) {
+        agentAccounts[cleanU].balance = currentAgent.balance;
+        agentAccounts[cleanU].balanceUpdatedAt = nowTs;
+      }
+
+      // 3. Persist into sorat_users_v2
+      try {
+        const raw = localStorage.getItem("sorat_users_v2");
+        let list = raw ? JSON.parse(raw) : [];
+        const uIdx = list.findIndex(u => (u.username || "").toLowerCase().replace(/^@/, "") === cleanU);
+        if (uIdx !== -1) {
+          list[uIdx].balance = currentAgent.balance;
+          list[uIdx].balanceUpdatedAt = nowTs;
+        } else {
+          list.push({
+            id: currentAgent.id,
+            username: currentAgent.id,
+            displayName: currentAgent.name,
+            balance: currentAgent.balance,
+            balanceUpdatedAt: nowTs
+          });
+        }
+        localStorage.setItem("sorat_users_v2", JSON.stringify(list));
+      } catch (e) {}
+
+      // 4. Broadcast balance deduction directly to Admin Panel via Cloud
+      try {
+        fetch("https://ntfy.sh/sorat_accounts_sync_v2_99", {
+          method: "POST",
+          headers: { Title: "BALANCE_DEDUCT" },
+          body: JSON.stringify({
+            type: "AGENT_BALANCE_DEDUCT",
+            agentId: currentAgent.id,
+            username: currentAgent.id,
+            agentName: currentAgent.name,
+            totalDeducted: total,
+            newBalance: currentAgent.balance,
+            balanceUpdatedAt: nowTs,
+            roundId: clock.roundId,
+            timestamp: nowTs
+          })
+        }).catch(() => {});
+      } catch (e) {}
 
       const items = Object.entries(selectedBets).map(([cId, amt]) => {
         const card = CARDS.find(c => c.id === Number(cId));
@@ -1001,7 +1097,7 @@
       tickets.unshift(newTicket);
       localStorage.setItem("sorat_pos_tickets", JSON.stringify(tickets));
 
-      // Broadcast ticket bets to TV Screen via Cloud channel
+      // 5. Broadcast ticket bets to TV Screen via Cloud channel
       try {
         fetch("https://ntfy.sh/sorat_arena_live_v2_99", {
           method: "POST",
