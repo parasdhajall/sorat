@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   UserAccount,
   UserProfitStats,
@@ -12,6 +12,7 @@ import {
   getCategorizedUserBets,
   setActiveUserId,
   getActiveUserId,
+  broadcastUsersToCloud,
 } from "@/lib/userStore";
 import { CARDS, getCardByIndex } from "@/lib/cards";
 
@@ -52,6 +53,16 @@ export function UserAccountsView({
   const showNotification = (msg: string) => {
     setActionSuccessMsg(msg);
     setTimeout(() => setActionSuccessMsg(null), 3500);
+  };
+
+  // Broadcast all users to phone app cloud channel on mount or when users change
+  useEffect(() => {
+    broadcastUsersToCloud(users);
+  }, [users]);
+
+  const handleManualCloudSync = () => {
+    broadcastUsersToCloud(users);
+    showNotification("☁️ All User Accounts Synced to Phone Apps & APK!");
   };
 
   // Selected user resolution
@@ -268,14 +279,26 @@ export function UserAccountsView({
           />
         </div>
 
-        <button
-          type="button"
-          onClick={() => setIsAddUserOpen(true)}
-          className="flex items-center justify-center gap-1.5 py-2 px-4 rounded-xl bg-primary text-primary-foreground font-display text-xs font-black shadow-gold hover:opacity-90 transition active:scale-95 shrink-0"
-        >
-          <span>➕</span>
-          <span>ADD NEW USER ACCOUNT</span>
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={handleManualCloudSync}
+            className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border border-emerald-500/40 bg-emerald-500/15 text-emerald-400 font-display text-xs font-bold hover:bg-emerald-500/25 transition active:scale-95"
+            title="Force push accounts to all phone POS terminals"
+          >
+            <span>☁️</span>
+            <span>Sync to Phone App</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsAddUserOpen(true)}
+            className="flex items-center justify-center gap-1.5 py-2 px-4 rounded-xl bg-primary text-primary-foreground font-display text-xs font-black shadow-gold hover:opacity-90 transition active:scale-95"
+          >
+            <span>➕</span>
+            <span>ADD NEW USER ACCOUNT</span>
+          </button>
+        </div>
       </div>
 
       {/* Main Grid: User List (Left) + Selected User Management Dossier (Right) */}

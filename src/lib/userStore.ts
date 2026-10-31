@@ -121,6 +121,32 @@ function createInitialSeedUsers(): UserAccount[] {
 
   return [
     {
+      id: "usr_ramu_00",
+      username: "@ram",
+      displayName: "Ramu",
+      phone: "9284893346",
+      pin: "1212",
+      agentCode: "@ram",
+      balance: 1000,
+      totalDeposited: 1000,
+      totalWithdrawn: 0,
+      createdAt: now,
+      status: "ACTIVE",
+      notes: "Main TV Counter Agent",
+      deposits: [
+        {
+          id: "dep_ram_01",
+          amount: 1000,
+          timestamp: now - 3600 * 1000,
+          dateStr: todayStr,
+          timeStr: "10:00 AM",
+          note: "Counter Cash Deposit",
+          balanceAfter: 1000,
+        },
+      ],
+      bets: [],
+    },
+    {
       id: "usr_rahul_01",
       username: "agent1",
       displayName: "Rahul Sharma (Agent 1)",
@@ -414,12 +440,165 @@ export function getUsers(): UserAccount[] {
   return seed;
 }
 
+export const CLOUD_ACCOUNTS_SYNC_TOPIC = "sorat_accounts_sync_v2_99";
+
+/**
+ * Broadcasts lightweight accounts snapshot to the cloud topic so phones & APKs receive them instantly.
+ */
+export function broadcastUsersToCloud(users: UserAccount[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    const payload = users.map((u) => ({
+      id: u.id,
+      username: u.username,
+      displayName: u.displayName,
+      phone: u.phone,
+      pin: u.pin || "1234",
+      agentCode: u.agentCode,
+      balance: u.balance,
+      totalDeposited: u.totalDeposited,
+      status: u.status,
+    }));
+
+    fetch(`https://ntfy.sh/${CLOUD_ACCOUNTS_SYNC_TOPIC}`, {
+      method: "POST",
+      headers: { Title: "ACCOUNTS_SYNC" },
+      body: JSON.stringify({ type: "ACCOUNTS_SYNC", users: payload, ts: Date.now() }),
+    }).catch(() => {});
+  } catch (e) {
+    console.error("Cloud users broadcast error:", e);
+  }
+}
+
+/**
+ * Pulls latest accounts snapshot from cloud topic and updates local store.
+ */
+export async function pullUsersFromCloud(): Promise<UserAccount[]> {
+  if (typeof window === "undefined") return getUsers();
+  try {
+    const res = await fetch(`https://ntfy.sh/${CLOUD_ACCOUNTS_SYNC_TOPIC}/json?poll=1&since=all`);
+    if (res.ok) {
+      const text = await res.text();
+      const lines = text.trim().split("\n");
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+          const item = JSON.parse(lines[i]);
+          if (item.event === "message" && item.message) {
+            const parsed = JSON.parse(item.message);
+            if (parsed.type === "ACCOUNTS_SYNC" && Array.isArray(parsed.users) && parsed.users.length > 0) {
+              const current = getUsers();
+              const mergedMap = new Map<string, UserAccount>();
+              current.forEach((u) => mergedMap.set(u.id, u));
+
+              parsed.users.forEach((remoteU: any) => {
+                const existing =
+                  mergedMap.get(remoteU.id) ||
+                  current.find(
+                    (c) =>
+                      c.username.toLowerCase().replace(/^@/, "") ===
+                      (remoteU.username || "").toLowerCase().replace(/^@/, "")
+                  );
+                if (existing) {
+                  mergedMap.set(existing.id, {
+                    ...existing,
+                    ...remoteU,
+                    bets: existing.bets || [],
+                    deposits: existing.deposits || [],
+                  });
+                } else {
+                  mergedMap.set(remoteU.id, {
+                    ...remoteU,
+                    createdAt: Date.now(),
+                    totalWithdrawn: 0,
+                    deposits: [],
+                    bets: [],
+                  });
+                }
+              });
+
+              const mergedUsers = Array.from(mergedMap.values());
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedUsers));
+              cachedUsers = mergedUsers;
+              notifySync("USERS_UPDATED", mergedUsers);
+              return mergedUsers;
+            }
+          }
+        } catch {}
+      }
+    }
+  } catch (e) {
+    console.error("Failed to pull users from cloud:", e);
+  }
+  return getUsers();
+}
+
+/**
+ * Subscribes to real-time cloud account changes via Server-Sent Events (SSE).
+ */
+export function subscribeToCloudUsers(onUpdate?: (users: UserAccount[]) => void): () => void {
+  if (typeof window === "undefined" || !("EventSource" in window)) {
+    return () => {};
+  }
+  try {
+    const sse = new EventSource(`https://ntfy.sh/${CLOUD_ACCOUNTS_SYNC_TOPIC}/sse`);
+    sse.onmessage = (event) => {
+      try {
+        const item = JSON.parse(event.data);
+        if (item.event === "message" && item.message) {
+          const parsed = JSON.parse(item.message);
+          if (parsed.type === "ACCOUNTS_SYNC" && Array.isArray(parsed.users) && parsed.users.length > 0) {
+            const current = getUsers();
+            const mergedMap = new Map<string, UserAccount>();
+            current.forEach((u) => mergedMap.set(u.id, u));
+
+            parsed.users.forEach((remoteU: any) => {
+              const existing =
+                mergedMap.get(remoteU.id) ||
+                current.find(
+                  (c) =>
+                    c.username.toLowerCase().replace(/^@/, "") ===
+                    (remoteU.username || "").toLowerCase().replace(/^@/, "")
+                );
+              if (existing) {
+                mergedMap.set(existing.id, {
+                  ...existing,
+                  ...remoteU,
+                  bets: existing.bets || [],
+                  deposits: existing.deposits || [],
+                });
+              } else {
+                mergedMap.set(remoteU.id, {
+                  ...remoteU,
+                  createdAt: Date.now(),
+                  totalWithdrawn: 0,
+                  deposits: [],
+                  bets: [],
+                });
+              }
+            });
+
+            const mergedUsers = Array.from(mergedMap.values());
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedUsers));
+            cachedUsers = mergedUsers;
+            notifySync("USERS_UPDATED", mergedUsers);
+            onUpdate?.(mergedUsers);
+          }
+        }
+      } catch {}
+    };
+    return () => sse.close();
+  } catch {
+    return () => {};
+  }
+}
+
 export function saveUsers(users: UserAccount[]): void {
   cachedUsers = users;
   if (typeof window !== "undefined") {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(users));
       notifySync("USERS_UPDATED", users);
+      broadcastUsersToCloud(users);
     } catch (e) {
       console.error("Failed to save users", e);
     }
@@ -482,20 +661,23 @@ export function authenticateAgent(
   pin: string
 ): { success: boolean; user?: UserAccount; error?: string } {
   const users = getUsers();
-  const cleanId = identifier.trim().toLowerCase();
-  const cleanPin = pin.trim();
+  const rawId = (identifier || "").trim().toLowerCase();
+  const cleanId = rawId.replace(/^@/, "");
+  const cleanPin = (pin || "").trim();
 
   if (!cleanId) return { success: false, error: "Kripya Agent ID daalein" };
   if (!cleanPin) return { success: false, error: "Kripya 4-digit PIN daalein" };
 
   const user = users.find((u) => {
-    const uName = (u.username || "").toLowerCase();
-    const uCode = (u.agentCode || "").toLowerCase();
+    const uRaw = (u.username || "").toLowerCase();
+    const uName = uRaw.replace(/^@/, "");
+    const uCode = (u.agentCode || "").toLowerCase().replace(/^@/, "");
     const uPhone = (u.phone || "").replace(/\D/g, "");
     const cleanPhone = cleanId.replace(/\D/g, "");
 
     return (
       uName === cleanId ||
+      uRaw === rawId ||
       uCode === cleanId ||
       u.id.toLowerCase() === cleanId ||
       (cleanPhone.length >= 4 && uPhone.includes(cleanPhone))
@@ -505,11 +687,11 @@ export function authenticateAgent(
   if (!user) {
     return {
       success: false,
-      error: `Galat Agent ID "${identifier}"! Kripya sahi ID daalein (jaise agent1, agent2).`,
+      error: `Galat Agent ID "${identifier}"! Kripya sahi ID daalein (jaise @ram, agent1).`,
     };
   }
 
-  const expectedPin = user.pin || "1234";
+  const expectedPin = (user.pin || "1234").trim();
   if (expectedPin !== cleanPin) {
     return {
       success: false,

@@ -26,6 +26,8 @@ import {
   settleRoundBets,
   UserAccount,
   deductAgentBalance,
+  pullUsersFromCloud,
+  subscribeToCloudUsers,
 } from "@/lib/userStore";
 import { ThermalSlipModal } from "@/components/pos/ThermalSlipModal";
 import { PrinterSettingsModal } from "@/components/pos/PrinterSettingsModal";
@@ -152,6 +154,24 @@ export default function AgentPage() {
     };
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
+  }, []);
+
+  // Realtime Cloud User Accounts Sync (syncs with Admin on PC instantly)
+  useEffect(() => {
+    pullUsersFromCloud().then(() => {
+      const u = getLoggedInAgent() || getActiveUser();
+      setLoggedInAgentState(getLoggedInAgent());
+      setAgentUser(u);
+      setAgentBalance(u.balance);
+    });
+
+    const unsub = subscribeToCloudUsers(() => {
+      const u = getLoggedInAgent() || getActiveUser();
+      setLoggedInAgentState(getLoggedInAgent());
+      setAgentUser(u);
+      setAgentBalance(u.balance);
+    });
+    return () => unsub();
   }, []);
 
   // Realtime Sync with TV Screen
@@ -322,10 +342,15 @@ export default function AgentPage() {
     }
   };
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
-    const res = authenticateAgent(loginIdInput, loginPinInput);
+    let res = authenticateAgent(loginIdInput, loginPinInput);
+    if (!res.success) {
+      // Pull fresh users from cloud in case account was just created or updated on Admin
+      await pullUsersFromCloud();
+      res = authenticateAgent(loginIdInput, loginPinInput);
+    }
     if (res.success && res.user) {
       setLoggedInAgentState(res.user);
       setAgentUser(res.user);
@@ -421,8 +446,8 @@ export default function AgentPage() {
             <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest block">
               Quick Test / Demo Login
             </span>
-            <div className="grid grid-cols-3 gap-2">
-              {getUsers().slice(0, 3).map((u) => (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {getUsers().slice(0, 4).map((u) => (
                 <button
                   key={u.id}
                   type="button"
