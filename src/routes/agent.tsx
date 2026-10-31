@@ -27,6 +27,7 @@ import {
 } from "@/lib/userStore";
 import { ThermalSlipModal } from "@/components/pos/ThermalSlipModal";
 import { PrinterSettingsModal } from "@/components/pos/PrinterSettingsModal";
+import { PrinterStatusBadge } from "@/components/pos/PrinterStatusBadge";
 import {
   executeDirectPrint,
   isDirectPrinterConnected,
@@ -472,19 +473,7 @@ export default function AgentPage() {
               📺
             </a>
 
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab("printer");
-                setShowPrinterModal(true);
-              }}
-              className="px-2.5 py-1 rounded-lg bg-emerald-500/25 border border-emerald-400 text-emerald-300 hover:bg-emerald-500/35 text-xs font-black transition flex items-center gap-1.5 shadow-sm active:scale-95"
-              title="Thermal Printer Setup & Bluetooth Connect"
-            >
-              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>🖨️</span>
-              <span className="text-[11px] font-bold">Printer</span>
-            </button>
+            <PrinterStatusBadge showTextOnMobile={true} />
           </div>
         </div>
 

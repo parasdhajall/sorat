@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { ThermalTicket } from "@/lib/ticketStore";
 import { executeDirectPrint, isDirectPrinterConnected } from "@/lib/thermalPrinter";
 import { getCardDisplayName } from "@/lib/cards";
+import { PrinterStatusBadge } from "./PrinterStatusBadge";
 
 interface ThermalSlipModalProps {
   ticket: ThermalTicket | null;
@@ -51,13 +52,16 @@ export function ThermalSlipModal({
                 </span>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="text-muted-foreground hover:text-foreground text-sm p-1 rounded-lg hover:bg-muted"
-            >
-              ✕
-            </button>
+            <div className="flex items-center gap-1.5">
+              <PrinterStatusBadge showTextOnMobile={false} />
+              <button
+                type="button"
+                onClick={onClose}
+                className="text-muted-foreground hover:text-foreground text-sm p-1 rounded-lg hover:bg-muted"
+              >
+                ✕
+              </button>
+            </div>
           </div>
 
           {/* Realistic Paper Thermal Receipt Card */}
@@ -129,22 +133,34 @@ export function ThermalSlipModal({
           )}
 
           {/* Action Buttons */}
-          <div className="flex items-center gap-2 pt-1">
+          <div className="space-y-2 pt-1">
             <button
               type="button"
               onClick={handlePrint}
-              className="flex-1 py-2.5 px-4 rounded-xl bg-primary text-primary-foreground font-display text-xs font-black shadow-gold hover:opacity-90 transition active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+              className="w-full py-2.5 px-4 rounded-xl bg-primary text-primary-foreground font-display text-xs font-black shadow-gold hover:opacity-90 transition active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <span>🖨️</span>
               <span>{isDirectPrinterConnected() ? "DIRECT PRINT (NO DIALOG)" : "PRINT THERMAL PARCHI"}</span>
             </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="py-2.5 px-3 rounded-xl bg-muted text-muted-foreground hover:text-foreground text-xs font-bold transition cursor-pointer"
-            >
-              Done
-            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof window !== "undefined") window.print();
+                }}
+                className="flex-1 py-2 px-3 rounded-xl border border-border bg-card hover:bg-muted text-muted-foreground hover:text-foreground text-[11px] font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <span>📱</span>
+                <span>System Print / PDF</span>
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 rounded-xl bg-muted text-muted-foreground hover:text-foreground text-xs font-bold transition cursor-pointer"
+              >
+                Done
+              </button>
+            </div>
           </div>
         </div>
       </div>

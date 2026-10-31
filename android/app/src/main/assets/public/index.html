@@ -507,22 +507,33 @@
       </div>
 
       <!-- Action Buttons -->
-      <div class="flex gap-2 no-print">
+      <div class="space-y-2 no-print">
         <button
           type="button"
-          onclick="window.print()"
-          class="flex-1 py-2.5 rounded-xl gold-gradient text-zinc-950 font-black text-xs shadow hover:brightness-110 transition flex items-center justify-center gap-1.5"
+          onclick="executeDirectSlipPrint()"
+          class="w-full py-2.5 rounded-xl gold-gradient text-zinc-950 font-black text-xs shadow hover:brightness-110 transition flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
         >
           <span>🖨️</span>
-          <span>PRINT SLIP NOW</span>
+          <span>DIRECT PRINT (NO DIALOG)</span>
         </button>
-        <button
-          type="button"
-          onclick="closeSlipModal()"
-          class="px-4 py-2.5 rounded-xl border border-zinc-700 bg-zinc-800 text-zinc-300 text-xs font-bold"
-        >
-          Done
-        </button>
+        <div class="flex gap-2">
+          <button
+            type="button"
+            onclick="window.print()"
+            class="flex-1 py-2 rounded-xl border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+            title="Print via Android System / PDF"
+          >
+            <span>📱</span>
+            <span>System Print / PDF</span>
+          </button>
+          <button
+            type="button"
+            onclick="closeSlipModal()"
+            class="px-4 py-2 rounded-xl border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold transition cursor-pointer"
+          >
+            Done
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -809,7 +820,133 @@
       return name;
     }
 
+    let currentViewingTicket = null;
+    let selectedPrinterAddress = localStorage.getItem("sorat_printer_address") || "";
+
+    // Check if Android Native Bridge exists and auto-connect
+    if (typeof window.AndroidBridge !== "undefined") {
+      try {
+        const savedName = localStorage.getItem("sorat_printer_name");
+        if (savedName) {
+          const nameEl = document.getElementById("printerStatusName");
+          const cfgEl = document.getElementById("cfgPrinterName");
+          if (nameEl) nameEl.innerText = savedName;
+          if (cfgEl) cfgEl.innerText = savedName;
+        }
+        if (selectedPrinterAddress && window.AndroidBridge.connect) {
+          window.AndroidBridge.connect(selectedPrinterAddress);
+        }
+      } catch (e) {}
+    }
+
+    function buildTicketEscPosBase64(ticket) {
+      const bytes = [];
+      const push = (...b) => bytes.push(...b);
+      const text = (str) => {
+        for (let i = 0; i < str.length; i++) {
+          const code = str.charCodeAt(i);
+          push(code < 128 ? code : 0x3f);
+        }
+      };
+      const line = (str) => { text(str); push(0x0a); };
+      const divider = "--------------------------------";
+
+      push(0x1b, 0x40); // Init
+      push(0x1b, 0x61, 0x01); // Center
+      push(0x1b, 0x45, 0x01); // Bold ON
+      push(0x1d, 0x21, 0x11); // Double size
+      line("SORAT LIVE ARENA");
+      push(0x1d, 0x21, 0x00); // Normal
+      push(0x1b, 0x45, 0x00); // Bold OFF
+      line(divider);
+
+      push(0x1b, 0x61, 0x00); // Left
+      line("Ticket No:  #" + ticket.id);
+      line("Date & Time:" + ticket.dateStr + " " + ticket.timeStr);
+      line("Round No:   " + ticket.roundId);
+      line("Customer:   " + (ticket.customerName || "Walk-in"));
+      line("Counter:    " + (ticket.agentName || "Counter"));
+      line(divider);
+
+      push(0x1b, 0x45, 0x01);
+      line("PICTURE                   AMT(Rs)");
+      push(0x1b, 0x45, 0x00);
+
+      ticket.items.forEach((item, idx) => {
+        let cardRoman = item.cardName;
+        for (const [k, v] of Object.entries(ROMAN_CARD_MAP)) {
+          if (item.cardName && item.cardName.includes(k)) {
+            cardRoman = v.replace(/[^\x00-\x7F]/g, "").trim();
+            break;
+          }
+        }
+        const left = (idx + 1) + ". " + cardRoman;
+        const right = "Rs " + item.amount;
+        const pad = 32 - left.length - right.length;
+        line(left + " ".repeat(Math.max(1, pad)) + right);
+      });
+
+      line(divider);
+      push(0x1b, 0x45, 0x01);
+      const totLeft = "TOTAL STAKE:";
+      const totRight = "Rs " + ticket.totalAmount;
+      line(totLeft + " ".repeat(Math.max(1, 32 - totLeft.length - totRight.length)) + totRight);
+      push(0x1b, 0x45, 0x00);
+      line(divider);
+
+      push(0x1b, 0x61, 0x01);
+      line("*" + ticket.id + "*");
+
+      push(0x0a, 0x0a, 0x0a, 0x0a);
+      push(0x1d, 0x56, 0x01); // Cut
+
+      let binary = "";
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return btoa(binary);
+    }
+
+    function executeDirectSlipPrint(ticketToPrint) {
+      const tkt = ticketToPrint || currentViewingTicket;
+      if (!tkt) return;
+
+      if (typeof window.AndroidBridge !== "undefined") {
+        if (!window.AndroidBridge.isBluetoothEnabled()) {
+          alert("Phone Bluetooth OFF hai. Kripya Bluetooth ON karein.");
+          return;
+        }
+        if (!window.AndroidBridge.hasPermissions()) {
+          window.AndroidBridge.requestPermissions();
+          alert("Bluetooth permission allow karke dubara print karein.");
+          return;
+        }
+        const base64 = buildTicketEscPosBase64(tkt);
+        const resRaw = window.AndroidBridge.print(selectedPrinterAddress || "", base64);
+        try {
+          const res = JSON.parse(resRaw);
+          if (res.success) {
+            if (res.deviceName) {
+              const nameEl = document.getElementById("printerStatusName");
+              const cfgEl = document.getElementById("cfgPrinterName");
+              if (nameEl) nameEl.innerText = res.deviceName;
+              if (cfgEl) cfgEl.innerText = res.deviceName;
+            }
+            return;
+          } else {
+            alert(res.message || "Print fail");
+          }
+        } catch (e) {
+          alert("Print error: " + e.message);
+        }
+        return;
+      }
+
+      window.print();
+    }
+
     function openSlipModal(ticket) {
+      currentViewingTicket = ticket;
       document.getElementById("slipTicketId").innerText = ticket.id;
       document.getElementById("slipDateTime").innerText = `${ticket.dateStr} ${ticket.timeStr}`;
       document.getElementById("slipRoundId").innerText = ticket.roundId;
@@ -826,6 +963,13 @@
 
       document.getElementById("slipTotalStake").innerText = `₹${ticket.totalAmount}`;
       document.getElementById("slipModal").classList.remove("hidden");
+
+      // In Android APK, auto-print directly via Bluetooth without opening dialog!
+      if (typeof window.AndroidBridge !== "undefined") {
+        setTimeout(() => {
+          executeDirectSlipPrint(ticket);
+        }, 100);
+      }
     }
 
     function closeSlipModal() {
@@ -867,6 +1011,45 @@
     }
 
     async function handleScanBluetoothWeb() {
+      // 1. If running inside Android APK with native AndroidBridge
+      if (typeof window.AndroidBridge !== "undefined") {
+        if (!window.AndroidBridge.isBluetoothEnabled()) {
+          alert("Mobile ka Bluetooth OFF hai. Kripya phone me Bluetooth ON karein.");
+          return;
+        }
+        if (!window.AndroidBridge.hasPermissions()) {
+          window.AndroidBridge.requestPermissions();
+          alert("Bluetooth permission allow karein aur dubara Scan dabayein.");
+          return;
+        }
+        try {
+          const raw = window.AndroidBridge.getPairedDevices();
+          const devices = JSON.parse(raw || "[]");
+          if (!devices || devices.length === 0) {
+            if (window.AndroidBridge.openBluetoothSettings) {
+              window.AndroidBridge.openBluetoothSettings();
+            }
+            alert("Koi paired Bluetooth printer nahi mila. Phone settings me pehle printer pair karein.");
+            return;
+          }
+          const target = devices.find(d => /print|pos|mtp|inner|rp|mpt|veer|seznik|bt|thermal/i.test(d.name)) || devices[0];
+          selectedPrinterAddress = target.address;
+          document.getElementById("printerStatusName").innerText = target.name;
+          document.getElementById("cfgPrinterName").innerText = target.name;
+          localStorage.setItem("sorat_printer_name", target.name);
+          localStorage.setItem("sorat_printer_address", target.address);
+          if (window.AndroidBridge.connect) {
+            window.AndroidBridge.connect(target.address);
+          }
+          alert("✓ Connected to " + target.name + "! Ab har ticket direct print hoga.");
+          return;
+        } catch (e) {
+          alert("Error: " + e.message);
+          return;
+        }
+      }
+
+      // 2. Web Bluetooth in Chrome
       try {
         if (navigator.bluetooth) {
           const device = await navigator.bluetooth.requestDevice({
@@ -879,6 +1062,7 @@
           if (device && device.name) {
             document.getElementById("printerStatusName").innerText = device.name;
             document.getElementById("cfgPrinterName").innerText = device.name;
+            localStorage.setItem("sorat_printer_name", device.name);
             alert("✓ Printer " + device.name + " Bluetooth se connect ho gaya!");
           }
         } else {
@@ -905,9 +1089,7 @@
         totalAmount: 80,
       };
       openSlipModal(dummyTicket);
-      setTimeout(() => {
-        window.print();
-      }, 350);
+      executeDirectSlipPrint(dummyTicket);
     }
 
     function renderTicketsList() {
