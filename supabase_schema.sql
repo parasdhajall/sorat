@@ -363,3 +363,4 @@ GRANT ALL ON public.sorat_bets TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.place_sorat_bets(TEXT, TEXT, INT, TEXT, TEXT, TEXT, TEXT, JSONB) TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.declare_sorat_round(TEXT, INT, TEXT, TEXT) TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.deposit_to_player(TEXT, NUMERIC, TEXT, TEXT, TEXT) TO anon, authenticated, service_role;
+

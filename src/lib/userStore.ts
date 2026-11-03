@@ -1754,6 +1754,7 @@ export async function pushAllToSupabase(): Promise<{
       username: u.username,
       display_name: u.displayName,
       phone: u.phone || null,
+      pin: u.pin || "1234",
       balance: u.balance,
       total_deposited: u.totalDeposited,
       total_withdrawn: u.totalWithdrawn || 0,
@@ -1798,22 +1799,20 @@ export async function pushAllToSupabase(): Promise<{
           user_id: u.id,
           round_id: b.roundId,
           round_number: b.roundNumber,
-          date_str: b.dateStr,
-          time_str: b.timeStr,
+          ticket_id: b.ticketId || b.id,
           card_index: b.cardIndex,
           card_name: b.cardName,
-          stake: b.stake,
-          winning_card_index: b.winningCardIndex ?? null,
-          winning_card_name: b.winningCardName ?? null,
+          amount: b.stake,
           payout: b.payout || 0,
-          is_win: b.isWin || false,
-          status: b.status || "SETTLED",
+          status: b.isWin ? "won" : "lost",
+          date_str: b.dateStr,
+          time_str: b.timeStr,
         });
       });
     });
 
     if (betRows.length > 0) {
-      const { error: bErr } = await supabase.from("bets").upsert(betRows);
+      const { error: bErr } = await supabase.from("sorat_bets").upsert(betRows);
       if (bErr) throw bErr;
       betsCount = betRows.length;
     }
@@ -1864,7 +1863,7 @@ export async function syncFromSupabase(): Promise<{
     const { data: deposits, error: dErr } = await supabase.from("deposits").select("*");
     if (dErr) throw dErr;
 
-    const { data: bets, error: bErr } = await supabase.from("bets").select("*");
+    const { data: bets, error: bErr } = await supabase.from("sorat_bets").select("*");
     if (bErr) throw bErr;
 
     const parsedUsers: UserAccount[] = players.map((p: any) => {
@@ -1884,6 +1883,7 @@ export async function syncFromSupabase(): Promise<{
         .filter((b: any) => b.user_id === p.id)
         .map((b: any) => ({
           id: b.id,
+          ticketId: b.ticket_id,
           roundId: b.round_id,
           roundNumber: b.round_number,
           timestamp: new Date(b.created_at).getTime(),
@@ -1891,12 +1891,12 @@ export async function syncFromSupabase(): Promise<{
           timeStr: b.time_str,
           cardIndex: b.card_index,
           cardName: b.card_name,
-          stake: Number(b.stake),
+          stake: Number(b.amount || b.stake || 0),
           winningCardIndex: b.winning_card_index ?? undefined,
           winningCardName: b.winning_card_name ?? undefined,
           payout: Number(b.payout || 0),
-          isWin: Boolean(b.is_win),
-          status: b.status,
+          isWin: b.status === "won" || Boolean(b.is_win),
+          status: b.status === "won" ? "SETTLED" : b.status === "lost" ? "SETTLED" : "PENDING",
         }));
 
       return {
@@ -1904,6 +1904,7 @@ export async function syncFromSupabase(): Promise<{
         username: p.username,
         displayName: p.display_name,
         phone: p.phone || "",
+        pin: p.pin || "1234",
         balance: Number(p.balance),
         totalDeposited: Number(p.total_deposited),
         totalWithdrawn: Number(p.total_withdrawn || 0),

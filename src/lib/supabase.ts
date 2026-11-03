@@ -9,7 +9,10 @@ export interface SupabaseConfig {
 const STORAGE_URL_KEY = "sorat_supabase_url";
 const STORAGE_KEY_KEY = "sorat_supabase_key";
 
-// Read from Vite environment or localStorage override
+const DEFAULT_SUPABASE_URL = "https://igriqquokpzkbgxqlxhy.supabase.co";
+const DEFAULT_SUPABASE_KEY = "sb_publishable_bX34LRt7UEoVoNUPl7UYnA_JCdM-0aO";
+
+// Read from Vite environment or localStorage override (with live production default fallback)
 export function getSupabaseConfig(): SupabaseConfig {
   let url = "";
   let key = "";
@@ -21,10 +24,10 @@ export function getSupabaseConfig(): SupabaseConfig {
 
   // Fallback to Vite env variables if not set in localStorage
   if (!url) {
-    url = (import.meta as any).env?.VITE_SUPABASE_URL || "";
+    url = (import.meta as any).env?.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
   }
   if (!key) {
-    key = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || "";
+    key = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_KEY;
   }
 
   return {
