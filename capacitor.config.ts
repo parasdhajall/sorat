@@ -5,7 +5,7 @@ const config: CapacitorConfig = {
   appName: 'Sorat POS',
   webDir: '.output/public',
   server: {
-    androidScheme: 'https',
+    url: 'https://sorat.vercel.app',
     cleartext: true
   }
 };

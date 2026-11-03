@@ -11,7 +11,9 @@ public class MainActivity extends BridgeActivity {
         try {
             WebView webView = this.getBridge().getWebView();
             if (webView != null) {
-                webView.addJavascriptInterface(new BluetoothPrinterBridge(this, webView), "AndroidBridge");
+                BluetoothPrinterBridge bridge = new BluetoothPrinterBridge(this, webView);
+                webView.addJavascriptInterface(bridge, "AndroidBridge");
+                webView.addJavascriptInterface(bridge, "AndroidPrinter");
             }
         } catch (Exception e) {
             e.printStackTrace();
