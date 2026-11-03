@@ -646,35 +646,45 @@ export default function AgentPage() {
           </div>
         </div>
 
-        {/* PWA App Install Banner */}
+        {/* App Install & APK Download Banner */}
         {!isStandalone && (
-          <div className="flex items-center justify-between rounded-xl bg-gradient-to-r from-amber-500/20 via-primary/15 to-amber-500/10 border border-primary/30 px-3 py-1.5 shadow-sm text-xs">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 rounded-xl bg-gradient-to-r from-amber-500/20 via-primary/15 to-amber-500/10 border border-primary/30 p-2.5 shadow-sm text-xs">
             <div className="flex items-center gap-2">
-              <span className="text-base">ðŸ“²</span>
+              <span className="text-xl">📲</span>
               <div>
                 <span className="font-bold text-foreground block text-[11px] leading-tight">
-                  Phone me App Install Karein
+                  Sorat Agent App (Android & Mobile)
                 </span>
                 <span className="text-[9px] text-muted-foreground block leading-tight">
-                  Bina browser ke screen par App icon ban jayega
+                  Direct .APK download karein ya Home Screen par install karein
                 </span>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={async () => {
-                if (deferredPrompt) {
-                  deferredPrompt.prompt();
-                  const { outcome } = await deferredPrompt.userChoice;
-                  if (outcome === "accepted") setDeferredPrompt(null);
-                } else {
-                  alert("Apne phone me Chrome ke 3-dots (â‹®) par click karein aur 'Install app' ya 'Add to Home screen' dabayein!");
-                }
-              }}
-              className="px-2.5 py-1 rounded-lg bg-primary text-primary-foreground font-black text-[10px] uppercase shadow hover:brightness-110 active:scale-95 transition"
-            >
-              Install App
-            </button>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <a
+                href="/Sorat_Agent_POS.apk"
+                download="Sorat_Agent_POS.apk"
+                className="flex-1 sm:flex-none text-center px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[10px] uppercase shadow active:scale-95 transition flex items-center justify-center gap-1"
+              >
+                <span>📥</span> Download .APK
+              </a>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (deferredPrompt) {
+                    deferredPrompt.prompt();
+                    const { outcome } = await deferredPrompt.userChoice;
+                    if (outcome === "accepted") setDeferredPrompt(null);
+                  } else {
+                    alert("Chrome ke 3-dots (⋮) par click karein aur 'Install app' ya 'Add to Home screen' dabayein!");
+                  }
+                }}
+                className="flex-1 sm:flex-none px-3 py-1.5 rounded-lg bg-primary hover:brightness-110 text-primary-foreground font-black text-[10px] uppercase shadow active:scale-95 transition"
+              >
+                Install Web App
+              </button>
+            </div>
           </div>
         )}
 
