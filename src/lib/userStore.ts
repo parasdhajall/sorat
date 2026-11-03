@@ -409,6 +409,33 @@ function createInitialSeedUsers(): UserAccount[] {
         },
       ],
     },
+    {
+      id: "usr_kk_05",
+      username: "kk",
+      displayName: "kk",
+      phone: "9284893349",
+      pin: "1111",
+      agentCode: "AGENT-105",
+      balance: 2000,
+      totalDeposited: 2000,
+      totalWithdrawn: 0,
+      createdAt: now - 1800 * 1000,
+      status: "ACTIVE",
+      notes: "Counter Agent kk",
+      deposits: [
+        {
+          id: "dep_kk_01",
+          amount: 2000,
+          timestamp: now - 1800 * 1000,
+          dateStr: todayStr,
+          timeStr: "01:39 PM",
+          note: "Initial Account Deposit",
+          balanceAfter: 2000,
+        },
+      ],
+      bets: [],
+      balanceUpdatedAt: now,
+    },
   ];
 }
 
@@ -515,7 +542,130 @@ export function getUsers(): UserAccount[] {
 export const CLOUD_ACCOUNTS_SYNC_TOPIC = "sorat_accounts_sync_v2_99";
 
 /**
- * Broadcasts accounts snapshot to the cloud topic so phones & APKs receive them instantly.
+ * Merges a list of remote accounts into local store, preserving local bets & deposit history.
+ */
+export function mergeRemoteUsers(remoteUsers: any[]): UserAccount[] {
+  if (!Array.isArray(remoteUsers) || remoteUsers.length === 0) {
+    return getUsers();
+  }
+
+  const current = getUsers();
+  const mergedMap = new Map<string, UserAccount>();
+  current.forEach((u) => mergedMap.set(u.id, u));
+
+  remoteUsers.forEach((remoteU: any) => {
+    if (!remoteU || !remoteU.id) return;
+    const remotePhoneDigits = (remoteU.phone || "").replace(/\D/g, "");
+    const remoteUserClean = (remoteU.username || "").toLowerCase().replace(/^@/, "");
+
+    const existing =
+      mergedMap.get(remoteU.id) ||
+      current.find((c) => {
+        const cPhone = (c.phone || "").replace(/\D/g, "");
+        const cUser = (c.username || "").toLowerCase().replace(/^@/, "");
+        return (
+          (remoteUserClean && cUser === remoteUserClean) ||
+          (remotePhoneDigits.length >= 6 && cPhone.includes(remotePhoneDigits))
+        );
+      });
+
+    if (existing) {
+      const localUpdatedAt = existing.balanceUpdatedAt || 0;
+      const remoteUpdatedAt = remoteU.balanceUpdatedAt || 0;
+      const effBalance = remoteUpdatedAt >= localUpdatedAt ? remoteU.balance : existing.balance;
+      const effUpdatedAt = Math.max(localUpdatedAt, remoteUpdatedAt);
+
+      const isRamu = isRamuUser(existing) || isRamuUser(remoteU);
+      const ramuBets = isRamu ? getRamuSimulatedBets() : [];
+      const finalBets =
+        remoteU.bets && remoteU.bets.length > 0
+          ? remoteU.bets
+          : existing.bets && existing.bets.length > 0
+          ? existing.bets
+          : ramuBets;
+
+      const todayStr = getTodayDateStr();
+      const ramuDeposits = [
+        {
+          id: "dep_ram_01",
+          amount: 5000,
+          timestamp: Date.now() - 3600 * 1000,
+          dateStr: todayStr,
+          timeStr: "09:00 AM",
+          note: "Counter Cash Initial Recharge",
+          balanceAfter: 5000,
+        },
+      ];
+
+      const finalDeposits =
+        remoteU.deposits && remoteU.deposits.length > 0
+          ? remoteU.deposits
+          : existing.deposits && existing.deposits.length > 0
+          ? existing.deposits
+          : isRamu
+          ? ramuDeposits
+          : [];
+
+      mergedMap.set(existing.id, {
+        ...existing,
+        ...remoteU,
+        pin: remoteU.pin || existing.pin || "1234",
+        phone: remoteU.phone || existing.phone || "",
+        balance: isRamu ? 0 : effBalance,
+        balanceUpdatedAt: effUpdatedAt,
+        totalDeposited: isRamu ? 5000 : (remoteU.totalDeposited ?? existing.totalDeposited ?? 0),
+        bets: finalBets,
+        deposits: finalDeposits,
+      });
+    } else {
+      const isRamu = isRamuUser(remoteU);
+      const todayStr = getTodayDateStr();
+      mergedMap.set(remoteU.id, {
+        id: remoteU.id,
+        username: remoteU.username || `user_${Date.now()}`,
+        displayName: remoteU.displayName || remoteU.username || "Agent",
+        phone: remoteU.phone || "",
+        pin: remoteU.pin || "1234",
+        agentCode: remoteU.agentCode || `AGENT-${100 + mergedMap.size}`,
+        createdAt: remoteU.createdAt || Date.now(),
+        totalWithdrawn: remoteU.totalWithdrawn || 0,
+        totalDeposited: isRamu ? 5000 : (remoteU.totalDeposited || 0),
+        balance: isRamu ? 0 : (remoteU.balance || 0),
+        status: remoteU.status || "ACTIVE",
+        notes: remoteU.notes || "",
+        deposits: isRamu
+          ? [
+              {
+                id: "dep_ram_01",
+                amount: 5000,
+                timestamp: Date.now() - 3600 * 1000,
+                dateStr: todayStr,
+                timeStr: "09:00 AM",
+                note: "Counter Cash Initial Recharge",
+                balanceAfter: 5000,
+              },
+            ]
+          : remoteU.deposits || [],
+        bets: isRamu ? getRamuSimulatedBets() : remoteU.bets || [],
+        balanceUpdatedAt: remoteU.balanceUpdatedAt || Date.now(),
+      });
+    }
+  });
+
+  const mergedUsers = Array.from(mergedMap.values());
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedUsers));
+    } catch {}
+  }
+  cachedUsers = mergedUsers;
+  notifySync("USERS_UPDATED", mergedUsers);
+  return mergedUsers;
+}
+
+/**
+ * Broadcasts lightweight accounts snapshot to the cloud topic so phones & APKs receive them instantly.
+ * Strips heavy bets & deposit arrays to stay well below 4KB and avoid ntfy file-attachment conversion.
  */
 export function broadcastUsersToCloud(users: UserAccount[]): void {
   if (typeof window === "undefined") return;
@@ -524,15 +674,15 @@ export function broadcastUsersToCloud(users: UserAccount[]): void {
       id: u.id,
       username: u.username,
       displayName: u.displayName,
-      phone: u.phone,
+      phone: u.phone || "",
       pin: u.pin || "1234",
-      agentCode: u.agentCode,
+      agentCode: u.agentCode || "",
       balance: u.balance,
       balanceUpdatedAt: u.balanceUpdatedAt || Date.now(),
-      totalDeposited: u.totalDeposited,
+      totalDeposited: u.totalDeposited || 0,
+      totalWithdrawn: u.totalWithdrawn || 0,
       status: u.status,
-      deposits: u.deposits,
-      bets: (u.bets || []).slice(0, 30),
+      notes: u.notes || "",
     }));
 
     fetch(`https://ntfy.sh/${CLOUD_ACCOUNTS_SYNC_TOPIC}`, {
@@ -543,6 +693,56 @@ export function broadcastUsersToCloud(users: UserAccount[]): void {
   } catch (e) {
     console.error("Cloud users broadcast error:", e);
   }
+}
+
+/**
+ * Broadcasts instant single user creation event for sub-second cross-device registration.
+ */
+export function broadcastSingleUserCreated(u: UserAccount): void {
+  if (typeof window === "undefined") return;
+  try {
+    const minUser = {
+      id: u.id,
+      username: u.username,
+      displayName: u.displayName,
+      phone: u.phone || "",
+      pin: u.pin || "1234",
+      agentCode: u.agentCode || "",
+      balance: u.balance,
+      balanceUpdatedAt: u.balanceUpdatedAt || Date.now(),
+      totalDeposited: u.totalDeposited || 0,
+      totalWithdrawn: u.totalWithdrawn || 0,
+      status: u.status,
+      notes: u.notes || "",
+    };
+    fetch(`https://ntfy.sh/${CLOUD_ACCOUNTS_SYNC_TOPIC}`, {
+      method: "POST",
+      headers: { Title: "USER_CREATED" },
+      body: JSON.stringify({ type: "USER_CREATED", user: minUser, ts: Date.now() }),
+    }).catch(() => {});
+  } catch {}
+}
+
+export function broadcastPinChange(userId: string, pin: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    fetch(`https://ntfy.sh/${CLOUD_ACCOUNTS_SYNC_TOPIC}`, {
+      method: "POST",
+      headers: { Title: "PIN_CHANGED" },
+      body: JSON.stringify({ type: "PIN_CHANGED", userId, pin, ts: Date.now() }),
+    }).catch(() => {});
+  } catch {}
+}
+
+export function broadcastUserDelete(userId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    fetch(`https://ntfy.sh/${CLOUD_ACCOUNTS_SYNC_TOPIC}`, {
+      method: "POST",
+      headers: { Title: "USER_DELETED" },
+      body: JSON.stringify({ type: "USER_DELETED", userId, ts: Date.now() }),
+    }).catch(() => {});
+  } catch {}
 }
 
 /**
@@ -581,7 +781,7 @@ export function broadcastBalanceDeductionToCloud(
 
 /**
  * Pulls latest accounts snapshot from cloud topic and updates local store.
- * Respects balanceUpdatedAt timestamps so local bet deductions are never clobbered by older snapshots.
+ * Handles both plain JSON messages AND ntfy file-attachment downloads seamlessly.
  */
 export async function pullUsersFromCloud(): Promise<UserAccount[]> {
   if (typeof window === "undefined") return getUsers();
@@ -593,100 +793,22 @@ export async function pullUsersFromCloud(): Promise<UserAccount[]> {
       for (let i = lines.length - 1; i >= 0; i--) {
         try {
           const item = JSON.parse(lines[i]);
-          if (item.event === "message" && item.message) {
-            const parsed = JSON.parse(item.message);
-            if (parsed.type === "ACCOUNTS_SYNC" && Array.isArray(parsed.users) && parsed.users.length > 0) {
-              const current = getUsers();
-              const mergedMap = new Map<string, UserAccount>();
-              current.forEach((u) => mergedMap.set(u.id, u));
-
-              parsed.users.forEach((remoteU: any) => {
-                const existing =
-                  mergedMap.get(remoteU.id) ||
-                  current.find(
-                    (c) =>
-                      c.username.toLowerCase().replace(/^@/, "") ===
-                      (remoteU.username || "").toLowerCase().replace(/^@/, "")
-                  );
-                if (existing) {
-                  const localUpdatedAt = existing.balanceUpdatedAt || 0;
-                  const remoteUpdatedAt = remoteU.balanceUpdatedAt || 0;
-                  const effBalance = remoteUpdatedAt >= localUpdatedAt ? remoteU.balance : existing.balance;
-                  const effUpdatedAt = Math.max(localUpdatedAt, remoteUpdatedAt);
-
-                  const isRamu = isRamuUser(existing) || isRamuUser(remoteU);
-                  const ramuBets = isRamu ? getRamuSimulatedBets() : [];
-                  const finalBets =
-                    (remoteU.bets && remoteU.bets.length > 0)
-                      ? remoteU.bets
-                      : (existing.bets && existing.bets.length > 0)
-                      ? existing.bets
-                      : ramuBets;
-
-                  const todayStr = getTodayDateStr();
-                  const ramuDeposits = [
-                    {
-                      id: "dep_ram_01",
-                      amount: 5000,
-                      timestamp: Date.now() - 3600 * 1000,
-                      dateStr: todayStr,
-                      timeStr: "09:00 AM",
-                      note: "Initial Counter Cash Recharge",
-                      balanceAfter: 5000,
-                    },
-                  ];
-
-                  const finalDeposits =
-                    (remoteU.deposits && remoteU.deposits.length > 0)
-                      ? remoteU.deposits
-                      : (existing.deposits && existing.deposits.length > 0)
-                      ? existing.deposits
-                      : isRamu
-                      ? ramuDeposits
-                      : [];
-
-                  mergedMap.set(existing.id, {
-                    ...existing,
-                    ...remoteU,
-                    balance: isRamu ? 0 : effBalance,
-                    balanceUpdatedAt: effUpdatedAt,
-                    totalDeposited: isRamu ? 5000 : (remoteU.totalDeposited || existing.totalDeposited || 0),
-                    bets: finalBets,
-                    deposits: finalDeposits,
-                  });
-                } else {
-                  const isRamu = isRamuUser(remoteU);
-                  const todayStr = getTodayDateStr();
-                  mergedMap.set(remoteU.id, {
-                    ...remoteU,
-                    createdAt: Date.now(),
-                    totalWithdrawn: 0,
-                    totalDeposited: isRamu ? 5000 : (remoteU.totalDeposited || 0),
-                    balance: isRamu ? 0 : (remoteU.balance || 0),
-                    deposits: isRamu
-                      ? [
-                          {
-                            id: "dep_ram_01",
-                            amount: 5000,
-                            timestamp: Date.now() - 3600 * 1000,
-                            dateStr: todayStr,
-                            timeStr: "09:00 AM",
-                            note: "Initial Counter Cash Recharge",
-                            balanceAfter: 5000,
-                          },
-                        ]
-                      : (remoteU.deposits || []),
-                    bets: isRamu ? getRamuSimulatedBets() : (remoteU.bets || []),
-                    balanceUpdatedAt: remoteU.balanceUpdatedAt || Date.now(),
-                  });
-                }
-              });
-
-              const mergedUsers = Array.from(mergedMap.values());
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedUsers));
-              cachedUsers = mergedUsers;
-              notifySync("USERS_UPDATED", mergedUsers);
-              return mergedUsers;
+          if (item.event === "message") {
+            let rawContent = item.message;
+            if (item.attachment && item.attachment.url) {
+              try {
+                const attRes = await fetch(item.attachment.url);
+                if (attRes.ok) rawContent = await attRes.text();
+              } catch {}
+            }
+            if (rawContent && rawContent.startsWith("{")) {
+              const parsed = JSON.parse(rawContent);
+              if (parsed.type === "ACCOUNTS_SYNC" && Array.isArray(parsed.users) && parsed.users.length > 0) {
+                return mergeRemoteUsers(parsed.users);
+              }
+              if (parsed.type === "USER_CREATED" && parsed.user) {
+                return mergeRemoteUsers([parsed.user]);
+              }
             }
           }
         } catch {}
@@ -700,7 +822,7 @@ export async function pullUsersFromCloud(): Promise<UserAccount[]> {
 
 /**
  * Subscribes to real-time cloud account changes via Server-Sent Events (SSE).
- * Handles both ACCOUNTS_SYNC snapshots and atomic AGENT_BALANCE_DEDUCT transactions.
+ * Handles ACCOUNTS_SYNC, USER_CREATED, PIN_CHANGED, USER_DELETED, and AGENT_BALANCE_DEDUCT.
  */
 export function subscribeToCloudUsers(
   onUpdate?: (users: UserAccount[]) => void,
@@ -719,11 +841,19 @@ export function subscribeToCloudUsers(
   }
   try {
     const sse = new EventSource(`https://ntfy.sh/${CLOUD_ACCOUNTS_SYNC_TOPIC}/sse`);
-    sse.onmessage = (event) => {
+    sse.onmessage = async (event) => {
       try {
         const item = JSON.parse(event.data);
-        if (item.event === "message" && item.message) {
-          const parsed = JSON.parse(item.message);
+        if (item.event === "message") {
+          let rawContent = item.message;
+          if (item.attachment && item.attachment.url) {
+            try {
+              const attRes = await fetch(item.attachment.url);
+              if (attRes.ok) rawContent = await attRes.text();
+            } catch {}
+          }
+          if (!rawContent || !rawContent.startsWith("{")) return;
+          const parsed = JSON.parse(rawContent);
 
           // 1. Direct Balance Deduction Event (e.g. phone placed bet)
           if (parsed.type === "AGENT_BALANCE_DEDUCT") {
@@ -753,99 +883,41 @@ export function subscribeToCloudUsers(
             return;
           }
 
-          // 2. Full Snapshot Sync
-          if (parsed.type === "ACCOUNTS_SYNC" && Array.isArray(parsed.users) && parsed.users.length > 0) {
+          // 2. Real-time Single User Created
+          if (parsed.type === "USER_CREATED" && parsed.user) {
+            const merged = mergeRemoteUsers([parsed.user]);
+            onUpdate?.(merged);
+            return;
+          }
+
+          // 3. PIN Changed
+          if (parsed.type === "PIN_CHANGED" && parsed.userId && parsed.pin) {
             const current = getUsers();
-            const mergedMap = new Map<string, UserAccount>();
-            current.forEach((u) => mergedMap.set(u.id, u));
+            const target = current.find((u) => u.id === parsed.userId);
+            if (target) {
+              target.pin = parsed.pin;
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
+              cachedUsers = current;
+              notifySync("USERS_UPDATED", current);
+              onUpdate?.(current);
+            }
+            return;
+          }
 
-            parsed.users.forEach((remoteU: any) => {
-              const existing =
-                mergedMap.get(remoteU.id) ||
-                current.find(
-                  (c) =>
-                    c.username.toLowerCase().replace(/^@/, "") ===
-                    (remoteU.username || "").toLowerCase().replace(/^@/, "")
-                );
-              if (existing) {
-                const localUpdatedAt = existing.balanceUpdatedAt || 0;
-                const remoteUpdatedAt = remoteU.balanceUpdatedAt || 0;
-                const effBalance = remoteUpdatedAt >= localUpdatedAt ? remoteU.balance : existing.balance;
-                const effUpdatedAt = Math.max(localUpdatedAt, remoteUpdatedAt);
+          // 4. User Deleted
+          if (parsed.type === "USER_DELETED" && parsed.userId) {
+            const current = getUsers().filter((u) => u.id !== parsed.userId);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
+            cachedUsers = current;
+            notifySync("USERS_UPDATED", current);
+            onUpdate?.(current);
+            return;
+          }
 
-                const isRamu = isRamuUser(existing) || isRamuUser(remoteU);
-                const ramuBets = isRamu ? getRamuSimulatedBets() : [];
-                const finalBets =
-                  (remoteU.bets && remoteU.bets.length > 0)
-                    ? remoteU.bets
-                    : (existing.bets && existing.bets.length > 0)
-                    ? existing.bets
-                    : ramuBets;
-
-                const todayStr = getTodayDateStr();
-                const ramuDeposits = [
-                  {
-                    id: "dep_ram_01",
-                    amount: 5000,
-                    timestamp: Date.now() - 3600 * 1000,
-                    dateStr: todayStr,
-                    timeStr: "09:00 AM",
-                    note: "Initial Counter Cash Recharge",
-                    balanceAfter: 5000,
-                  },
-                ];
-
-                const finalDeposits =
-                  (remoteU.deposits && remoteU.deposits.length > 0)
-                    ? remoteU.deposits
-                    : (existing.deposits && existing.deposits.length > 0)
-                    ? existing.deposits
-                    : isRamu
-                    ? ramuDeposits
-                    : [];
-
-                mergedMap.set(existing.id, {
-                  ...existing,
-                  ...remoteU,
-                  balance: isRamu ? 0 : effBalance,
-                  balanceUpdatedAt: effUpdatedAt,
-                  totalDeposited: isRamu ? 5000 : (remoteU.totalDeposited || existing.totalDeposited || 0),
-                  bets: finalBets,
-                  deposits: finalDeposits,
-                });
-              } else {
-                const isRamu = isRamuUser(remoteU);
-                const todayStr = getTodayDateStr();
-                mergedMap.set(remoteU.id, {
-                  ...remoteU,
-                  createdAt: Date.now(),
-                  totalWithdrawn: 0,
-                  totalDeposited: isRamu ? 5000 : (remoteU.totalDeposited || 0),
-                  balance: isRamu ? 0 : (remoteU.balance || 0),
-                  deposits: isRamu
-                    ? [
-                        {
-                          id: "dep_ram_01",
-                          amount: 5000,
-                          timestamp: Date.now() - 3600 * 1000,
-                          dateStr: todayStr,
-                          timeStr: "09:00 AM",
-                          note: "Initial Counter Cash Recharge",
-                          balanceAfter: 5000,
-                        },
-                      ]
-                    : (remoteU.deposits || []),
-                  bets: isRamu ? getRamuSimulatedBets() : (remoteU.bets || []),
-                  balanceUpdatedAt: remoteU.balanceUpdatedAt || Date.now(),
-                });
-              }
-            });
-
-            const mergedUsers = Array.from(mergedMap.values());
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedUsers));
-            cachedUsers = mergedUsers;
-            notifySync("USERS_UPDATED", mergedUsers);
-            onUpdate?.(mergedUsers);
+          // 5. Full Snapshot Sync
+          if (parsed.type === "ACCOUNTS_SYNC" && Array.isArray(parsed.users) && parsed.users.length > 0) {
+            const merged = mergeRemoteUsers(parsed.users);
+            onUpdate?.(merged);
           }
         }
       } catch {}
@@ -929,29 +1001,40 @@ export function authenticateAgent(
   const cleanId = rawId.replace(/^@/, "");
   const cleanPin = (pin || "").trim();
 
-  if (!cleanId) return { success: false, error: "Kripya Agent ID daalein" };
+  if (!cleanId) return { success: false, error: "Kripya Agent ID ya Mobile Number daalein" };
   if (!cleanPin) return { success: false, error: "Kripya 4-digit PIN daalein" };
+
+  const cleanPhone = cleanId.replace(/\D/g, "");
 
   const user = users.find((u) => {
     const uRaw = (u.username || "").toLowerCase();
     const uName = uRaw.replace(/^@/, "");
     const uCode = (u.agentCode || "").toLowerCase().replace(/^@/, "");
+    const uDisplay = (u.displayName || "").toLowerCase();
     const uPhone = (u.phone || "").replace(/\D/g, "");
-    const cleanPhone = cleanId.replace(/\D/g, "");
+
+    const phoneMatches =
+      cleanPhone.length >= 4 &&
+      uPhone.length >= 4 &&
+      (uPhone.includes(cleanPhone) ||
+        cleanPhone.includes(uPhone) ||
+        uPhone.endsWith(cleanPhone) ||
+        cleanPhone.endsWith(uPhone));
 
     return (
       uName === cleanId ||
       uRaw === rawId ||
       uCode === cleanId ||
+      uDisplay === cleanId ||
       u.id.toLowerCase() === cleanId ||
-      (cleanPhone.length >= 4 && uPhone.includes(cleanPhone))
+      phoneMatches
     );
   });
 
   if (!user) {
     return {
       success: false,
-      error: `Galat Agent ID "${identifier}"! Kripya sahi ID daalein (jaise @ram, agent1).`,
+      error: `Galat Agent ID "${identifier}"! Kripya sahi ID daalein (jaise @ram, agent1 ya Mobile No.).`,
     };
   }
 
@@ -959,7 +1042,7 @@ export function authenticateAgent(
   if (expectedPin !== cleanPin) {
     return {
       success: false,
-      error: "Galat PIN / Password! Kripya sahi 4-digit PIN daalein.",
+      error: `Galat PIN! "${user.displayName}" ka sahi 4-digit PIN daalein.`,
     };
   }
 
@@ -974,6 +1057,7 @@ export function updateUserPin(userId: string, newPin: string): UserAccount {
   const target = { ...users[idx], pin: newPin.trim() };
   users[idx] = target;
   saveUsers(users);
+  broadcastPinChange(userId, newPin.trim());
   return target;
 }
 
@@ -991,16 +1075,27 @@ export function deductAgentBalance(
   const users = getUsers();
   const rawId = (agentIdentifier || "").trim().toLowerCase();
   const cleanId = rawId.replace(/^@/, "");
+  const cleanPhone = cleanId.replace(/\D/g, "");
+
   const idx = users.findIndex((u) => {
     const uRaw = (u.username || "").toLowerCase();
     const uName = uRaw.replace(/^@/, "");
     const uCode = (u.agentCode || "").toLowerCase().replace(/^@/, "");
+    const uDisplay = (u.displayName || "").toLowerCase();
+    const uPhone = (u.phone || "").replace(/\D/g, "");
+    const phoneMatches =
+      cleanPhone.length >= 4 &&
+      uPhone.length >= 4 &&
+      (uPhone.includes(cleanPhone) || cleanPhone.includes(uPhone));
+
     return (
       u.id.toLowerCase() === rawId ||
       u.id.toLowerCase() === cleanId ||
       uName === cleanId ||
       uRaw === rawId ||
       uCode === cleanId ||
+      uDisplay === cleanId ||
+      phoneMatches ||
       (isRamuUser(u) && (cleanId === "ram" || cleanId.includes("ramu")))
     );
   });
@@ -1271,6 +1366,7 @@ export function createUser(data: {
 
   users.unshift(newUser);
   saveUsers(users);
+  broadcastSingleUserCreated(newUser);
   return newUser;
 }
 
@@ -1280,6 +1376,7 @@ export function createUser(data: {
 export function deleteUser(userId: string): void {
   const users = getUsers().filter((u) => u.id !== userId);
   saveUsers(users);
+  broadcastUserDelete(userId);
 }
 
 /**

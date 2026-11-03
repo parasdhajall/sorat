@@ -47,6 +47,7 @@ export function UserAccountsView({
   const [newDisplayName, setNewDisplayName] = useState("");
   const [newUsername, setNewUsername] = useState("");
   const [newPhone, setNewPhone] = useState("");
+  const [newPin, setNewPin] = useState("1234");
   const [newInitialDeposit, setNewInitialDeposit] = useState("1000");
   const [newNotes, setNewNotes] = useState("");
 
@@ -195,6 +196,7 @@ export function UserAccountsView({
         displayName: newDisplayName.trim(),
         username: newUsername.trim() || newDisplayName.trim().toLowerCase().replace(/\s+/g, "_"),
         phone: newPhone.trim(),
+        pin: newPin.trim() || "1234",
         initialDeposit: Number(newInitialDeposit) || 0,
         notes: newNotes.trim(),
       });
@@ -205,9 +207,10 @@ export function UserAccountsView({
       setNewDisplayName("");
       setNewUsername("");
       setNewPhone("");
+      setNewPin("1234");
       setNewInitialDeposit("1000");
       setNewNotes("");
-      showNotification(`Account created for ${created.displayName}!`);
+      showNotification(`Account created for ${created.displayName}! Synced to mobile apps.`);
     } catch (e: any) {
       alert(e.message || "Failed to create user");
     }
@@ -1076,6 +1079,23 @@ export function UserAccountsView({
                     className="w-full px-3 py-2 rounded-xl border border-input bg-background text-foreground font-mono focus:border-primary focus:outline-none"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-muted-foreground uppercase mb-1">
+                  4-Digit Login PIN (For Mobile POS Login) *
+                </label>
+                <input
+                  type="text"
+                  maxLength={6}
+                  value={newPin}
+                  onChange={(e) => setNewPin(e.target.value)}
+                  placeholder="1234"
+                  className="w-full px-3 py-2 rounded-xl border border-input bg-background text-foreground font-mono font-bold focus:border-primary focus:outline-none"
+                />
+                <span className="text-[10px] text-muted-foreground block mt-1">
+                  Agent will use this PIN to log in on their mobile phone app. Default is 1234.
+                </span>
               </div>
 
               <div>

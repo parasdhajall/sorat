@@ -62,6 +62,10 @@ export default function AgentPage() {
   const [loginIdInput, setLoginIdInput] = useState("");
   const [loginPinInput, setLoginPinInput] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [availableUsers, setAvailableUsers] = useState<UserAccount[]>(() => getUsers());
+  const [isSyncingAccounts, setIsSyncingAccounts] = useState(false);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
 
   // Active User / Agent Wallet Balance
   const [agentUser, setAgentUser] = useState<UserAccount>(() => getLoggedInAgent() || getActiveUser());
@@ -158,14 +162,16 @@ export default function AgentPage() {
 
   // Realtime Cloud User Accounts Sync (syncs with Admin on PC instantly)
   useEffect(() => {
-    pullUsersFromCloud().then(() => {
+    pullUsersFromCloud().then((cloudUsers) => {
+      setAvailableUsers([...cloudUsers]);
       const u = getLoggedInAgent() || getActiveUser();
       setLoggedInAgentState(getLoggedInAgent());
       setAgentUser(u);
       setAgentBalance(u.balance);
     });
 
-    const unsub = subscribeToCloudUsers(() => {
+    const unsub = subscribeToCloudUsers((freshUsers) => {
+      setAvailableUsers([...freshUsers]);
       const u = getLoggedInAgent() || getActiveUser();
       setLoggedInAgentState(getLoggedInAgent());
       setAgentUser(u);
@@ -346,18 +352,40 @@ export default function AgentPage() {
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
-    let res = authenticateAgent(loginIdInput, loginPinInput);
-    if (!res.success) {
-      // Pull fresh users from cloud in case account was just created or updated on Admin
-      await pullUsersFromCloud();
-      res = authenticateAgent(loginIdInput, loginPinInput);
+    setIsLoggingIn(true);
+    try {
+      let res = authenticateAgent(loginIdInput, loginPinInput);
+      if (!res.success) {
+        // Pull fresh users from cloud in case account was just created or updated on Admin
+        const fresh = await pullUsersFromCloud();
+        setAvailableUsers([...fresh]);
+        res = authenticateAgent(loginIdInput, loginPinInput);
+      }
+      if (res.success && res.user) {
+        setLoggedInAgentState(res.user);
+        setAgentUser(res.user);
+        setAgentBalance(res.user.balance);
+      } else {
+        setLoginError(res.error || "Login fail! Sahi Agent ID aur 4-digit PIN daalein.");
+      }
+    } finally {
+      setIsLoggingIn(false);
     }
-    if (res.success && res.user) {
-      setLoggedInAgentState(res.user);
-      setAgentUser(res.user);
-      setAgentBalance(res.user.balance);
-    } else {
-      setLoginError(res.error || "Login fail! Sahi Agent ID aur 4-digit PIN daalein.");
+  };
+
+  const handleManualSyncAccounts = async () => {
+    setIsSyncingAccounts(true);
+    setSyncNotice(null);
+    try {
+      const fresh = await pullUsersFromCloud();
+      setAvailableUsers([...fresh]);
+      setSyncNotice(`✅ ${fresh.length} Agent Accounts Cloud Se Sync Ho Gaye!`);
+      setTimeout(() => setSyncNotice(null), 3500);
+    } catch {
+      setSyncNotice("⚠️ Cloud sync fail hua.");
+      setTimeout(() => setSyncNotice(null), 3000);
+    } finally {
+      setIsSyncingAccounts(false);
     }
   };
 
@@ -381,7 +409,7 @@ export default function AgentPage() {
   if (!loggedInAgent) {
     return (
       <div className="min-h-screen bg-background text-foreground flex flex-col justify-center items-center p-4 max-w-md mx-auto select-none">
-        <div className="w-full bg-card/95 border border-primary/30 rounded-3xl p-6 shadow-2xl backdrop-blur-md space-y-6">
+        <div className="w-full bg-card/95 border border-primary/30 rounded-3xl p-6 shadow-2xl backdrop-blur-md space-y-5">
           <div className="text-center space-y-2">
             <div className="h-16 w-16 mx-auto rounded-2xl bg-gradient-gold grid place-items-center font-display text-3xl font-black text-primary-foreground shadow-gold">
               S
@@ -397,17 +425,23 @@ export default function AgentPage() {
             </div>
           </div>
 
-          <form onSubmit={handleLoginSubmit} className="space-y-4">
+          {syncNotice && (
+            <div className="rounded-xl bg-emerald-500/15 border border-emerald-500/40 p-2.5 text-xs text-emerald-400 font-bold text-center animate-in fade-in">
+              {syncNotice}
+            </div>
+          )}
+
+          <form onSubmit={handleLoginSubmit} className="space-y-3.5">
             <div className="space-y-1.5 text-left">
               <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                Agent ID / Username / Phone
+                Agent ID / Mobile Number / Username
               </label>
               <input
                 type="text"
                 required
                 value={loginIdInput}
                 onChange={(e) => setLoginIdInput(e.target.value)}
-                placeholder="Jaise agent1, agent2 ya Mobile No."
+                placeholder="Mobile No. (e.g. 9284893349) ya @ram"
                 className="w-full bg-background border border-border focus:border-primary rounded-xl px-4 py-3 text-sm font-bold text-foreground placeholder:text-muted-foreground/50 outline-none transition"
               />
             </div>
@@ -422,51 +456,79 @@ export default function AgentPage() {
                 maxLength={8}
                 value={loginPinInput}
                 onChange={(e) => setLoginPinInput(e.target.value)}
-                placeholder="•••• (Default: 1234)"
+                placeholder="•••• (e.g. 1111 ya 1234)"
                 className="w-full bg-background border border-border focus:border-primary rounded-xl px-4 py-3 text-sm font-bold text-foreground tracking-widest placeholder:tracking-normal placeholder:text-muted-foreground/50 outline-none transition"
               />
             </div>
 
             {loginError && (
-              <div className="rounded-xl bg-destructive/15 border border-destructive/40 p-3 text-xs text-destructive font-bold text-center">
-                ⚠️ {loginError}
+              <div className="rounded-xl bg-destructive/15 border border-destructive/40 p-3 text-xs text-destructive font-bold text-center space-y-1.5">
+                <div>⚠️ {loginError}</div>
+                <button
+                  type="button"
+                  onClick={handleManualSyncAccounts}
+                  className="text-[11px] underline text-primary hover:text-primary/80 font-bold block mx-auto cursor-pointer"
+                >
+                  🔄 Admin se naya account abhi sync karein
+                </button>
               </div>
             )}
 
             <button
               type="submit"
-              className="w-full py-3.5 rounded-xl bg-gradient-gold text-primary-foreground font-display text-base font-black tracking-wide shadow-gold hover:brightness-110 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer"
+              disabled={isLoggingIn}
+              className="w-full py-3.5 rounded-xl bg-gradient-gold text-primary-foreground font-display text-base font-black tracking-wide shadow-gold hover:brightness-110 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
-              <span>🔐</span>
-              <span>LOGIN & OPEN COUNTER</span>
+              <span>{isLoggingIn ? "⏳" : "🔐"}</span>
+              <span>{isLoggingIn ? "CHECKING CREDENTIALS..." : "LOGIN & OPEN COUNTER"}</span>
             </button>
           </form>
 
-          {/* Quick Demo Test Buttons */}
-          <div className="border-t border-border/80 pt-4 space-y-2 text-center">
-            <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest block">
-              Quick Test / Demo Login
-            </span>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {getUsers().slice(0, 4).map((u) => (
+          {/* Cloud Sync & Available Accounts List */}
+          <div className="border-t border-border/80 pt-4 space-y-2.5 text-center">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                Select Agent / 1-Tap Login ({availableUsers.length})
+              </span>
+              <button
+                type="button"
+                onClick={handleManualSyncAccounts}
+                disabled={isSyncingAccounts}
+                className="text-[10px] font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer"
+              >
+                <span>{isSyncingAccounts ? "⏳ Syncing..." : "🔄 Refresh Cloud"}</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+              {availableUsers.map((u) => (
                 <button
                   key={u.id}
                   type="button"
                   onClick={() => {
-                    setLoginIdInput(u.username);
-                    setLoginPinInput(u.pin || "1234");
-                    const res = authenticateAgent(u.username, u.pin || "1234");
+                    const identifier = u.phone || u.username;
+                    const pin = u.pin || "1234";
+                    setLoginIdInput(identifier);
+                    setLoginPinInput(pin);
+                    const res = authenticateAgent(identifier, pin);
                     if (res.success && res.user) {
                       setLoggedInAgentState(res.user);
                       setAgentUser(res.user);
                       setAgentBalance(res.user.balance);
                     }
                   }}
-                  className="p-2 rounded-xl bg-muted/60 hover:bg-muted border border-border text-left transition"
+                  className="p-2.5 rounded-xl bg-muted/60 hover:bg-muted border border-border text-left transition hover:border-primary/50 cursor-pointer active:scale-95"
                 >
-                  <div className="text-[11px] font-black text-foreground truncate">{u.displayName.split(" ")[0]}</div>
-                  <div className="text-[9px] text-primary font-mono font-bold">ID: {u.username}</div>
-                  <div className="text-[9px] text-muted-foreground font-mono">PIN: {u.pin || "1234"}</div>
+                  <div className="text-[11px] font-black text-foreground truncate flex items-center justify-between">
+                    <span>{u.displayName}</span>
+                    <span className="text-[9px] text-emerald-400 font-mono">₹{u.balance}</span>
+                  </div>
+                  <div className="text-[9px] text-primary font-mono font-bold truncate">
+                    {u.phone ? `📱 ${u.phone}` : `@${u.username}`}
+                  </div>
+                  <div className="text-[9px] text-muted-foreground font-mono">
+                    PIN: <strong className="text-foreground">{u.pin || "1234"}</strong>
+                  </div>
                 </button>
               ))}
             </div>
