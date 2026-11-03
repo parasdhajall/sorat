@@ -1,4 +1,4 @@
-import { getSupabaseClient } from "./supabase";
+import { getSupabaseClient, placeSoratBetsRpc, depositToPlayerRpc } from "./supabase";
 import { RAMU_SIMULATED_BETS } from "./ramuSimulationData";
 
 export interface UserDeposit {
@@ -1232,6 +1232,20 @@ export function deductAgentBalance(
     items,
     betRecords
   );
+
+  // Background Supabase Sync if configured (DigitJodi pattern)
+  try {
+    placeSoratBetsRpc({
+      userId: users[idx].id,
+      roundId,
+      roundNumber: roundNumber || 1,
+      ticketId: `tkt_${now}`,
+      customerName: users[idx].displayName,
+      dateStr: formatDate(now),
+      timeStr: formatTime(now),
+      bets: items,
+    }).catch(() => {});
+  } catch {}
 
   return { success: true, newBalance };
 }

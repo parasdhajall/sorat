@@ -20,6 +20,7 @@ import {
 import { UserAccountsView } from "@/components/admin/UserAccountsView";
 import { OverviewView } from "@/components/admin/OverviewView";
 import { DatabaseSettingsView } from "@/components/admin/DatabaseSettingsView";
+import { LiveBetsRiskAudit } from "@/components/admin/LiveBetsRiskAudit";
 import { getSupabaseConfig } from "@/lib/supabase";
 
 export const Route = createFileRoute("/admin")({
@@ -40,8 +41,8 @@ export default function AdminPage() {
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState(false);
 
-  // Active Admin Tab: "users" (DEFAULT) | "game" | "database" | "overview"
-  const [activeAdminTab, setActiveAdminTab] = useState<"users" | "game" | "database" | "overview">("users");
+  // Active Admin Tab: "users" (DEFAULT) | "game" | "audit" | "database" | "overview"
+  const [activeAdminTab, setActiveAdminTab] = useState<"users" | "game" | "audit" | "database" | "overview">("users");
 
   // User Accounts State
   const [users, setUsers] = useState<UserAccount[]>(() => getUsers());
@@ -453,6 +454,19 @@ export default function AdminPage() {
 
           <button
             type="button"
+            onClick={() => setActiveAdminTab("audit")}
+            className={`flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg text-xs font-display font-extrabold transition whitespace-nowrap ${
+              activeAdminTab === "audit"
+                ? "bg-primary text-primary-foreground shadow-gold"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <span>🔥</span>
+            <span>LIVE BETS & 10X RISK MATRIX</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveAdminTab("database")}
             className={`flex items-center gap-1.5 py-1.5 px-3.5 rounded-lg text-xs font-display font-extrabold transition whitespace-nowrap ${
               activeAdminTab === "database"
@@ -780,7 +794,18 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* TAB 3: SUPABASE DATABASE & CLOUD SYNC */}
+        {/* TAB 3: LIVE BETS & 10X RISK MATRIX (DIGITJODI PATTERN) */}
+        {activeAdminTab === "audit" && (
+          <LiveBetsRiskAudit
+            users={users}
+            totalTurnover={totalTurnover}
+            totalPayouts={totalPayouts}
+            houseProfit={houseProfit}
+            profitPercentage={profitPercentage}
+          />
+        )}
+
+        {/* TAB 4: SUPABASE DATABASE & CLOUD SYNC */}
         {activeAdminTab === "database" && (
           <DatabaseSettingsView onSyncComplete={reloadUsers} />
         )}
