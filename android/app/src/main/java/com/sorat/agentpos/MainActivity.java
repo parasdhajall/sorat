@@ -11,6 +11,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
+import android.webkit.CookieManager;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -32,108 +33,113 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
+        try {
+            setContentView(R.layout.activity_main);
 
-        webView = findViewById(R.id.webView);
-        setupWebView();
-        setupBackNavigation();
+            webView = findViewById(R.id.webView);
+            if (webView == null) {
+                webView = new WebView(this);
+                setContentView(webView);
+            }
 
-        if (isNetworkAvailable()) {
+            setupWebView();
+            setupBackNavigation();
+
             webView.loadUrl(APP_URL);
-        } else {
-            Toast.makeText(this, "Internet not connected! Please check your network.", Toast.LENGTH_LONG).show();
-            webView.loadUrl(APP_URL);
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
     private void setupWebView() {
-        WebSettings settings = webView.getSettings();
-        settings.setJavaScriptEnabled(true);
-        settings.setDomStorageEnabled(true);
-        settings.setDatabaseEnabled(true);
-        settings.setAllowFileAccess(true);
-        settings.setAllowContentAccess(true);
-        settings.setLoadWithOverviewMode(true);
-        settings.setUseWideViewPort(true);
-        settings.setSupportZoom(false);
-        settings.setBuiltInZoomControls(false);
-        settings.setDisplayZoomControls(false);
-        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        settings.setUserAgentString(settings.getUserAgentString() + " SoratApp/1.0.0");
+        try {
+            WebSettings settings = webView.getSettings();
+            settings.setJavaScriptEnabled(true);
+            settings.setDomStorageEnabled(true);
+            settings.setDatabaseEnabled(true);
+            settings.setAllowFileAccess(true);
+            settings.setAllowContentAccess(true);
+            settings.setLoadWithOverviewMode(true);
+            settings.setUseWideViewPort(true);
+            settings.setSupportZoom(false);
+            settings.setBuiltInZoomControls(false);
+            settings.setDisplayZoomControls(false);
+            settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+            settings.setCacheMode(WebSettings.LOAD_DEFAULT);
+            settings.setUserAgentString(settings.getUserAgentString() + " SoratApp/1.0.0");
 
-        // Native Bluetooth Bridge for thermal receipt printing (both names bound for 100% compatibility)
-        BluetoothPrinterBridge bridge = new BluetoothPrinterBridge(this, webView);
-        webView.addJavascriptInterface(bridge, "AndroidBridge");
-        webView.addJavascriptInterface(bridge, "AndroidPrinter");
+            CookieManager.getInstance().setAcceptCookie(true);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
+            }
 
-        webView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
+            // Native Bluetooth Bridge for thermal receipt printing
+            try {
+                BluetoothPrinterBridge bridge = new BluetoothPrinterBridge(this, webView);
+                webView.addJavascriptInterface(bridge, "AndroidBridge");
+                webView.addJavascriptInterface(bridge, "AndroidPrinter");
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
 
-        webView.setWebViewClient(new WebViewClient() {
-            @Override
-            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                String url = request.getUrl().toString();
-                if (url.startsWith("https://sorat.vercel.app") || url.startsWith("http://sorat.vercel.app")) {
-                    return false; // Load inside WebView!
-                }
+            webView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
 
-                // External intents: WhatsApp, Phone, etc.
-                if (url.startsWith("tel:") || url.startsWith("whatsapp:") || url.startsWith("mailto:")) {
+            webView.setWebViewClient(new WebViewClient() {
+                @Override
+                public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                     try {
-                        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-                        startActivity(intent);
-                        return true;
-                    } catch (Exception e) {
-                        return true;
-                    }
-                }
-                return false;
-            }
+                        String url = request.getUrl().toString();
+                        if (url.startsWith("https://sorat.vercel.app") || url.startsWith("http://sorat.vercel.app")) {
+                            return false; // Load inside WebView!
+                        }
 
-            @Override
-            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-                if (request.isForMainFrame()) {
-                    Toast.makeText(MainActivity.this, "Connecting to Sorat server...", Toast.LENGTH_SHORT).show();
+                        // External intents: WhatsApp, Phone, etc.
+                        if (url.startsWith("tel:") || url.startsWith("whatsapp:") || url.startsWith("mailto:")) {
+                            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                            startActivity(intent);
+                            return true;
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                    return false;
                 }
-            }
-        });
+
+                @Override
+                public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                    // Do not crash or block rendering
+                }
+            });
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     private void setupBackNavigation() {
-        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
-            @Override
-            public void handleOnBackPressed() {
-                if (webView != null && webView.canGoBack()) {
-                    webView.goBack();
-                } else {
-                    if (System.currentTimeMillis() - lastBackPressTime < BACK_PRESS_INTERVAL) {
-                        setEnabled(false);
+        try {
+            getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+                @Override
+                public void handleOnBackPressed() {
+                    try {
+                        if (webView != null && webView.canGoBack()) {
+                            webView.goBack();
+                        } else {
+                            if (System.currentTimeMillis() - lastBackPressTime < BACK_PRESS_INTERVAL) {
+                                setEnabled(false);
+                                finish();
+                            } else {
+                                lastBackPressTime = System.currentTimeMillis();
+                                Toast.makeText(MainActivity.this, "Press back again to exit", Toast.LENGTH_SHORT).show();
+                            }
+                        }
+                    } catch (Exception e) {
                         finish();
-                    } else {
-                        lastBackPressTime = System.currentTimeMillis();
-                        Toast.makeText(MainActivity.this, "Press back again to exit", Toast.LENGTH_SHORT).show();
                     }
                 }
-            }
-        });
-    }
-
-    private boolean isNetworkAvailable() {
-        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-        if (cm == null) return false;
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            android.net.Network network = cm.getActiveNetwork();
-            if (network == null) return false;
-            NetworkCapabilities actNw = cm.getNetworkCapabilities(network);
-            return actNw != null && (actNw.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
-                    || actNw.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
-                    || actNw.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET));
-        } else {
-            @SuppressWarnings("deprecation")
-            NetworkInfo networkInfo = cm.getActiveNetworkInfo();
-            return networkInfo != null && networkInfo.isConnected();
+            });
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
