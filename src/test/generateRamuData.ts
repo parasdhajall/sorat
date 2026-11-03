@@ -80,15 +80,15 @@ export function generateSimulationFile() {
       }
     }
 
-    cumulativeTurnover += targetTotal;
-    runningBalance -= targetTotal;
-
     const decision = calculateProfitGuaranteedWinner(
       betsOnCards,
       cumulativeTurnover,
       cumulativePayouts,
       null
     );
+
+    cumulativeTurnover += targetTotal;
+    runningBalance -= targetTotal;
 
     const winningCardIndex = decision.winner;
     const winningCardName = CARD_NAMES[winningCardIndex];
