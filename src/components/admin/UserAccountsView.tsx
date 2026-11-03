@@ -373,17 +373,17 @@ export function UserAccountsView({
                       </div>
 
                       <div className="flex items-center gap-1">
-                        <span className="text-muted-foreground">Profit:</span>
+                        <span className="text-muted-foreground">House Profit:</span>
                         <span
                           className={`font-mono font-black px-1.5 py-0.5 rounded ${
-                            stats.netBetProfit > 0
+                            (stats.totalBetAmount - stats.totalWonAmount) >= 0
                               ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                              : stats.netBetProfit < 0
-                              ? "bg-destructive/20 text-destructive border border-destructive/30"
-                              : "bg-muted text-muted-foreground"
+                              : "bg-destructive/20 text-destructive border border-destructive/30"
                           }`}
                         >
-                          {stats.netBetProfit >= 0 ? `+₹${stats.netBetProfit}` : `-₹${Math.abs(stats.netBetProfit)}`}
+                          {(stats.totalBetAmount - stats.totalWonAmount) >= 0
+                            ? `+₹${(stats.totalBetAmount - stats.totalWonAmount).toLocaleString("en-IN")}`
+                            : `-₹${Math.abs(stats.totalBetAmount - stats.totalWonAmount).toLocaleString("en-IN")}`}
                         </span>
                       </div>
                     </div>
@@ -561,35 +561,43 @@ export function UserAccountsView({
                 </span>
               </div>
 
-              {/* Card 3: USER'S PROFIT & LOSS */}
-              <div
-                className={`rounded-xl border p-3 ${
-                  profitStats.netBetProfit >= 0
-                    ? "border-emerald-500/40 bg-emerald-500/10"
-                    : "border-destructive/40 bg-destructive/10"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span
-                    className={`text-[10px] font-bold uppercase tracking-wider ${
-                      profitStats.netBetProfit >= 0 ? "text-emerald-400" : "text-destructive"
+              {/* Card 3: HOUSE GROSS PROFIT */}
+              {(() => {
+                const houseProfit = profitStats.totalBetAmount - profitStats.totalWonAmount;
+                const isHouseGreen = houseProfit >= 0;
+                return (
+                  <div
+                    className={`rounded-xl border p-3 ${
+                      isHouseGreen
+                        ? "border-emerald-500/40 bg-emerald-500/10"
+                        : "border-destructive/40 bg-destructive/10"
                     }`}
                   >
-                    📈 Player Net Profit
-                  </span>
-                  <span className="text-xs">🏆</span>
-                </div>
-                <div
-                  className={`mt-1 text-xl font-display font-black ${
-                    profitStats.netBetProfit >= 0 ? "text-emerald-400" : "text-destructive"
-                  }`}
-                >
-                  {profitStats.netBetProfit >= 0 ? `+₹${profitStats.netBetProfit}` : `-₹${Math.abs(profitStats.netBetProfit)}`}
-                </div>
-                <span className="text-[9px] text-muted-foreground block mt-0.5 font-mono">
-                  Won ₹{profitStats.totalWonAmount} • Staked ₹{profitStats.totalBetAmount}
-                </span>
-              </div>
+                    <div className="flex items-center justify-between">
+                      <span
+                        className={`text-[10px] font-bold uppercase tracking-wider ${
+                          isHouseGreen ? "text-emerald-400" : "text-destructive"
+                        }`}
+                      >
+                        🏛️ House Gross Profit
+                      </span>
+                      <span className="text-xs">💰</span>
+                    </div>
+                    <div
+                      className={`mt-1 text-xl font-display font-black ${
+                        isHouseGreen ? "text-emerald-400" : "text-destructive"
+                      }`}
+                    >
+                      {isHouseGreen
+                        ? `+₹${houseProfit.toLocaleString("en-IN")}`
+                        : `-₹${Math.abs(houseProfit).toLocaleString("en-IN")}`}
+                    </div>
+                    <span className="text-[9px] text-muted-foreground block mt-0.5 font-mono">
+                      Staked ₹{profitStats.totalBetAmount.toLocaleString("en-IN")} • Won ₹{profitStats.totalWonAmount.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                );
+              })()}
 
               {/* Card 4: BETTING WIN RATE */}
               <div className="rounded-xl border border-purple-500/30 bg-purple-500/5 p-3">
