@@ -84,9 +84,9 @@ export function UserAccountsView({
 
   const displayedBets =
     betPeriodFilter === "today"
-      ? categorizedBets.today
+      ? (categorizedBets.today.length > 0 ? categorizedBets.today : categorizedBets.all)
       : betPeriodFilter === "yesterday"
-      ? categorizedBets.yesterday
+      ? (categorizedBets.yesterday.length > 0 ? categorizedBets.yesterday : categorizedBets.all)
       : categorizedBets.all;
 
   // Handle Deposit

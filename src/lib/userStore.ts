@@ -110,11 +110,27 @@ const STORAGE_KEY = "sorat_users_v2";
 const ACTIVE_USER_KEY = "sorat_active_user_id_v2";
 const SYNC_CHANNEL_NAME = "sorat_user_sync_channel";
 
+export function isRamuUser(u: any): boolean {
+  if (!u) return false;
+  const cleanUser = (u.username || "").toLowerCase().replace(/^@/, "").trim();
+  const cleanName = (u.displayName || "").toLowerCase().trim();
+  const cleanPhone = (u.phone || "").replace(/[^0-9]/g, "");
+  const id = (u.id || "").toLowerCase();
+  return (
+    cleanUser === "ram" ||
+    cleanName.includes("ramu") ||
+    id === "usr_ramu_00" ||
+    id.includes("3ys1") ||
+    cleanPhone.endsWith("9284893346")
+  );
+}
+
 export function getRamuSimulatedBets(): UserBetRecord[] {
   const todayStr = getTodayDateStr();
-  return RAMU_SIMULATED_BETS.map((b) => ({
+  const yesterdayStr = getYesterdayDateStr();
+  return RAMU_SIMULATED_BETS.map((b, idx) => ({
     ...b,
-    dateStr: todayStr,
+    dateStr: idx < 12 ? yesterdayStr : todayStr,
   }));
 }
 
@@ -437,13 +453,44 @@ export function getUsers(): UserAccount[] {
           agentCode: u.agentCode || `AGENT-${101 + i}`,
         }));
 
-        // Seamless auto-upgrade: If Ramu is present but has outdated data (0 bets or deposited < 5000), update him with the ₹5,000 simulation
-        const ramu = enriched.find((u) => u.id === "usr_ramu_00" || u.username === "@ram");
-        if (ramu && ((ramu.bets && ramu.bets.length === 0) || ramu.totalDeposited < 5000)) {
-          const freshSeed = createInitialSeedUsers();
-          const freshRamu = freshSeed.find((u) => u.id === "usr_ramu_00");
-          if (freshRamu) {
-            Object.assign(ramu, freshRamu);
+        // Robust auto-upgrade: Find ANY Ramu account in localStorage and ensure full 5000 exhaustion simulation & bets are populated
+        const ramuIndices: number[] = [];
+        enriched.forEach((u, idx) => {
+          if (isRamuUser(u)) ramuIndices.push(idx);
+        });
+
+        const freshBets = getRamuSimulatedBets();
+        const freshSeed = createInitialSeedUsers();
+        const freshRamu = freshSeed.find((u) => u.id === "usr_ramu_00")!;
+
+        if (ramuIndices.length === 0) {
+          enriched.unshift(freshRamu);
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(enriched));
+          } catch {}
+        } else {
+          let updated = false;
+          for (const idx of ramuIndices) {
+            const r = enriched[idx];
+            if (!r.bets || r.bets.length === 0 || r.totalDeposited < 5000 || r.balance > 0) {
+              enriched[idx] = {
+                ...r,
+                displayName: r.displayName || "Ramu",
+                username: r.username || "@ram",
+                phone: r.phone || "9284893346",
+                pin: r.pin || "1212",
+                agentCode: r.agentCode || "@ram",
+                balance: 0,
+                totalDeposited: 5000,
+                totalWithdrawn: 0,
+                deposits: freshRamu.deposits,
+                bets: freshBets,
+                balanceUpdatedAt: Date.now(),
+              };
+              updated = true;
+            }
+          }
+          if (updated) {
             try {
               localStorage.setItem(STORAGE_KEY, JSON.stringify(enriched));
             } catch {}
@@ -567,21 +614,69 @@ export async function pullUsersFromCloud(): Promise<UserAccount[]> {
                   const effBalance = remoteUpdatedAt >= localUpdatedAt ? remoteU.balance : existing.balance;
                   const effUpdatedAt = Math.max(localUpdatedAt, remoteUpdatedAt);
 
+                  const isRamu = isRamuUser(existing) || isRamuUser(remoteU);
+                  const ramuBets = isRamu ? getRamuSimulatedBets() : [];
+                  const finalBets =
+                    (remoteU.bets && remoteU.bets.length > 0)
+                      ? remoteU.bets
+                      : (existing.bets && existing.bets.length > 0)
+                      ? existing.bets
+                      : ramuBets;
+
+                  const todayStr = getTodayDateStr();
+                  const ramuDeposits = [
+                    {
+                      id: "dep_ram_01",
+                      amount: 5000,
+                      timestamp: Date.now() - 3600 * 1000,
+                      dateStr: todayStr,
+                      timeStr: "09:00 AM",
+                      note: "Initial Counter Cash Recharge",
+                      balanceAfter: 5000,
+                    },
+                  ];
+
+                  const finalDeposits =
+                    (remoteU.deposits && remoteU.deposits.length > 0)
+                      ? remoteU.deposits
+                      : (existing.deposits && existing.deposits.length > 0)
+                      ? existing.deposits
+                      : isRamu
+                      ? ramuDeposits
+                      : [];
+
                   mergedMap.set(existing.id, {
                     ...existing,
                     ...remoteU,
-                    balance: effBalance,
+                    balance: isRamu ? 0 : effBalance,
                     balanceUpdatedAt: effUpdatedAt,
-                    bets: (remoteU.bets && remoteU.bets.length > 0) ? remoteU.bets : (existing.bets || []),
-                    deposits: (remoteU.deposits && remoteU.deposits.length > 0) ? remoteU.deposits : (existing.deposits || []),
+                    totalDeposited: isRamu ? 5000 : (remoteU.totalDeposited || existing.totalDeposited || 0),
+                    bets: finalBets,
+                    deposits: finalDeposits,
                   });
                 } else {
+                  const isRamu = isRamuUser(remoteU);
+                  const todayStr = getTodayDateStr();
                   mergedMap.set(remoteU.id, {
                     ...remoteU,
                     createdAt: Date.now(),
                     totalWithdrawn: 0,
-                    deposits: [],
-                    bets: [],
+                    totalDeposited: isRamu ? 5000 : (remoteU.totalDeposited || 0),
+                    balance: isRamu ? 0 : (remoteU.balance || 0),
+                    deposits: isRamu
+                      ? [
+                          {
+                            id: "dep_ram_01",
+                            amount: 5000,
+                            timestamp: Date.now() - 3600 * 1000,
+                            dateStr: todayStr,
+                            timeStr: "09:00 AM",
+                            note: "Initial Counter Cash Recharge",
+                            balanceAfter: 5000,
+                          },
+                        ]
+                      : (remoteU.deposits || []),
+                    bets: isRamu ? getRamuSimulatedBets() : (remoteU.bets || []),
                     balanceUpdatedAt: remoteU.balanceUpdatedAt || Date.now(),
                   });
                 }
@@ -676,21 +771,69 @@ export function subscribeToCloudUsers(
                 const effBalance = remoteUpdatedAt >= localUpdatedAt ? remoteU.balance : existing.balance;
                 const effUpdatedAt = Math.max(localUpdatedAt, remoteUpdatedAt);
 
+                const isRamu = isRamuUser(existing) || isRamuUser(remoteU);
+                const ramuBets = isRamu ? getRamuSimulatedBets() : [];
+                const finalBets =
+                  (remoteU.bets && remoteU.bets.length > 0)
+                    ? remoteU.bets
+                    : (existing.bets && existing.bets.length > 0)
+                    ? existing.bets
+                    : ramuBets;
+
+                const todayStr = getTodayDateStr();
+                const ramuDeposits = [
+                  {
+                    id: "dep_ram_01",
+                    amount: 5000,
+                    timestamp: Date.now() - 3600 * 1000,
+                    dateStr: todayStr,
+                    timeStr: "09:00 AM",
+                    note: "Initial Counter Cash Recharge",
+                    balanceAfter: 5000,
+                  },
+                ];
+
+                const finalDeposits =
+                  (remoteU.deposits && remoteU.deposits.length > 0)
+                    ? remoteU.deposits
+                    : (existing.deposits && existing.deposits.length > 0)
+                    ? existing.deposits
+                    : isRamu
+                    ? ramuDeposits
+                    : [];
+
                 mergedMap.set(existing.id, {
                   ...existing,
                   ...remoteU,
-                  balance: effBalance,
+                  balance: isRamu ? 0 : effBalance,
                   balanceUpdatedAt: effUpdatedAt,
-                  bets: (remoteU.bets && remoteU.bets.length > 0) ? remoteU.bets : (existing.bets || []),
-                  deposits: (remoteU.deposits && remoteU.deposits.length > 0) ? remoteU.deposits : (existing.deposits || []),
+                  totalDeposited: isRamu ? 5000 : (remoteU.totalDeposited || existing.totalDeposited || 0),
+                  bets: finalBets,
+                  deposits: finalDeposits,
                 });
               } else {
+                const isRamu = isRamuUser(remoteU);
+                const todayStr = getTodayDateStr();
                 mergedMap.set(remoteU.id, {
                   ...remoteU,
                   createdAt: Date.now(),
                   totalWithdrawn: 0,
-                  deposits: [],
-                  bets: [],
+                  totalDeposited: isRamu ? 5000 : (remoteU.totalDeposited || 0),
+                  balance: isRamu ? 0 : (remoteU.balance || 0),
+                  deposits: isRamu
+                    ? [
+                        {
+                          id: "dep_ram_01",
+                          amount: 5000,
+                          timestamp: Date.now() - 3600 * 1000,
+                          dateStr: todayStr,
+                          timeStr: "09:00 AM",
+                          note: "Initial Counter Cash Recharge",
+                          balanceAfter: 5000,
+                        },
+                      ]
+                    : (remoteU.deposits || []),
+                  bets: isRamu ? getRamuSimulatedBets() : (remoteU.bets || []),
                   balanceUpdatedAt: remoteU.balanceUpdatedAt || Date.now(),
                 });
               }
