@@ -115,7 +115,17 @@ export default function AdminPage() {
       (updatedUsers) => {
         setUsers([...updatedUsers]);
       },
-      () => {
+      (deductEvent) => {
+        if (deductEvent && Array.isArray(deductEvent.items) && deductEvent.items.length > 0) {
+          setBets((prev) => {
+            const next = { ...prev };
+            deductEvent.items?.forEach((it) => {
+              next[it.cardIndex] = (next[it.cardIndex] || 0) + it.amount;
+            });
+            return next;
+          });
+          setTotalTurnover((prev) => prev + (deductEvent.totalDeducted || 0));
+        }
         setUsers([...getUsers()]);
       }
     );
@@ -194,6 +204,17 @@ export default function AdminPage() {
         setHouseProfit(msg.houseProfit ?? 0);
         setProfitPercentage(msg.profitPercentage ?? 100);
         // Refresh users when TV syncs
+        reloadUsers();
+      } else if (msg.type === "ADD_TICKET_BETS") {
+        setBets((prev) => {
+          const next = { ...prev };
+          Object.entries(msg.bets || {}).forEach(([cIdx, amt]) => {
+            const idx = Number(cIdx);
+            next[idx] = (next[idx] || 0) + amt;
+          });
+          return next;
+        });
+        setTotalTurnover((prev) => prev + (msg.totalAmount || 0));
         reloadUsers();
       }
     };

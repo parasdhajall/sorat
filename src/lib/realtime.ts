@@ -377,7 +377,7 @@ export class AdminClientSync {
       try {
         this.broadcastChannel = new BroadcastChannel(`sorat_local_${this.roomId}`);
         this.broadcastChannel.onmessage = (event) => {
-          if (event.data && event.data._from === "tv") {
+          if (event.data && event.data.payload) {
             this.onStatusChange("connected");
             this.onMessage(event.data.payload);
           }
@@ -386,10 +386,13 @@ export class AdminClientSync {
     }
 
     window.addEventListener("storage", (e) => {
-      if (e.key === `sorat_tv_msg_${this.roomId}` && e.newValue) {
+      if (
+        (e.key === `sorat_tv_msg_${this.roomId}` || e.key === `sorat_admin_msg_${this.roomId}`) &&
+        e.newValue
+      ) {
         try {
           const wire = JSON.parse(e.newValue);
-          if (wire && wire._from === "tv") {
+          if (wire && wire.payload) {
             this.onStatusChange("connected");
             this.onMessage(wire.payload);
           }
@@ -415,7 +418,7 @@ export class AdminClientSync {
             const ntfyMsg = JSON.parse(event.data);
             if (ntfyMsg.event === "message" && ntfyMsg.message) {
               const wire = JSON.parse(ntfyMsg.message);
-              if (wire && wire._from === "tv" && wire.payload) {
+              if (wire && wire.payload) {
                 this.onStatusChange("connected");
                 this.onMessage(wire.payload);
               }

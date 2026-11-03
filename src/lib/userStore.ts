@@ -607,8 +607,9 @@ export function mergeRemoteUsers(remoteUsers: any[]): UserAccount[] {
           : [];
 
       mergedMap.set(existing.id, {
-        ...existing,
         ...remoteU,
+        ...existing,
+        id: existing.id,
         pin: remoteU.pin || existing.pin || "1234",
         phone: remoteU.phone || existing.phone || "",
         balance: isRamu ? 0 : effBalance,
@@ -746,7 +747,7 @@ export function broadcastUserDelete(userId: string): void {
 }
 
 /**
- * Broadcasts dedicated atomic balance deduction event to the cloud channel so Admin & other devices reflect it immediately.
+ * Broadcasts dedicated atomic balance deduction & live bet event to the cloud channel so Admin & other devices reflect it immediately.
  */
 export function broadcastBalanceDeductionToCloud(
   agentId: string,
@@ -755,7 +756,10 @@ export function broadcastBalanceDeductionToCloud(
   totalDeducted: number,
   newBalance: number,
   roundId: string,
-  balanceUpdatedAt: number
+  balanceUpdatedAt: number,
+  roundNumber?: number,
+  items?: { cardIndex: number; cardName: string; amount: number }[],
+  betRecords?: UserBetRecord[]
 ): void {
   if (typeof window === "undefined") return;
   try {
@@ -771,12 +775,45 @@ export function broadcastBalanceDeductionToCloud(
         newBalance,
         balanceUpdatedAt,
         roundId,
+        roundNumber,
+        items,
+        betRecords,
         timestamp: Date.now(),
       }),
     }).catch(() => {});
   } catch (e) {
     console.error("Cloud deduct broadcast error:", e);
   }
+}
+
+/**
+ * Broadcasts deposit event to the cloud topic so phone terminals update their wallet immediately.
+ */
+export function broadcastUserDeposit(
+  userId: string,
+  username: string,
+  amount: number,
+  newBalance: number,
+  totalDeposited: number,
+  depositRecord: UserDeposit
+): void {
+  if (typeof window === "undefined") return;
+  try {
+    fetch(`https://ntfy.sh/${CLOUD_ACCOUNTS_SYNC_TOPIC}`, {
+      method: "POST",
+      headers: { Title: "USER_DEPOSIT" },
+      body: JSON.stringify({
+        type: "USER_DEPOSIT",
+        userId,
+        username,
+        amount,
+        newBalance,
+        totalDeposited,
+        depositRecord,
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  } catch {}
 }
 
 /**
@@ -822,7 +859,7 @@ export async function pullUsersFromCloud(): Promise<UserAccount[]> {
 
 /**
  * Subscribes to real-time cloud account changes via Server-Sent Events (SSE).
- * Handles ACCOUNTS_SYNC, USER_CREATED, PIN_CHANGED, USER_DELETED, and AGENT_BALANCE_DEDUCT.
+ * Handles ACCOUNTS_SYNC, USER_CREATED, PIN_CHANGED, USER_DELETED, AGENT_BALANCE_DEDUCT, and USER_DEPOSIT.
  */
 export function subscribeToCloudUsers(
   onUpdate?: (users: UserAccount[]) => void,
@@ -833,6 +870,9 @@ export function subscribeToCloudUsers(
     totalDeducted: number;
     newBalance: number;
     roundId: string;
+    roundNumber?: number;
+    items?: { cardIndex: number; cardName: string; amount: number }[];
+    betRecords?: UserBetRecord[];
     timestamp: number;
   }) => void
 ): () => void {
@@ -855,42 +895,86 @@ export function subscribeToCloudUsers(
           if (!rawContent || !rawContent.startsWith("{")) return;
           const parsed = JSON.parse(rawContent);
 
-          // 1. Direct Balance Deduction Event (e.g. phone placed bet)
+          // 1. Direct Balance Deduction & Real-time Bet Placed Event (e.g. phone placed bet)
           if (parsed.type === "AGENT_BALANCE_DEDUCT") {
             const current = getUsers();
             const rawId = (parsed.username || parsed.agentId || "").toLowerCase();
             const cleanId = rawId.replace(/^@/, "");
+            const cleanPhone = cleanId.replace(/\D/g, "");
+
             const target = current.find(
               (u) =>
                 u.id.toLowerCase() === rawId ||
                 u.id.toLowerCase() === cleanId ||
                 u.username.toLowerCase().replace(/^@/, "") === cleanId ||
+                (cleanPhone.length >= 6 && (u.phone || "").replace(/\D/g, "").includes(cleanPhone)) ||
                 (isRamuUser(u) && (cleanId === "ram" || cleanId.includes("ramu")))
             );
 
             if (target) {
               const deductTime = parsed.balanceUpdatedAt || parsed.timestamp || Date.now();
-              if (deductTime >= (target.balanceUpdatedAt || 0)) {
-                target.balance = parsed.newBalance;
-                target.balanceUpdatedAt = deductTime;
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
-                cachedUsers = current;
-                notifySync("USERS_UPDATED", current);
-                onDeduct?.(parsed);
-                onUpdate?.(current);
+              target.balance = parsed.newBalance;
+              target.balanceUpdatedAt = deductTime;
+
+              // Append new bet records if provided!
+              if (Array.isArray(parsed.betRecords) && parsed.betRecords.length > 0) {
+                const existingBetIds = new Set((target.bets || []).map((b) => b.id));
+                const newBets = parsed.betRecords.filter((b: any) => !existingBetIds.has(b.id));
+                if (newBets.length > 0) {
+                  target.bets = [...newBets, ...(target.bets || [])];
+                }
               }
+
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
+              cachedUsers = current;
+              notifySync("USERS_UPDATED", current);
+              onDeduct?.(parsed);
+              onUpdate?.(current);
             }
             return;
           }
 
-          // 2. Real-time Single User Created
+          // 2. Real-time User Deposit Event (e.g. Admin topped up user wallet)
+          if (parsed.type === "USER_DEPOSIT") {
+            const current = getUsers();
+            const rawId = (parsed.username || parsed.userId || "").toLowerCase();
+            const cleanId = rawId.replace(/^@/, "");
+            const cleanPhone = cleanId.replace(/\D/g, "");
+
+            const target = current.find(
+              (u) =>
+                u.id.toLowerCase() === rawId ||
+                u.id.toLowerCase() === cleanId ||
+                u.username.toLowerCase().replace(/^@/, "") === cleanId ||
+                (cleanPhone.length >= 6 && (u.phone || "").replace(/\D/g, "").includes(cleanPhone))
+            );
+
+            if (target) {
+              target.balance = parsed.newBalance;
+              target.balanceUpdatedAt = parsed.timestamp || Date.now();
+              target.totalDeposited = parsed.totalDeposited;
+              if (parsed.depositRecord) {
+                const existingDepIds = new Set((target.deposits || []).map((d) => d.id));
+                if (!existingDepIds.has(parsed.depositRecord.id)) {
+                  target.deposits = [parsed.depositRecord, ...(target.deposits || [])];
+                }
+              }
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
+              cachedUsers = current;
+              notifySync("USERS_UPDATED", current);
+              onUpdate?.(current);
+            }
+            return;
+          }
+
+          // 3. Real-time Single User Created
           if (parsed.type === "USER_CREATED" && parsed.user) {
             const merged = mergeRemoteUsers([parsed.user]);
             onUpdate?.(merged);
             return;
           }
 
-          // 3. PIN Changed
+          // 4. PIN Changed
           if (parsed.type === "PIN_CHANGED" && parsed.userId && parsed.pin) {
             const current = getUsers();
             const target = current.find((u) => u.id === parsed.userId);
@@ -904,7 +988,7 @@ export function subscribeToCloudUsers(
             return;
           }
 
-          // 4. User Deleted
+          // 5. User Deleted
           if (parsed.type === "USER_DELETED" && parsed.userId) {
             const current = getUsers().filter((u) => u.id !== parsed.userId);
             localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
@@ -914,7 +998,7 @@ export function subscribeToCloudUsers(
             return;
           }
 
-          // 5. Full Snapshot Sync
+          // 6. Full Snapshot Sync
           if (parsed.type === "ACCOUNTS_SYNC" && Array.isArray(parsed.users) && parsed.users.length > 0) {
             const merged = mergeRemoteUsers(parsed.users);
             onUpdate?.(merged);
@@ -1143,7 +1227,10 @@ export function deductAgentBalance(
     totalStake,
     newBalance,
     roundId,
-    now
+    now,
+    roundNumber,
+    items,
+    betRecords
   );
 
   return { success: true, newBalance };
@@ -1184,6 +1271,14 @@ export function depositToUser(
 
   users[idx] = target;
   saveUsers(users);
+  broadcastUserDeposit(
+    target.id,
+    target.username,
+    amount,
+    newBalance,
+    target.totalDeposited,
+    depositRecord
+  );
 
   // Background sync to Supabase if configured
   try {
