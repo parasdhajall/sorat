@@ -177,3 +177,4 @@ export const RAMU_SIMULATED_BETS: UserBetRecord[] = ${JSON.stringify(ramuBets, n
   console.log(`Generated ${ramuBets.length} bets at ${outputPath}`);
   return { roundsSummary, ramuBets, cumulativeTurnover, cumulativePayouts, runningBalance };
 }
+
