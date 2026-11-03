@@ -50,8 +50,28 @@ function notifySync(type: string, data?: any) {
   } catch {}
 }
 
+export function cleanupLegacyUnscopedTickets(): void {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      // Retain only tickets with explicit non-empty agentId or username
+      const scopedOnly = parsed.filter(
+        (t: any) => Boolean((t.agentId && t.agentId.trim()) || (t.username && t.username.trim()))
+      );
+      if (scopedOnly.length !== parsed.length) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(scopedOnly));
+        cachedTickets = scopedOnly;
+      }
+    }
+  } catch {}
+}
+
 export function getTickets(agentId?: string): ThermalTicket[] {
   if (typeof window === "undefined") return [];
+  cleanupLegacyUnscopedTickets();
   let all: ThermalTicket[] = [];
 
   try {
@@ -67,16 +87,16 @@ export function getTickets(agentId?: string): ThermalTicket[] {
   cachedTickets = all;
   if (!agentId || agentId === "all") return all;
 
-  const cleanAgent = agentId.toLowerCase().replace(/^@/, "");
+  const cleanAgent = agentId.toLowerCase().replace(/^@/, "").trim();
+  if (!cleanAgent) return [];
+
   return all.filter((t) => {
-    const tAgentId = (t.agentId || "").toLowerCase();
-    const tUsername = (t.username || "").toLowerCase().replace(/^@/, "");
-    const tAgentName = (t.agentName || "").toLowerCase();
+    const tAgentId = (t.agentId || "").toLowerCase().trim();
+    const tUsername = (t.username || "").toLowerCase().replace(/^@/, "").trim();
 
     return (
-      tAgentId === cleanAgent ||
-      tUsername === cleanAgent ||
-      tAgentName === cleanAgent
+      (tAgentId !== "" && tAgentId === cleanAgent) ||
+      (tUsername !== "" && tUsername === cleanAgent)
     );
   });
 }
@@ -104,17 +124,12 @@ export function clearTickets(agentId?: string): void {
     return;
   }
   const all = getTickets("all");
-  const cleanAgent = agentId.toLowerCase().replace(/^@/, "");
+  const cleanAgent = agentId.toLowerCase().replace(/^@/, "").trim();
   const remaining = all.filter((t) => {
-    const tAgentId = (t.agentId || "").toLowerCase();
-    const tUsername = (t.username || "").toLowerCase().replace(/^@/, "");
-    const tAgentName = (t.agentName || "").toLowerCase();
+    const tAgentId = (t.agentId || "").toLowerCase().trim();
+    const tUsername = (t.username || "").toLowerCase().replace(/^@/, "").trim();
 
-    return (
-      tAgentId !== cleanAgent &&
-      tUsername !== cleanAgent &&
-      tAgentName !== cleanAgent
-    );
+    return tAgentId !== cleanAgent && tUsername !== cleanAgent;
   });
   saveTickets(remaining);
 }
@@ -139,6 +154,18 @@ export function createTicket(data: {
 
   const totalAmount = data.items.reduce((sum, item) => sum + item.amount, 0);
 
+  const cleanAgentId = (
+    data.agentId ||
+    (data.agentName ? data.agentName.toLowerCase().replace(/\s+/g, "_") : "kiosk")
+  ).trim();
+  const cleanUsername = (
+    data.username ||
+    (data.agentName ? data.agentName.toLowerCase().replace(/\s+/g, "_") : "kiosk")
+  )
+    .toLowerCase()
+    .replace(/^@/, "")
+    .trim();
+
   const newTicket: ThermalTicket = {
     ticketId,
     barcode,
@@ -149,8 +176,8 @@ export function createTicket(data: {
     timeStr: formatTime(now),
     customerName: data.customerName?.trim() || `Customer #${randomSuffix.toString().slice(-2)}`,
     agentName: data.agentName || "Kiosk Agent",
-    agentId: data.agentId,
-    username: data.username,
+    agentId: cleanAgentId,
+    username: cleanUsername,
     items: data.items,
     totalAmount,
     status: "ACTIVE",

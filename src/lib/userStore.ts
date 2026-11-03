@@ -1134,6 +1134,69 @@ export function authenticateAgent(
   return { success: true, user };
 }
 
+/**
+ * Asynchronously authenticates an agent against local store and live Supabase.
+ */
+export async function authenticateAgentAsync(
+  identifier: string,
+  pin: string
+): Promise<{ success: boolean; user?: UserAccount; error?: string }> {
+  const localRes = authenticateAgent(identifier, pin);
+  if (localRes.success) return localRes;
+
+  const sb = getSupabaseClient();
+  if (sb) {
+    try {
+      const raw = (identifier || "").trim().toLowerCase();
+      const clean = raw.replace(/^@/, "");
+      if (!clean) return { success: false, error: "Kripya Agent ID daalein" };
+
+      const { data, error } = await sb
+        .from("players")
+        .select("*")
+        .or(`username.eq.${clean},id.eq.${clean},display_name.ilike.%${clean}%`)
+        .limit(1);
+
+      if (!error && data && data.length > 0) {
+        const p = data[0];
+        const expectedPin = (p.pin || "1234").trim();
+        if (expectedPin === pin.trim()) {
+          const remoteUser: UserAccount = {
+            id: p.id,
+            displayName: p.display_name,
+            username: p.username,
+            phone: p.phone || "",
+            pin: p.pin,
+            agentCode: `AGENT-${p.id.slice(0, 6)}`,
+            balance: Number(p.balance) || 0,
+            totalDeposited: Number(p.total_deposited || 0),
+            totalWithdrawn: Number(p.total_withdrawn || 0),
+            createdAt: new Date(p.created_at).getTime(),
+            status: p.status || "ACTIVE",
+            notes: p.notes || "",
+            deposits: [],
+            bets: [],
+          };
+          const users = getUsers();
+          const existIdx = users.findIndex((u) => u.id === p.id || u.username === p.username);
+          if (existIdx >= 0) {
+            users[existIdx] = remoteUser;
+          } else {
+            users.unshift(remoteUser);
+          }
+          saveUsers(users);
+          setLoggedInAgent(remoteUser.id);
+          return { success: true, user: remoteUser };
+        } else {
+          return { success: false, error: `Galat PIN! "${p.display_name}" ka sahi PIN daalein.` };
+        }
+      }
+    } catch {}
+  }
+
+  return localRes;
+}
+
 export function updateUserPin(userId: string, newPin: string): UserAccount {
   const users = getUsers();
   const idx = users.findIndex((u) => u.id === userId);
@@ -1476,6 +1539,40 @@ export function createUser(data: {
   users.unshift(newUser);
   saveUsers(users);
   broadcastSingleUserCreated(newUser);
+
+  // Directly persist newly created agent/player to Supabase
+  const sb = getSupabaseClient();
+  if (sb) {
+    sb.from("players")
+      .upsert({
+        id: newUser.id,
+        username: newUser.username,
+        display_name: newUser.displayName,
+        phone: newUser.phone,
+        pin: newUser.pin,
+        role: "agent",
+        balance: newUser.balance,
+        total_deposited: newUser.totalDeposited,
+        total_withdrawn: 0,
+        status: "ACTIVE",
+        notes: newUser.notes,
+      })
+      .then(({ error }) => {
+        if (error) console.warn("Supabase player upsert notice:", error.message);
+        if (initialDep > 0) {
+          sb.from("deposits").insert({
+            user_id: newUser.id,
+            amount: initialDep,
+            date_str: getTodayDateStr(new Date(now)),
+            time_str: formatTime(now),
+            note: "Initial Account Deposit",
+            balance_after: initialDep,
+          }).catch(() => {});
+        }
+      })
+      .catch(() => {});
+  }
+
   return newUser;
 }
 

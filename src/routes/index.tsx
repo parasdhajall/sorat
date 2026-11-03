@@ -1,459 +1,467 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useRef } from "react";
 import {
-  TVHostSync,
+  AdminClientSync,
   DEFAULT_ROOM_ID,
   GameMessage,
   getSynchronizedRoundState,
-  calculateProfitGuaranteedWinner,
-  PAYOUT_MULTIPLIER,
+  getDeterministicRoundWinner,
 } from "@/lib/realtime";
+import { CARDS } from "@/lib/cards";
 import {
+  createTicket,
+  getTickets,
+  clearTickets,
+  claimTicket,
+  settleTicketsForRound,
+  ThermalTicket,
+  BetItem,
+} from "@/lib/ticketStore";
+import {
+  getActiveUser,
   getLoggedInAgent,
   setLoggedInAgent,
   authenticateAgent,
+  authenticateAgentAsync,
+  recordUserBet,
   getUsers,
-  setActiveUserId,
   settleRoundBets,
   UserAccount,
+  deductAgentBalance,
+  pullUsersFromCloud,
+  subscribeToCloudUsers,
+  getTodayDateStr,
 } from "@/lib/userStore";
-import { settleTicketsForRound } from "@/lib/ticketStore";
-import kite from "@/assets/kite.jpg";
-import umbrella from "@/assets/umbrella.jpg";
-import ball from "@/assets/ball.jpg";
-import sun from "@/assets/sun.jpg";
-import rose from "@/assets/rose.jpg";
-import diya from "@/assets/diya.jpg";
-import butterfly from "@/assets/butterfly.jpg";
-import sparrow from "@/assets/sparrow.jpg";
-import rabbit from "@/assets/rabbit.jpg";
-import top from "@/assets/top.jpg";
-import bucket from "@/assets/bucket.jpg";
-import cow from "@/assets/cow.jpg";
+import { ThermalSlipModal } from "@/components/pos/ThermalSlipModal";
+import { PrinterSettingsModal } from "@/components/pos/PrinterSettingsModal";
+import { PrinterStatusBadge } from "@/components/pos/PrinterStatusBadge";
+import {
+  executeDirectPrint,
+  isDirectPrinterConnected,
+} from "@/lib/thermalPrinter";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Sorat — Live TV Arena Display (Spectator)" },
-      { name: "description", content: "Big Screen Spectator Arena for Sorat Game" },
-      { property: "og:title", content: "Sorat — Live TV Arena Display" },
-      { property: "og:type", content: "website" },
+      { title: "Sorat — Agent Counter POS Booking App" },
+      { name: "description", content: "Mobile Counter POS App for Agent Booking & Thermal Printing" },
+      { name: "viewport", content: "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" },
     ],
   }),
-  component: TvArenaPage,
+  component: AgentPage,
 });
 
-const CARDS = [
-  { id: 0, name: "पतंग", img: kite },
-  { id: 1, name: "छत्री", img: umbrella },
-  { id: 2, name: "बॉल", img: ball },
-  { id: 3, name: "सूर्य", img: sun },
-  { id: 4, name: "गुलाब", img: rose },
-  { id: 5, name: "दिवा", img: diya },
-  { id: 6, name: "फुलपाखरू", img: butterfly },
-  { id: 7, name: "चिमणी", img: sparrow },
-  { id: 8, name: "ससा", img: rabbit },
-  { id: 9, name: "भोवरा", img: top },
-  { id: 10, name: "बादली", img: bucket },
-  { id: 11, name: "गाय", img: cow },
-];
-
-type Phase = "bet" | "select" | "result";
-
-interface ResultHistoryItem {
-  roundId: string;
-  cardIndex: number;
-  cardName: string;
-  timeStr: string;
-}
-
-export default function TvArenaPage() {
+export default function AgentPage() {
   const initialSync = getSynchronizedRoundState();
   const [roundNumber, setRoundNumber] = useState(initialSync.roundNumber);
   const [roundId, setRoundId] = useState(initialSync.roundId);
-  const [phase, setPhase] = useState<Phase>(initialSync.phase);
-  const [t, setT] = useState(initialSync.timeLeft);
+  const [phase, setPhase] = useState<"bet" | "select" | "result">(initialSync.phase);
+  const [timer, setTimer] = useState(initialSync.timeLeft);
+  const [declaredWinner, setDeclaredWinner] = useState<number | null>(null);
+  const lastSettledRoundRef = useRef<number | null>(null);
 
-  // TV Agent Authentication State
-  const [tvAgent, setTvAgent] = useState<UserAccount | null>(() => getLoggedInAgent());
+  // Agent Authentication State
+  const [loggedInAgent, setLoggedInAgentState] = useState<UserAccount | null>(() => getLoggedInAgent());
   const [loginIdInput, setLoginIdInput] = useState("");
   const [loginPinInput, setLoginPinInput] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [availableUsers, setAvailableUsers] = useState<UserAccount[]>(() => getUsers());
+  const [isSyncingAccounts, setIsSyncingAccounts] = useState(false);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
 
-  // Game Board State (Synced from Agent POS App)
-  const [bets, setBets] = useState<Record<number, number>>({});
-  const [winner, setWinner] = useState<number | null>(null);
-  const [spot, setSpot] = useState<number | null>(null);
-  const [soundEnabled, setSoundEnabled] = useState(true);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-
-  // Financials for Guaranteed 30% Margin Engine
-  const [totalTurnover, setTotalTurnover] = useState<number>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("sorat_total_turnover");
-      if (saved) return Number(saved);
-    }
-    return 0;
-  });
-  const [totalPayouts, setTotalPayouts] = useState<number>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("sorat_total_payouts");
-      if (saved) return Number(saved);
-    }
-    return 0;
+  // Active User / Agent Wallet Balance
+  const [agentUser, setAgentUser] = useState<UserAccount>(() => getLoggedInAgent() || getActiveUser());
+  const [agentBalance, setAgentBalance] = useState<number>(() => {
+    const u = getLoggedInAgent() || getActiveUser();
+    return u ? u.balance : 1000;
   });
 
-  // Recent Winners History
-  const [resultsHistory, setResultsHistory] = useState<ResultHistoryItem[]>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = localStorage.getItem("sorat_tv_results_history");
-        if (saved) return JSON.parse(saved);
-      } catch {}
-    }
-    return [
-      { roundId: "#0839", cardIndex: 11, cardName: "गाय", timeStr: "08:39 PM" },
-      { roundId: "#0838", cardIndex: 3, cardName: "सूर्य", timeStr: "08:38 PM" },
-      { roundId: "#0837", cardIndex: 0, cardName: "पतंग", timeStr: "08:37 PM" },
-      { roundId: "#0836", cardIndex: 7, cardName: "चिमणी", timeStr: "08:36 PM" },
-      { roundId: "#0835", cardIndex: 4, cardName: "गुलाब", timeStr: "08:35 PM" },
-      { roundId: "#0834", cardIndex: 8, cardName: "ससा", timeStr: "08:34 PM" },
-    ];
+  // POS Booking State
+  const [customerName, setCustomerName] = useState("");
+  const [activeChip, setActiveChip] = useState<number>(10);
+  const [selectedCards, setSelectedCards] = useState<Record<number, number>>({});
+  const [ticketsList, setTicketsList] = useState<ThermalTicket[]>(() => {
+    const u = getLoggedInAgent();
+    return u ? getTickets(u.id || u.username) : [];
   });
+  const [activeTab, setActiveTab] = useState<"punch" | "tickets" | "shift" | "printer">("punch");
 
-  const lastProcessedRoundRef = useRef<number>(initialSync.roundNumber);
-  const lastDecidedWinnerRoundRef = useRef<number | null>(null);
-  const forcedWinnerRef = useRef<number | null>(null);
-  const [forcedWinner, setForcedWinner] = useState<number | null>(null);
-  const hostSyncRef = useRef<TVHostSync | null>(null);
+  // Keep ticketsList strictly scoped to current logged-in agent
+  useEffect(() => {
+    if (loggedInAgent) {
+      setTicketsList(getTickets(loggedInAgent.id || loggedInAgent.username));
+    } else {
+      setTicketsList([]);
+    }
+  }, [loggedInAgent?.id, loggedInAgent?.username]);
+
+  // Print Slip State
+  const [printTicket, setPrintTicket] = useState<ThermalTicket | null>(null);
+  const [showSlipModal, setShowSlipModal] = useState(false);
+  const [showPrinterModal, setShowPrinterModal] = useState(false);
+  const [printerName, setPrinterName] = useState(() =>
+    typeof window !== "undefined" ? localStorage.getItem("sorat_printer_name") || "POS-58" : "POS-58"
+  );
+
+  // PWA Install State
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isStandalone, setIsStandalone] = useState(false);
+
+  const clientSyncRef = useRef<AdminClientSync | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
 
-  // Audio Context Helpers
-  const getAudioContext = () => {
-    if (typeof window === "undefined") return null;
-    if (!audioCtxRef.current) {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (AudioCtx) audioCtxRef.current = new AudioCtx();
-    }
-    if (audioCtxRef.current?.state === "suspended") {
-      audioCtxRef.current.resume().catch(() => {});
-    }
-    return audioCtxRef.current;
-  };
-
-  const playBeep = (freq: number, duration: number, type: OscillatorType = "sine") => {
-    if (!soundEnabled) return;
-    try {
-      const ctx = getAudioContext();
-      if (!ctx) return;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = type;
-      osc.frequency.setValueAtTime(freq, ctx.currentTime);
-      gain.gain.setValueAtTime(0.08, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + duration);
-    } catch {}
-  };
-
-  const playVictoryFanfare = () => {
-    if (!soundEnabled) return;
-    try {
-      const ctx = getAudioContext();
-      if (!ctx) return;
-      const notes = [523.25, 659.25, 783.99, 1046.5];
-      notes.forEach((freq, idx) => {
-        const now = ctx.currentTime + idx * 0.12;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(freq, now);
-        gain.gain.setValueAtTime(0.12, now);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(now);
-        osc.stop(now + 0.5);
-      });
-    } catch {}
-  };
-
-  const toggleSound = () => {
-    const next = !soundEnabled;
-    setSoundEnabled(next);
-    if (next) {
-      getAudioContext();
-      playBeep(660, 0.1, "sine");
-    }
-  };
-
-  const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(() => {});
-      setIsFullscreen(true);
-    } else {
-      document.exitFullscreen().catch(() => {});
-      setIsFullscreen(false);
-    }
-  };
-
+  // Detect standalone PWA mode
   useEffect(() => {
-    const handleFsChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
-    document.addEventListener("fullscreenchange", handleFsChange);
-    return () => document.removeEventListener("fullscreenchange", handleFsChange);
+    if (typeof window !== "undefined") {
+      const isStandaloneMode = window.matchMedia("(display-mode: standalone)").matches || (window.navigator as any).standalone;
+      setIsStandalone(Boolean(isStandaloneMode));
+
+      const handler = (e: any) => {
+        e.preventDefault();
+        setDeferredPrompt(e);
+      };
+      window.addEventListener("beforeinstallprompt", handler);
+      return () => window.removeEventListener("beforeinstallprompt", handler);
+    }
   }, []);
 
-  // Listen to cross-tab storage changes (if Agent logs in/out in another tab)
+  // Sync Timer & Clock Rollover
+  useEffect(() => {
+    const id = setInterval(() => {
+      const sync = getSynchronizedRoundState();
+      setRoundNumber(sync.roundNumber);
+      setRoundId(sync.roundId);
+      setPhase(sync.phase);
+      setTimer(sync.timeLeft);
+
+      // New round rollover: clear old winner
+      if (sync.phase === "bet" && declaredWinner !== null) {
+        setDeclaredWinner(null);
+      }
+
+      // If in result phase and winner has not been declared yet from TV:
+      if (sync.phase === "result" && lastSettledRoundRef.current !== sync.roundNumber) {
+        lastSettledRoundRef.current = sync.roundNumber;
+        const fallbackWinner = declaredWinner ?? getDeterministicRoundWinner(sync.roundNumber);
+        if (declaredWinner === null) {
+          setDeclaredWinner(fallbackWinner);
+        }
+        settleTicketsForRound(sync.roundId, fallbackWinner, CARDS[fallbackWinner]?.name || "");
+        setTicketsList(getTickets());
+      }
+    }, 250);
+    return () => clearInterval(id);
+  }, [declaredWinner]);
+
+  // Sync Storage
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === "sorat_logged_in_agent_id_v1") {
-        setTvAgent(getLoggedInAgent());
+      if (
+        e.key === "sorat_users_v2" ||
+        e.key === "sorat_active_user_id_v2" ||
+        e.key === "sorat_logged_in_agent_id_v1"
+      ) {
+        const u = getLoggedInAgent() || getActiveUser();
+        setLoggedInAgentState(getLoggedInAgent());
+        setAgentUser(u);
+        setAgentBalance(u.balance);
+      }
+      if (e.key === "sorat_thermal_tickets_v1") {
+        setTicketsList(getTickets());
       }
     };
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
   }, []);
 
-  // Initialize TV Host Sync to receive live bets from Agent POS Mobile App
+  // Realtime Cloud User Accounts Sync (syncs with Admin on PC instantly)
   useEffect(() => {
-    const host = new TVHostSync(DEFAULT_ROOM_ID);
-    hostSyncRef.current = host;
+    pullUsersFromCloud().then((cloudUsers) => {
+      setAvailableUsers([...cloudUsers]);
+      const u = getLoggedInAgent() || getActiveUser();
+      setLoggedInAgentState(getLoggedInAgent());
+      setAgentUser(u);
+      setAgentBalance(u.balance);
+    });
 
-    host.onMessage = (msg: GameMessage) => {
-      if (msg.type === "ADD_TICKET_BETS") {
-        setBets((prev) => {
-          const next = { ...prev };
-          Object.entries(msg.bets).forEach(([c, amt]) => {
-            const cardNum = Number(c);
-            next[cardNum] = (next[cardNum] ?? 0) + amt;
-          });
-          return next;
-        });
-        setTotalTurnover((t) => t + msg.totalAmount);
-        playBeep(720, 0.08, "sine");
-      } else if (msg.type === "ADD_BET") {
-        setBets((prev) => ({
-          ...prev,
-          [msg.card]: (prev[msg.card] ?? 0) + msg.amount,
-        }));
-        setTotalTurnover((t) => t + msg.amount);
-        playBeep(720, 0.08, "sine");
-      } else if (msg.type === "FORCE_WINNER") {
-        const card = msg.card !== undefined && msg.card !== null ? Number(msg.card) : null;
-        setForcedWinner(card);
-        forcedWinnerRef.current = card;
-        playBeep(880, 0.15, "triangle");
-      } else if (msg.type === "CLEAR_ALL_BETS") {
-        setBets({});
-        playBeep(440, 0.1, "sine");
-      } else if (msg.type === "TRIGGER_SPIN") {
-        setPhase("select");
-        setT(5);
-        playBeep(960, 0.15, "sine");
-      } else if (msg.type === "RESET_FINANCIALS") {
-        setTotalTurnover(0);
-        setTotalPayouts(0);
-        if (typeof window !== "undefined") {
-          localStorage.removeItem("sorat_total_turnover");
-          localStorage.removeItem("sorat_total_payouts");
+    const unsub = subscribeToCloudUsers((freshUsers) => {
+      setAvailableUsers([...freshUsers]);
+      const u = getLoggedInAgent() || getActiveUser();
+      setLoggedInAgentState(getLoggedInAgent());
+      setAgentUser(u);
+      setAgentBalance(u.balance);
+    });
+    return () => unsub();
+  }, []);
+
+  // Realtime Sync with TV Screen
+  useEffect(() => {
+    const client = new AdminClientSync(DEFAULT_ROOM_ID);
+    clientSyncRef.current = client;
+
+    client.onMessage = (msg: GameMessage) => {
+      if (msg.type === "SYNC_FROM_TV") {
+        setRoundNumber(msg.roundNumber);
+        setRoundId(msg.roundId);
+        setPhase(msg.phase);
+        setTimer(msg.t);
+        // Accept winner immediately whether in select or result phase
+        if (msg.winner !== null && msg.winner >= 0 && msg.winner < 12) {
+          setDeclaredWinner(msg.winner);
+          settleTicketsForRound(msg.roundId, msg.winner, CARDS[msg.winner]?.name || "");
+          settleRoundBets(msg.roundId, msg.winner, CARDS[msg.winner]?.name || "", false);
+          setTicketsList(getTickets(agentUser?.id || agentUser?.username));
         }
+      } else if (msg.type === "SET_AGENT_BALANCE") {
+        setAgentBalance(msg.balance);
+        setAgentUser((u) => ({ ...u, balance: msg.balance }));
+      } else if (msg.type === "RECHARGE_AGENT") {
+        setAgentBalance((b) => b + msg.amount);
+        setAgentUser((u) => ({ ...u, balance: u.balance + msg.amount }));
       }
     };
 
-    host.connect();
-    return () => host.destroy();
-  }, [soundEnabled]);
+    client.connect();
+    return () => client.destroy();
+  }, []);
 
-  // Synchronized Clock Ticker
-  useEffect(() => {
-    const updateTick = () => {
-      const sync = getSynchronizedRoundState();
-      setT(sync.timeLeft);
-      setPhase(sync.phase);
+  const totalTicketStake = Object.values(selectedCards).reduce((a, b) => a + b, 0);
+  const isBalanceEnough = agentBalance >= totalTicketStake;
 
-      // New Round Rollover every 60 seconds
-      if (sync.roundNumber !== lastProcessedRoundRef.current) {
-        lastProcessedRoundRef.current = sync.roundNumber;
-        setRoundNumber(sync.roundNumber);
-        setRoundId(sync.roundId);
-        setBets({});
-        setWinner(null);
-        setSpot(null);
-        lastDecidedWinnerRoundRef.current = null;
-        setForcedWinner(null);
-        forcedWinnerRef.current = null;
-      }
+  const handleCardClick = (cardIdx: number) => {
+    if (phase !== "bet") return;
+    setSelectedCards((prev) => ({
+      ...prev,
+      [cardIdx]: (prev[cardIdx] || 0) + activeChip,
+    }));
+  };
 
-      // Audio countdown cues in final 5 seconds of betting phase
-      if (sync.phase === "bet" && sync.timeLeft <= 5 && sync.timeLeft > 0) {
-        playBeep(880, 0.12, "sawtooth");
-      }
+  const handleClearCard = (cardIdx: number) => {
+    setSelectedCards((prev) => {
+      const next = { ...prev };
+      delete next[cardIdx];
+      return next;
+    });
+  };
+
+  const handleClearAll = () => {
+    setSelectedCards({});
+  };
+
+  // Punch Bet & Trigger Thermal Print
+  const handlePunchAndPrint = () => {
+    if (phase !== "bet") {
+      alert("Betting is currently closed for this round!");
+      return;
+    }
+
+    if (totalTicketStake <= 0) {
+      alert("Kripya kam se kam ek card par daav chunein!");
+      return;
+    }
+
+    if (!isBalanceEnough) {
+      alert(`Balance kam hai! Needed: â‚¹${totalTicketStake}, Available: â‚¹${agentBalance}. Kripya counter recharge karein!`);
+      return;
+    }
+
+    // 1. Prepare Bet Items
+    const items: BetItem[] = Object.entries(selectedCards).map(([idx, amt]) => ({
+      cardIndex: Number(idx),
+      cardName: CARDS[Number(idx)]?.name || `Card ${idx}`,
+      amount: amt,
+    }));
+
+    // 2. Atomically Deduct Balance & Persist in userStore
+    const deductRes = deductAgentBalance(
+      agentUser.id || agentUser.username,
+      totalTicketStake,
+      roundId,
+      roundNumber,
+      items
+    );
+
+    if (!deductRes.success) {
+      alert(deductRes.error || "Balance deduct nahi ho paya!");
+      return;
+    }
+
+    // 3. Immediately reflect deducted balance in React state
+    setAgentBalance(deductRes.newBalance);
+    setAgentUser((prev) => ({ ...prev, balance: deductRes.newBalance }));
+
+    // 4. Create Ticket
+    const newTicket = createTicket({
+      roundId,
+      roundNumber,
+      customerName: customerName.trim() || undefined,
+      agentName: agentUser.displayName || "Counter Kiosk",
+      agentId: agentUser.id,
+      username: agentUser.username,
+      items,
+    });
+
+    // 5. Send single ATOMIC bet packet to TV Screen
+    clientSyncRef.current?.send({
+      type: "ADD_TICKET_BETS",
+      bets: { ...selectedCards },
+      totalAmount: totalTicketStake,
+      agentName: agentUser.displayName,
+      roundId,
+    });
+
+    // Refresh tickets & clear staged selection (scoped to current agent)
+    setTicketsList(getTickets(agentUser.id || agentUser.username));
+    setSelectedCards({});
+    setCustomerName("");
+
+    // 5. Direct Thermal Print or Preview Slip
+    setPrintTicket(newTicket);
+    const paperWidth = ((typeof window !== "undefined" && localStorage.getItem("sorat_printer_width")) as any) || "58mm";
+    const autoPrint = typeof window !== "undefined" && localStorage.getItem("sorat_auto_print") !== "false";
+
+    if (autoPrint && isDirectPrinterConnected()) {
+      executeDirectPrint(newTicket, paperWidth);
+    } else {
+      setShowSlipModal(true);
+    }
+  };
+
+  const handleClaimPrize = (ticketId: string) => {
+    const updated = claimTicket(ticketId);
+    if (updated) {
+      setTicketsList(getTickets(agentUser?.id || agentUser?.username));
+      alert(`Ticket #${ticketId} prize of â‚¹${updated.winningPayout} marked as PAID! Customer ko cash de dijiye.`);
+    }
+  };
+
+  const handleTestPrint = () => {
+    const testTkt: ThermalTicket = {
+      id: "TEST-" + Math.random().toString(36).substring(2, 7).toUpperCase(),
+      dateStr: new Date().toISOString().split("T")[0],
+      timeStr: new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
+      roundId,
+      roundNumber,
+      agentId: agentUser.id,
+      agentName: agentUser.displayName,
+      customerName: "PRINTER TEST SLIP",
+      items: [
+        { cardIndex: 0, cardName: "à¤ªà¤¤à¤‚à¤— (TEST OK)", stake: 10, potentialPayout: 100 },
+        { cardIndex: 11, cardName: "à¤—à¤¾à¤¯ (TEST OK)", stake: 10, potentialPayout: 100 },
+      ],
+      totalStake: 20,
+      totalAmount: 20,
+      maxPotentialPayout: 100,
+      isWinner: false,
+      isClaimed: false,
+      status: "SETTLED",
     };
-
-    updateTick();
-    const id = setInterval(updateTick, 250);
-    return () => clearInterval(id);
-  }, [soundEnabled]);
-
-  // Determine Winner When Entering "select" Phase
-  useEffect(() => {
-    if (phase === "select" && lastDecidedWinnerRoundRef.current !== roundNumber) {
-      lastDecidedWinnerRoundRef.current = roundNumber;
-
-      const decision = calculateProfitGuaranteedWinner(
-        bets,
-        totalTurnover,
-        totalPayouts,
-        forcedWinnerRef.current
-      );
-
-      const w = decision.winner;
-      const prize = (bets[w] ?? 0) * PAYOUT_MULTIPLIER;
-      setWinner(w);
-
-      if (prize > 0) {
-        setTotalPayouts((p) => p + prize);
-      }
-
-      // Automatically settle all pending bets placed by agents/players for this round
-      settleRoundBets(roundId, w, CARDS[w].name, false);
-
-      // Record to recent history
-      const nowStr = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
-      const newHistItem: ResultHistoryItem = {
-        roundId,
-        cardIndex: w,
-        cardName: CARDS[w].name,
-        timeStr: nowStr,
-      };
-      setResultsHistory((prev) => {
-        const next = [newHistItem, ...prev.slice(0, 11)];
-        if (typeof window !== "undefined") {
-          localStorage.setItem("sorat_tv_results_history", JSON.stringify(next));
-        }
-        return next;
-      });
-
-      // Broadcast to Agent Mobile POS Apps (early heads-up during spin)
-      hostSyncRef.current?.broadcast({
-        type: "SYNC_FROM_TV",
-        roundNumber,
-        roundId,
-        phase: "select",
-        t,
-        bets,
-        pool: Object.values(bets).reduce((a, b) => a + b, 0),
-        winner: w,
-        forcedWinner: forcedWinnerRef.current,
-        agentBalance: 0,
-        totalTurnover,
-        totalPayouts: totalPayouts + prize,
-        houseProfit: totalTurnover - (totalPayouts + prize),
-        profitPercentage: 30,
-      });
-
-      playVictoryFanfare();
+    const paperWidth = ((typeof window !== "undefined" && localStorage.getItem("sorat_printer_width")) as any) || "58mm";
+    if (isDirectPrinterConnected()) {
+      executeDirectPrint(testTkt, paperWidth);
+    } else {
+      setPrintTicket(testTkt);
+      setShowSlipModal(true);
     }
-  }, [phase, roundNumber, bets, totalTurnover, totalPayouts, soundEnabled]);
+  };
 
-  // Broadcast again when entering "result" phase so all agents reveal winner simultaneously
-  useEffect(() => {
-    if (phase === "result" && winner !== null) {
-      hostSyncRef.current?.broadcast({
-        type: "SYNC_FROM_TV",
-        roundNumber,
-        roundId,
-        phase: "result",
-        t,
-        bets,
-        pool: Object.values(bets).reduce((a, b) => a + b, 0),
-        winner,
-        forcedWinner: forcedWinnerRef.current,
-        agentBalance: 0,
-        totalTurnover,
-        totalPayouts,
-        houseProfit: totalTurnover - totalPayouts,
-        profitPercentage: 30,
-      });
-    }
-  }, [phase, winner]);
-
-  // High-Speed Selection Animation during "select" phase
-  useEffect(() => {
-    if (phase !== "select") return;
-    let s = 0;
-    const id = setInterval(() => {
-      s = (s + 1) % 12;
-      setSpot(s);
-      playBeep(440 + s * 40, 0.04, "triangle");
-    }, 110);
-    return () => clearInterval(id);
-  }, [phase, soundEnabled]);
-
-  // Total Bets on Board
-  const totalBetsOnBoard = Object.values(bets).reduce((a, b) => a + b, 0);
-  const hurry = phase === "bet" && t <= 5;
-
-  // TV Agent Login Form Submission
-  const handleTvLogin = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
-    const res = authenticateAgent(loginIdInput, loginPinInput);
-    if (res.success && res.user) {
-      setTvAgent(res.user);
-      setActiveUserId(res.user.id);
-    } else {
-      setLoginError(res.error || "Login fail! Sahi Agent ID aur 4-digit PIN daalein.");
+    setIsLoggingIn(true);
+    try {
+      let res = await authenticateAgentAsync(loginIdInput, loginPinInput);
+      if (!res.success) {
+        // Pull fresh users from cloud in case account was just created or updated on Admin
+        const fresh = await pullUsersFromCloud();
+        setAvailableUsers([...fresh]);
+        res = await authenticateAgentAsync(loginIdInput, loginPinInput);
+      }
+      if (res.success && res.user) {
+        setLoggedInAgentState(res.user);
+        setAgentUser(res.user);
+        setAgentBalance(res.user.balance);
+        setTicketsList(getTickets(res.user.id || res.user.username));
+      } else {
+        setLoginError(res.error || "Login fail! Sahi Agent ID aur 4-digit PIN daalein.");
+      }
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
-  const handleTvLogout = () => {
-    if (confirm("Kya aap TV screen se agent logout karna chahte hain?")) {
+  const handleManualSyncAccounts = async () => {
+    setIsSyncingAccounts(true);
+    setSyncNotice(null);
+    try {
+      const fresh = await pullUsersFromCloud();
+      setAvailableUsers([...fresh]);
+      setSyncNotice(`âœ… ${fresh.length} Agent Accounts Cloud Se Sync Ho Gaye!`);
+      setTimeout(() => setSyncNotice(null), 3500);
+    } catch {
+      setSyncNotice("âš ï¸ Cloud sync fail hua.");
+      setTimeout(() => setSyncNotice(null), 3000);
+    } finally {
+      setIsSyncingAccounts(false);
+    }
+  };
+
+  const handleLogout = () => {
+    if (confirm("Kya aap counter se logout karna chahte hain?")) {
       setLoggedInAgent(null);
-      setTvAgent(null);
+      setLoggedInAgentState(null);
+      setLoginPinInput("");
+      setTicketsList([]);
     }
   };
 
-  // =========================================================================
-  // SCREEN 1: TV AGENT LOGIN GATE (If TV is not connected to an agent)
-  // =========================================================================
-  if (!tvAgent) {
-    return (
-      <main className="h-screen w-full bg-zinc-950 text-zinc-100 flex flex-col items-center justify-center p-4 relative overflow-hidden select-none">
-        {/* Ambient Glow */}
-        <div className="absolute -top-32 -left-32 h-[450px] w-[450px] rounded-full bg-amber-500/20 blur-[130px] pointer-events-none" />
-        <div className="absolute -bottom-32 -right-32 h-[450px] w-[450px] rounded-full bg-purple-600/20 blur-[130px] pointer-events-none" />
+  // Shift Stats strictly scoped to today and current agent
+  const todayStr = getTodayDateStr();
+  const todayTickets = ticketsList.filter((t) => t.dateStr === todayStr);
+  const totalSalesToday = todayTickets.reduce((sum, t) => sum + t.totalAmount, 0);
+  const totalPayoutsToday = todayTickets.reduce((sum, t) => sum + (t.winningPayout || 0), 0);
+  const agentCommission10 = Math.round(totalSalesToday * 0.10);
 
-        <div className="w-full max-w-md bg-zinc-900/95 border border-amber-500/30 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-md space-y-6 relative z-10">
+  // =========================================================================
+  // IF NOT LOGGED IN: DISPLAY AGENT ID & PIN LOGIN SCREEN
+  // =========================================================================
+  if (!loggedInAgent) {
+    return (
+      <div className="min-h-screen bg-background text-foreground flex flex-col justify-center items-center p-4 max-w-md mx-auto select-none">
+        <div className="w-full bg-card/95 border border-primary/30 rounded-3xl p-6 shadow-2xl backdrop-blur-md space-y-5">
           <div className="text-center space-y-2">
             <div className="h-16 w-16 mx-auto rounded-2xl bg-gradient-gold grid place-items-center font-display text-3xl font-black text-primary-foreground shadow-gold">
               S
             </div>
-            <h1 className="font-display text-2xl sm:text-3xl font-black tracking-wide text-foreground">
-              SORAT TV ARENA
+            <h1 className="font-display text-2xl font-black tracking-wide text-foreground">
+              SORAT AGENT POS
             </h1>
             <p className="text-xs text-muted-foreground font-medium">
-              Big Screen Spectator Arena Display Setup
+              Counter Booking & Thermal Printer App
             </p>
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/30 text-primary text-xs font-bold font-mono">
-              <span>🎰 Live Round:</span> {roundId} • <span>{t}s</span>
+              <span>ðŸŽ° Live Round:</span> {roundId} â€¢ <span>{timer}s</span>
             </div>
           </div>
 
-          <form onSubmit={handleTvLogin} className="space-y-4">
+          {syncNotice && (
+            <div className="rounded-xl bg-emerald-500/15 border border-emerald-500/40 p-2.5 text-xs text-emerald-400 font-bold text-center animate-in fade-in">
+              {syncNotice}
+            </div>
+          )}
+
+          <form onSubmit={handleLoginSubmit} className="space-y-3.5">
             <div className="space-y-1.5 text-left">
               <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                Agent ID / Username
+                Agent ID / Mobile Number / Username
               </label>
               <input
                 type="text"
                 required
                 value={loginIdInput}
                 onChange={(e) => setLoginIdInput(e.target.value)}
-                placeholder="Jaise agent1, agent2"
+                placeholder="Mobile No. (e.g. 9284893349) ya @ram"
                 className="w-full bg-background border border-border focus:border-primary rounded-xl px-4 py-3 text-sm font-bold text-foreground placeholder:text-muted-foreground/50 outline-none transition"
               />
             </div>
@@ -468,340 +476,780 @@ export default function TvArenaPage() {
                 maxLength={8}
                 value={loginPinInput}
                 onChange={(e) => setLoginPinInput(e.target.value)}
-                placeholder="•••• (Default: 1234)"
+                placeholder="â€¢â€¢â€¢â€¢ (e.g. 1111 ya 1234)"
                 className="w-full bg-background border border-border focus:border-primary rounded-xl px-4 py-3 text-sm font-bold text-foreground tracking-widest placeholder:tracking-normal placeholder:text-muted-foreground/50 outline-none transition"
               />
             </div>
 
             {loginError && (
-              <div className="rounded-xl bg-destructive/15 border border-destructive/40 p-3 text-xs text-destructive font-bold text-center">
-                ⚠️ {loginError}
+              <div className="rounded-xl bg-destructive/15 border border-destructive/40 p-3 text-xs text-destructive font-bold text-center space-y-1.5">
+                <div>âš ï¸ {loginError}</div>
+                <button
+                  type="button"
+                  onClick={handleManualSyncAccounts}
+                  className="text-[11px] underline text-primary hover:text-primary/80 font-bold block mx-auto cursor-pointer"
+                >
+                  ðŸ”„ Admin se naya account abhi sync karein
+                </button>
               </div>
             )}
 
             <button
               type="submit"
-              className="w-full py-3.5 rounded-xl bg-gradient-gold text-primary-foreground font-display text-base font-black tracking-wide shadow-gold hover:brightness-110 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer"
+              disabled={isLoggingIn}
+              className="w-full py-3.5 rounded-xl bg-gradient-gold text-primary-foreground font-display text-base font-black tracking-wide shadow-gold hover:brightness-110 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
-              <span>📺</span>
-              <span>START LIVE TV DISPLAY</span>
+              <span>{isLoggingIn ? "â³" : "ðŸ”"}</span>
+              <span>{isLoggingIn ? "CHECKING CREDENTIALS..." : "LOGIN & OPEN COUNTER"}</span>
             </button>
           </form>
 
-          {/* Quick Demo Buttons */}
-          <div className="border-t border-border/80 pt-4 space-y-2 text-center">
-            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest block">
-              Quick 1-Tap Demo Connect
-            </span>
-            <div className="grid grid-cols-3 gap-2">
-              {getUsers().slice(0, 3).map((u) => (
+          {/* Cloud Sync & Available Accounts List */}
+          <div className="border-t border-border/80 pt-4 space-y-2.5 text-center">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                Select Agent / 1-Tap Login ({availableUsers.length})
+              </span>
+              <button
+                type="button"
+                onClick={handleManualSyncAccounts}
+                disabled={isSyncingAccounts}
+                className="text-[10px] font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer"
+              >
+                <span>{isSyncingAccounts ? "â³ Syncing..." : "ðŸ”„ Refresh Cloud"}</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+              {availableUsers.map((u) => (
                 <button
                   key={u.id}
                   type="button"
                   onClick={() => {
-                    const res = authenticateAgent(u.username, u.pin || "1234");
+                    const identifier = u.phone || u.username;
+                    const pin = u.pin || "1234";
+                    setLoginIdInput(identifier);
+                    setLoginPinInput(pin);
+                    const res = authenticateAgent(identifier, pin);
                     if (res.success && res.user) {
-                      setTvAgent(res.user);
-                      setActiveUserId(res.user.id);
+                      setLoggedInAgentState(res.user);
+                      setAgentUser(res.user);
+                      setAgentBalance(res.user.balance);
+                      setTicketsList(getTickets(res.user.id || res.user.username));
                     }
                   }}
-                  className="p-2 rounded-xl bg-muted/60 hover:bg-muted border border-border text-left transition"
+                  className="p-2.5 rounded-xl bg-muted/60 hover:bg-muted border border-border text-left transition hover:border-primary/50 cursor-pointer active:scale-95"
                 >
-                  <div className="text-[11px] font-black text-foreground truncate">{u.displayName.split(" ")[0]}</div>
-                  <div className="text-[9px] text-primary font-mono font-bold">ID: {u.username}</div>
-                  <div className="text-[9px] text-muted-foreground font-mono">PIN: {u.pin || "1234"}</div>
+                  <div className="text-[11px] font-black text-foreground truncate flex items-center justify-between">
+                    <span>{u.displayName}</span>
+                    <span className="text-[9px] text-emerald-400 font-mono">â‚¹{u.balance}</span>
+                  </div>
+                  <div className="text-[9px] text-primary font-mono font-bold truncate">
+                    {u.phone ? `ðŸ“± ${u.phone}` : `@${u.username}`}
+                  </div>
+                  <div className="text-[9px] text-muted-foreground font-mono">
+                    PIN: <strong className="text-foreground">{u.pin || "1234"}</strong>
+                  </div>
                 </button>
               ))}
             </div>
           </div>
         </div>
-      </main>
+      </div>
     );
   }
 
-  // =========================================================================
-  // SCREEN 2: PURE SPECTATOR TV ARENA (NO BETTING CONTROLS OR DASHBOARD)
-  // =========================================================================
   return (
-    <main
-      className={`relative h-screen max-h-screen w-full overflow-hidden bg-background text-foreground flex flex-col justify-between select-none ${
-        hurry ? "shadow-[inset_0_0_90px_rgba(239,68,68,0.35)]" : ""
-      }`}
-    >
-      {/* Ambient Lighting Background */}
-      <div className="pointer-events-none fixed inset-0 overflow-hidden z-0">
-        <div className="absolute -top-24 -left-24 h-[520px] w-[520px] rounded-full bg-gradient-to-br from-amber-500/20 via-yellow-600/10 to-transparent blur-[120px]" />
-        <div className="absolute top-1/3 -right-32 h-[580px] w-[580px] rounded-full bg-gradient-to-tl from-indigo-500/20 via-purple-600/10 to-transparent blur-[140px]" />
-        <div className="absolute -bottom-24 left-1/4 h-[480px] w-[480px] rounded-full bg-gradient-to-tr from-emerald-500/15 via-teal-600/10 to-transparent blur-[130px]" />
-
-        {hurry && (
-          <div className="fixed inset-0 bg-gradient-to-b from-red-600/15 via-amber-600/10 to-red-950/20 animate-pulse" />
-        )}
-
-        {phase === "result" && (
-          <div className="victory-glow-burst fixed inset-0 bg-radial from-amber-400/25 via-primary/10 to-transparent" />
-        )}
-      </div>
-
+    <div className="min-h-screen bg-background text-foreground flex flex-col justify-between max-w-md mx-auto border-x border-border/60 shadow-2xl select-none">
       {/* ============================================================== */}
-      {/* 1. TOP HEADER STATUS BAR (SPECTATOR FRIENDLY)                 */}
+      {/* AGENT APP TOP HEADER                                           */}
       {/* ============================================================== */}
-      <header className="relative z-20 px-3 sm:px-6 py-2.5 bg-card/90 backdrop-blur-md border-b border-border/80 shadow-md flex items-center justify-between shrink-0">
-        
-        {/* Brand & Live Indicator */}
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-gradient-gold grid place-items-center font-display text-base font-black text-primary-foreground shadow-gold">
-            S
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-display text-xl sm:text-2xl font-black tracking-wider leading-none">
-                SORAT
+      <header className="sticky top-0 z-30 bg-card/95 backdrop-blur-md border-b border-border p-3 shadow-md space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="h-8 w-8 rounded-xl bg-gradient-gold grid place-items-center font-display text-sm font-black text-primary-foreground shadow-gold">
+              S
+            </div>
+            <div>
+              <span className="font-display text-sm font-black text-foreground tracking-wide block leading-tight">
+                SORAT AGENT POS
               </span>
-              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-destructive/20 border border-destructive/40 text-[10px] font-black text-destructive tracking-widest uppercase">
-                <span className="h-1.5 w-1.5 rounded-full bg-destructive animate-ping" />
-                LIVE ARENA
+              <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest block leading-tight">
+                Counter Booking App
               </span>
             </div>
-            <div className="text-[10px] font-bold text-muted-foreground mt-0.5">
-              12 Picture Cards • 10X Payout
-            </div>
           </div>
-        </div>
 
-        {/* Center Countdown & Phase Gauge */}
-        <div className="flex items-center gap-2 sm:gap-3">
-          <span className="px-3 py-1 rounded-xl bg-primary text-primary-foreground font-mono font-black text-xs sm:text-sm shadow-gold tracking-wider">
-            🎰 ROUND {roundId}
-          </span>
-
-          <div
-            className={`px-3 py-1 rounded-xl text-xs sm:text-sm font-black tracking-wide border flex items-center gap-1.5 ${
-              phase === "bet"
-                ? hurry
-                  ? "bg-destructive/20 text-destructive border-destructive/40 animate-pulse shadow-[0_0_15px_rgba(239,68,68,0.4)]"
-                  : "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
-                : phase === "select"
-                ? "bg-amber-500/20 text-amber-400 border-amber-500/40 animate-pulse shadow-[0_0_20px_rgba(245,158,11,0.5)]"
-                : "bg-purple-500/25 text-purple-300 border-purple-500/50 shadow-gold"
-            }`}
-          >
-            {phase === "bet" ? (
-              <span>⏳ {t}s {hurry ? "CLOSING SOON!" : "BETS OPEN"}</span>
-            ) : phase === "select" ? (
-              <span>⚡ {t}s WHEEL SPINNING...</span>
-            ) : (
-              <span>🏆 WINNER: {winner !== null ? CARDS[winner]?.name : ""}!</span>
-            )}
-          </div>
-        </div>
-
-        {/* Right Info & Display Controls */}
-        <div className="flex items-center gap-3">
-          {/* Active Counter Badge */}
-          <div className="hidden md:flex flex-col text-right">
-            <span className="text-[9px] uppercase font-bold text-muted-foreground">
-              Connected Counter
+          <div className="flex items-center gap-1.5">
+            <span className="rounded-lg bg-primary/20 border border-primary/40 px-2 py-0.5 text-xs font-mono font-black text-primary">
+              ðŸŽ° {roundId}
             </span>
-            <span className="text-xs font-black text-primary truncate max-w-[140px]">
-              {tvAgent.displayName}
-            </span>
-          </div>
 
-          {/* Action Total Pool */}
-          <div className="px-3 py-1 rounded-xl bg-background/80 border border-border text-xs font-mono font-black text-primary flex items-center gap-1">
-            <span>🪙</span>
-            <span>POOL: ₹{totalBetsOnBoard.toLocaleString("en-IN")}</span>
-          </div>
-
-          {/* Screen Controls */}
-          <div className="flex items-center gap-1">
-            <button
-              onClick={toggleSound}
-              title={soundEnabled ? "Mute Sound" : "Enable Sound FX"}
-              className={`p-1.5 rounded-lg text-xs font-bold transition border ${
-                soundEnabled
-                  ? "bg-primary/20 border-primary text-primary"
-                  : "bg-muted border-border text-muted-foreground hover:text-foreground"
+            <span
+              className={`text-xs font-mono font-black px-2 py-0.5 rounded-lg border ${
+                phase === "bet"
+                  ? timer <= 5
+                    ? "bg-destructive/20 text-destructive border-destructive/40 animate-pulse"
+                    : "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                  : "bg-amber-500/20 text-amber-300 border-amber-500/40"
               }`}
             >
-              {soundEnabled ? "🔊" : "🔇"}
-            </button>
-            <button
-              onClick={toggleFullscreen}
-              title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen (TV Mode)"}
-              className="p-1.5 rounded-lg text-xs font-bold transition border bg-muted border-border text-muted-foreground hover:text-foreground"
+              {phase === "bet" ? `â³ ${timer}s` : `âš¡ ${timer}s RESULT`}
+            </span>
+
+            <a
+              href="/tv"
+              target="_blank"
+              rel="noreferrer"
+              className="p-1 rounded-lg bg-muted text-muted-foreground hover:text-foreground text-xs"
+              title="Open TV Arena"
             >
-              {isFullscreen ? "🗗" : "⛶"}
-            </button>
+              ðŸ“º
+            </a>
+
+            <PrinterStatusBadge showTextOnMobile={true} />
+          </div>
+        </div>
+
+        {/* Counter Balance Status Card */}
+        <div className="flex items-center justify-between rounded-xl bg-background/80 border border-border/80 px-3 py-2 shadow-inner">
+          <div>
+            <span className="text-[9px] uppercase font-bold text-muted-foreground block">
+              Counter Live Balance
+            </span>
+            <div className="text-xl font-display font-black text-primary leading-none mt-0.5 flex items-center gap-1">
+              <span>ðŸª™</span> â‚¹{agentBalance.toLocaleString("en-IN")}
+            </div>
+          </div>
+
+          <div className="text-right flex items-center gap-2">
+            <div>
+              <span className="text-[9px] uppercase font-bold text-muted-foreground block">
+                Agent / Counter
+              </span>
+              <span className="text-xs font-bold text-foreground truncate max-w-[120px] block">
+                {agentUser.displayName}
+              </span>
+              <span className="text-[10px] font-mono text-primary font-black block">
+                ID: {agentUser.username}
+              </span>
+            </div>
             <button
-              onClick={handleTvLogout}
-              title="Disconnect / Switch Agent"
-              className="p-1.5 rounded-lg text-xs font-bold transition border bg-destructive/15 text-destructive border-destructive/30 hover:bg-destructive/25"
+              type="button"
+              onClick={handleLogout}
+              className="p-1.5 rounded-lg bg-destructive/15 hover:bg-destructive/25 text-destructive border border-destructive/30 text-xs font-bold transition flex items-center gap-1"
+              title="Logout from counter"
             >
-              🚪
+              <span>ðŸšª</span>
+              <span className="text-[10px]">Exit</span>
             </button>
           </div>
         </div>
 
+        {/* PWA App Install Banner */}
+        {!isStandalone && (
+          <div className="flex items-center justify-between rounded-xl bg-gradient-to-r from-amber-500/20 via-primary/15 to-amber-500/10 border border-primary/30 px-3 py-1.5 shadow-sm text-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-base">ðŸ“²</span>
+              <div>
+                <span className="font-bold text-foreground block text-[11px] leading-tight">
+                  Phone me App Install Karein
+                </span>
+                <span className="text-[9px] text-muted-foreground block leading-tight">
+                  Bina browser ke screen par App icon ban jayega
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={async () => {
+                if (deferredPrompt) {
+                  deferredPrompt.prompt();
+                  const { outcome } = await deferredPrompt.userChoice;
+                  if (outcome === "accepted") setDeferredPrompt(null);
+                } else {
+                  alert("Apne phone me Chrome ke 3-dots (â‹®) par click karein aur 'Install app' ya 'Add to Home screen' dabayein!");
+                }
+              }}
+              className="px-2.5 py-1 rounded-lg bg-primary text-primary-foreground font-black text-[10px] uppercase shadow hover:brightness-110 active:scale-95 transition"
+            >
+              Install App
+            </button>
+          </div>
+        )}
+
+        {/* App Sub-Navigation Tabs */}
+        <div className="grid grid-cols-4 gap-1 bg-muted/80 p-1 rounded-xl border border-border text-xs">
+          <button
+            type="button"
+            onClick={() => setActiveTab("punch")}
+            className={`py-2 text-center rounded-lg font-bold transition flex flex-col items-center justify-center gap-0.5 ${
+              activeTab === "punch"
+                ? "bg-primary text-primary-foreground shadow-sm font-black"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <span className="text-sm">ðŸŽ¯</span>
+            <span className="text-[10px] leading-tight">Bet Book</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setTicketsList(getTickets(agentUser?.id || agentUser?.username));
+              setActiveTab("tickets");
+            }}
+            className={`py-2 text-center rounded-lg font-bold transition flex flex-col items-center justify-center gap-0.5 ${
+              activeTab === "tickets"
+                ? "bg-primary text-primary-foreground shadow-sm font-black"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <span className="text-sm">ðŸŽŸï¸</span>
+            <span className="text-[10px] leading-tight">Tickets ({ticketsList.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("shift")}
+            className={`py-2 text-center rounded-lg font-bold transition flex flex-col items-center justify-center gap-0.5 ${
+              activeTab === "shift"
+                ? "bg-primary text-primary-foreground shadow-sm font-black"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <span className="text-sm">ðŸ’¼</span>
+            <span className="text-[10px] leading-tight">Shift</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("printer");
+              setShowPrinterModal(true);
+            }}
+            className={`py-2 text-center rounded-lg font-bold transition flex flex-col items-center justify-center gap-0.5 border ${
+              activeTab === "printer"
+                ? "bg-emerald-500 text-zinc-950 border-emerald-400 font-black shadow-md"
+                : "bg-emerald-500/15 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/25"
+            }`}
+            title="Printer Connect & Bluetooth Settings"
+          >
+            <span className="text-sm">ðŸ–¨ï¸</span>
+            <span className="text-[10px] leading-tight font-black">Printer</span>
+          </button>
+        </div>
       </header>
 
       {/* ============================================================== */}
-      {/* 2. MAIN SPECTATOR STAGE: 12 PICTURE CARDS (FULL BLEED GRID)     */}
+      {/* TAB CONTENT                                                    */}
       {/* ============================================================== */}
-      <section className="relative z-10 flex-1 min-h-0 p-2 sm:p-4 flex flex-col justify-between overflow-hidden">
-        
-        {/* LED Marquee Ticker */}
-        <div className="casino-marquee h-1.5 w-full shrink-0 rounded-full border border-amber-500/40 opacity-80 shadow-[0_0_10px_rgba(245,158,11,0.5)] mb-2" />
-
-        {/* 12 Picture Cards Grid - 4 Columns x 3 Rows, strictly fitting screen height */}
-        <div className="grid flex-1 min-h-0 grid-cols-4 grid-rows-3 gap-2 sm:gap-3.5">
-          {CARDS.map((card, idx) => {
-            const isLit = (phase === "select" && spot === idx) || (phase === "result" && winner === idx);
-            const cardBet = bets[idx] || 0;
-            const isWinner = phase === "result" && winner === idx;
-
-            return (
-              <div
-                key={card.id}
-                className={`relative overflow-hidden rounded-2xl border text-center transition-all duration-200 select-none h-full w-full min-h-0 flex flex-col items-center justify-between p-1.5 pointer-events-none ${
-                  isLit
-                    ? "ring-4 ring-primary shadow-[0_0_40px_rgba(245,158,11,0.9)] scale-[1.03] z-20 border-primary bg-card"
-                    : cardBet > 0
-                    ? "border-primary/80 ring-2 ring-primary/40 shadow-[0_0_15px_rgba(245,158,11,0.3)] bg-card/90"
-                    : "border-border/80 bg-card/75"
-                } ${phase === "result" && !isWinner ? "opacity-35 grayscale-[25%]" : ""}`}
-              >
-                {/* Floating Bet Chip Badge (Shows live bets placed by Agent on mobile) */}
-                {cardBet > 0 && (
-                  <div className="absolute top-2 right-2 z-30 flex items-center gap-1 rounded-full bg-gradient-gold text-primary-foreground font-black px-2.5 py-0.5 text-xs sm:text-sm shadow-gold animate-bounce">
-                    <span>🪙</span>
-                    <span>₹{cardBet}</span>
-                  </div>
-                )}
-
-                {/* Card Picture */}
-                <div className="flex-1 w-full flex items-center justify-center min-h-0 p-1">
-                  <img
-                    src={card.img}
-                    alt={card.name}
-                    className="max-h-full max-w-full object-contain rounded-xl drop-shadow-lg transition-transform duration-300"
-                  />
+      <main className="p-3 flex-1 overflow-y-auto space-y-3 pb-28">
+        {/* TAB 1: PUNCH BETS */}
+        {activeTab === "punch" && (
+          <div className="space-y-3">
+            {/* Live Winner Result Pop Banner */}
+            {phase === "result" && declaredWinner !== null && (
+              <div className="rounded-2xl border-2 border-emerald-400 bg-gradient-to-r from-emerald-950 via-zinc-900 to-emerald-950 p-3.5 text-center space-y-1.5 shadow-2xl animate-in zoom-in-95 duration-300">
+                <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400 text-emerald-300 text-[10px] font-mono font-bold tracking-wider uppercase">
+                  <span>âš¡</span> ROUND {roundId} WINNER RESULT <span>âš¡</span>
                 </div>
+                <div className="flex items-center justify-center gap-2 pt-0.5">
+                  <span className="text-3xl animate-bounce">ðŸ†</span>
+                  <span className="font-display text-xl font-black text-amber-300 tracking-wide drop-shadow-md">
+                    {CARDS[declaredWinner]?.name}
+                  </span>
+                  <span className="text-3xl animate-bounce">ðŸ†</span>
+                </div>
+                <div className="text-[11px] font-black text-emerald-400">
+                  ðŸŽ‰ WINNING CARD: {CARDS[declaredWinner]?.englishName} (10X PAYOUT)
+                </div>
+              </div>
+            )}
 
-                {/* Marathi Name Footer */}
-                <div className="w-full py-0.5 rounded-xl bg-background/90 border border-border/60 shrink-0 text-center">
-                  <span className="font-display text-xs sm:text-sm md:text-base font-black text-foreground tracking-wide block">
-                    {card.name}
+            {/* Thermal Printer Quick-Connect Banner */}
+            <div className="flex items-center justify-between rounded-2xl bg-emerald-950/40 border border-emerald-500/40 p-2.5 shadow-sm">
+              <div className="flex items-center gap-2.5">
+                <div className="h-8 w-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 grid place-items-center text-base">
+                  ðŸ–¨ï¸
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-black text-emerald-300">
+                      {printerName || "POS-58 Bluetooth"}
+                    </span>
+                    <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 text-[9px] font-mono font-bold">
+                      READY
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-zinc-400 block">
+                    Bluetooth Thermal Slip (58mm / 80mm)
                   </span>
                 </div>
-
-                {/* Winner Crown Ribbon */}
-                {isWinner && (
-                  <div className="absolute inset-x-0 top-1/3 z-40 bg-gradient-gold text-primary-foreground py-1 font-display text-sm sm:text-base font-black tracking-widest uppercase shadow-gold animate-pulse">
-                    🏆 WINNER (10X) 🏆
-                  </div>
-                )}
               </div>
-            );
-          })}
-        </div>
+              <button
+                type="button"
+                onClick={() => setShowPrinterModal(true)}
+                className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-black text-xs uppercase shadow transition active:scale-95 flex items-center gap-1 cursor-pointer"
+              >
+                <span>âš™ï¸</span> Connect
+              </button>
+            </div>
 
-      </section>
+            {/* Customer Name & Chips Selector */}
+            <div className="space-y-2 bg-card p-2.5 rounded-2xl border border-border shadow-sm">
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">ðŸ‘¤</span>
+                <input
+                  type="text"
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  placeholder="Customer Name / Token # (e.g. Ramesh #12)"
+                  className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-input bg-background text-foreground text-xs font-bold focus:border-primary focus:outline-none"
+                />
+              </div>
 
-      {/* ============================================================== */}
-      {/* 3. BOTTOM SPECTATOR BAR: RECENT WINNERS HISTORY                */}
-      {/* ============================================================== */}
-      <footer className="relative z-20 px-3 sm:px-6 py-2 bg-card/95 border-t border-border/80 backdrop-blur-md shrink-0">
-        <div className="flex items-center justify-between gap-3 overflow-hidden">
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="text-xs font-black text-muted-foreground uppercase tracking-widest hidden sm:inline">
-              📜 RECENT RESULTS:
-            </span>
-            <span className="text-xs font-black text-muted-foreground uppercase tracking-widest sm:hidden">
-              📜 LAST:
-            </span>
-          </div>
+              {/* Stake Amount Selector */}
+              <div className="flex items-center justify-between gap-1">
+                {[10, 20, 50, 100, 200, 500].map((chip) => (
+                  <button
+                    key={chip}
+                    type="button"
+                    onClick={() => setActiveChip(chip)}
+                    className={`flex-1 py-1.5 rounded-lg text-xs font-mono font-black transition active:scale-95 border ${
+                      activeChip === chip
+                        ? "bg-gradient-gold text-primary-foreground border-primary shadow-gold"
+                        : "bg-background border-border text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    â‚¹{chip}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-          {/* Horizontal Recent Results Carousel */}
-          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
-            {resultsHistory.slice(0, 10).map((hist, i) => {
-              const card = CARDS[hist.cardIndex] || CARDS[0];
-              return (
-                <div
-                  key={`${hist.roundId}-${i}`}
-                  className="flex items-center gap-1.5 px-2 py-1 rounded-xl bg-background border border-border/80 shrink-0 shadow-sm"
-                >
-                  <img
-                    src={card.img}
-                    alt={card.name}
-                    className="h-6 w-6 rounded-md object-contain bg-muted"
-                  />
-                  <div>
-                    <span className="text-[11px] font-black text-foreground block leading-tight">
+            {/* 12-Card Fast Touch Grid */}
+            <div className="grid grid-cols-3 gap-2">
+              {CARDS.map((card, i) => {
+                const staked = selectedCards[i] || 0;
+                return (
+                  <div
+                    key={i}
+                    onClick={() => handleCardClick(i)}
+                    className={`relative rounded-2xl border p-2 cursor-pointer transition active:scale-95 flex flex-col items-center justify-between text-center select-none ${
+                      phase === "result" && declaredWinner === i
+                        ? "border-emerald-400 bg-emerald-500/30 ring-4 ring-emerald-400 shadow-2xl scale-[1.03] animate-pulse"
+                        : staked > 0
+                        ? "border-primary bg-primary/20 ring-2 ring-primary shadow-gold"
+                        : "border-border/80 bg-card hover:border-primary/50"
+                    }`}
+                  >
+                    {/* Winner Badge on declared card */}
+                    {phase === "result" && declaredWinner === i && (
+                      <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-emerald-500 text-zinc-950 font-black text-[9px] px-2 py-0.5 rounded-full shadow-lg border border-emerald-300 uppercase tracking-wider whitespace-nowrap animate-bounce z-10">
+                        ðŸ† WINNER 10X
+                      </div>
+                    )}
+                    {/* Clear Cross */}
+                    {staked > 0 && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleClearCard(i);
+                        }}
+                        className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-destructive text-white text-[10px] font-black grid place-items-center shadow-sm"
+                      >
+                        âœ•
+                      </button>
+                    )}
+
+                    <img
+                      src={card.img}
+                      alt={card.name}
+                      className="h-14 w-14 rounded-xl object-cover border border-border shadow-sm mb-1"
+                    />
+
+                    <span className="font-display text-xs font-black text-foreground block leading-tight">
                       {card.name}
                     </span>
-                    <span className="text-[9px] font-mono text-muted-foreground block leading-tight">
-                      {hist.roundId}
+
+                    <span
+                      className={`text-[11px] font-mono font-black mt-1 px-1.5 py-0.2 rounded w-full ${
+                        staked > 0
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground/60 bg-muted/40"
+                      }`}
+                    >
+                      {staked > 0 ? `â‚¹${staked}` : "+ Add"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: TICKETS LIST & CLAIM INAM */}
+        {activeTab === "tickets" && (
+          <div className="space-y-2.5">
+            {/* Quick Printer Status Banner in Tickets View */}
+            <div className="flex items-center justify-between rounded-xl bg-card border border-border p-2.5 shadow-sm text-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-base">ðŸ–¨ï¸</span>
+                <div>
+                  <span className="font-bold text-foreground text-xs block">
+                    Printer: {printerName || "POS-58"}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground block">
+                    Thermal Slip Ready (58mm / 80mm)
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPrinterModal(true)}
+                className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px] font-black uppercase hover:bg-emerald-500/30 transition active:scale-95 cursor-pointer"
+              >
+                âš™ï¸ Printer Setup
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between px-1">
+              <span className="text-xs font-bold text-muted-foreground">
+                Recent Issued Slips ({ticketsList.length})
+              </span>
+              <div className="flex items-center gap-2">
+                {ticketsList.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (confirm("Kya aap counter slip history clear karke fresh shift shuru karna chahte hain?")) {
+                        clearTickets(agentUser?.id || agentUser?.username);
+                        setTicketsList([]);
+                      }
+                    }}
+                    className="text-[10px] text-destructive hover:underline font-bold cursor-pointer"
+                  >
+                    ðŸ—‘ï¸ Clear Slips
+                  </button>
+                )}
+                <span className="text-[10px] text-muted-foreground">
+                  Inam aane par "Pay Out" karein
+                </span>
+              </div>
+            </div>
+
+            {ticketsList.length === 0 ? (
+              <div className="p-8 text-center text-muted-foreground border border-dashed border-border rounded-2xl text-xs">
+                No tickets issued yet. Punch a bet to print the first thermal slip!
+              </div>
+            ) : (
+              ticketsList.map((t) => (
+                <div
+                  key={t.ticketId}
+                  className={`p-3 rounded-2xl border transition flex flex-col justify-between gap-2.5 ${
+                    t.status === "WON"
+                      ? "border-emerald-500/50 bg-emerald-500/10 shadow-sm"
+                      : t.status === "CLAIMED"
+                      ? "border-zinc-500/30 bg-muted/30"
+                      : "border-border bg-card"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono font-black text-xs text-foreground">
+                      #{t.ticketId}
+                    </span>
+                    <span
+                      className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase ${
+                        t.status === "WON"
+                          ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+                          : t.status === "CLAIMED"
+                          ? "bg-zinc-500/20 text-zinc-400 border border-zinc-500/40"
+                          : t.status === "LOST"
+                          ? "bg-destructive/15 text-destructive border border-destructive/30"
+                          : "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                      }`}
+                    >
+                      {t.status === "WON"
+                        ? `ðŸ† WON â‚¹${t.winningPayout}`
+                        : t.status === "CLAIMED"
+                        ? "âœ“ PAID OUT"
+                        : t.status === "LOST"
+                        ? "LOST"
+                        : "â³ IN PLAY"}
+                    </span>
+                  </div>
+
+                  <div className="text-[11px] text-muted-foreground">
+                    Client: <strong className="text-foreground">{t.customerName}</strong> â€¢ Round {t.roundId}
+                  </div>
+
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {t.items.map((item, idx) => (
+                      <span
+                        key={idx}
+                        className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-background border border-border"
+                      >
+                        {item.cardName}: â‚¹{item.amount}
+                      </span>
+                    ))}
+                    <span className="text-[10px] font-mono font-black text-primary">
+                      Total: â‚¹{t.totalAmount}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1 border-t border-border/50">
+                    <span className="text-[10px] text-muted-foreground">{t.timeStr}</span>
+                    <div className="flex items-center gap-2">
+                      {t.status === "WON" && (
+                        <button
+                          type="button"
+                          onClick={() => handleClaimPrize(t.ticketId)}
+                          className="py-1 px-3 rounded-lg bg-emerald-500 text-black font-display text-xs font-black shadow-gold"
+                        >
+                          ðŸ’µ Pay Out â‚¹{t.winningPayout}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPrintTicket(t);
+                          setShowSlipModal(true);
+                        }}
+                        className="py-1 px-2.5 rounded-lg bg-muted text-foreground text-xs font-bold border border-border"
+                      >
+                        ðŸ–¨ï¸ Reprint
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* TAB 3: SHIFT REPORT */}
+        {activeTab === "shift" && (
+          <div className="space-y-3">
+            <div className="rounded-2xl border border-border bg-card p-4 space-y-3 shadow-sm">
+              <div className="flex items-center justify-between">
+                <h3 className="font-display text-sm font-black text-foreground">
+                  Agent Counter Shift Summary
+                </h3>
+                {ticketsList.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (confirm("Kya aap naya shift shuru karke shift sales 0 se start karna chahte hain?")) {
+                        clearTickets(agentUser?.id || agentUser?.username);
+                        setTicketsList([]);
+                      }
+                    }}
+                    className="text-[10px] text-primary hover:underline font-bold cursor-pointer"
+                  >
+                    ðŸ”„ Start New Shift
+                  </button>
+                )}
+              </div>
+
+              <div className="space-y-2 text-xs font-mono">
+                <div className="flex justify-between py-1.5 border-b border-border/50">
+                  <span className="text-muted-foreground">Total Bets Punched:</span>
+                  <span className="font-bold text-foreground">â‚¹{totalSalesToday.toLocaleString("en-IN")}</span>
+                </div>
+                <div className="flex justify-between py-1.5 border-b border-border/50">
+                  <span className="text-muted-foreground">Payouts Given:</span>
+                  <span className="font-bold text-emerald-400">â‚¹{totalPayoutsToday.toLocaleString("en-IN")}</span>
+                </div>
+                <div className="flex justify-between py-1.5 border-b border-border/50">
+                  <span className="text-muted-foreground">Cash Surplus in Drawer:</span>
+                  <span className="font-bold text-foreground">
+                    â‚¹{Math.max(0, totalSalesToday - totalPayoutsToday).toLocaleString("en-IN")}
+                  </span>
+                </div>
+                <div className="flex justify-between py-2 bg-primary/10 px-2 rounded-xl border border-primary/30">
+                  <span className="font-sans font-bold text-primary">Your 10% Commission:</span>
+                  <span className="font-display font-black text-sm text-primary">
+                    +â‚¹{agentCommission10.toLocaleString("en-IN")}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 4: DEDICATED THERMAL PRINTER SETTINGS & BLUETOOTH CONNECT */}
+        {activeTab === "printer" && (
+          <div className="space-y-3">
+            <div className="rounded-3xl border border-emerald-500/40 bg-zinc-900/90 p-4 space-y-4 shadow-xl">
+              <div className="flex items-center justify-between border-b border-border/80 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="h-10 w-10 rounded-2xl bg-gradient-gold grid place-items-center text-zinc-950 font-black text-xl shadow-gold">
+                    ðŸ–¨ï¸
+                  </div>
+                  <div>
+                    <h3 className="font-display text-base font-black text-foreground leading-tight">
+                      Thermal Printer Connect
+                    </h3>
+                    <span className="text-[10px] text-muted-foreground block leading-tight">
+                      Bluetooth & USB POS Settings
                     </span>
                   </div>
                 </div>
-              );
-            })}
-          </div>
+                <span className="px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase font-mono border border-emerald-500/30 animate-pulse">
+                  ONLINE
+                </span>
+              </div>
 
-          {/* Public Notice */}
-          <div className="hidden lg:block text-right shrink-0 text-[10px] font-bold text-muted-foreground">
-            Bets accepted at Operator Counter only • 10x Fixed Payout
+              {/* Active Printer Badge */}
+              <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-3 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <span className="h-3 w-3 rounded-full bg-emerald-400 animate-pulse" />
+                  <div>
+                    <span className="text-xs font-black text-emerald-300 block">
+                      {printerName || "POS-58 Bluetooth Thermal"}
+                    </span>
+                    <span className="text-[10px] text-emerald-400/80 font-mono block">
+                      ESC/POS Standard â€¢ Ready to Print
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowPrinterModal(true)}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-500 text-zinc-950 font-black text-[10px] uppercase shadow hover:brightness-110 active:scale-95 transition cursor-pointer"
+                >
+                  Configure
+                </button>
+              </div>
+
+              {/* Big 1-Tap Connect Bluetooth Printer Button */}
+              <button
+                type="button"
+                onClick={() => setShowPrinterModal(true)}
+                className="w-full py-3.5 rounded-2xl bg-gradient-gold text-zinc-950 font-black text-sm uppercase tracking-wide shadow-gold hover:brightness-110 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <span>ðŸ”Œ</span>
+                <span>SCAN & PAIR BLUETOOTH PRINTER</span>
+              </button>
+
+              {/* Test Print Slip Button */}
+              <button
+                type="button"
+                onClick={handleTestPrint}
+                className="w-full py-3 rounded-2xl border border-border bg-card hover:bg-muted text-foreground font-black text-xs transition flex items-center justify-center gap-2 active:scale-95 cursor-pointer shadow-sm"
+              >
+                <span>ðŸ§¾</span>
+                <span>PRINT TEST ALIGNMENT SLIP</span>
+              </button>
+
+              {/* Step-by-Step Hindi Guide */}
+              <div className="rounded-2xl bg-background/80 border border-border p-3.5 text-xs text-muted-foreground space-y-2">
+                <span className="font-bold text-primary block uppercase tracking-wider text-[11px] flex items-center gap-1">
+                  <span>ðŸ’¡</span> Bluetooth Thermal Printer Kaise Connect Karein:
+                </span>
+                <p className="leading-relaxed">
+                  1. Apne <strong>Bluetooth Thermal Printer</strong> ka power button ON karein.
+                </p>
+                <p className="leading-relaxed">
+                  2. Apne mobile phone ki <strong>Bluetooth Settings</strong> me jayein aur naya device pair karein (Printer name: <em>POS-58</em>, <em>MTP-2</em>, <em>InnerPrinter</em>, PIN: <strong>0000</strong> ya <strong>1234</strong>).
+                </p>
+                <p className="leading-relaxed">
+                  3. Pair hote hi upar <strong>"PRINT TEST ALIGNMENT SLIP"</strong> dabayein, parchi turant bahar aa jayegi!
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab("punch")}
+                className="w-full py-2.5 rounded-xl bg-muted text-muted-foreground hover:text-foreground font-bold text-xs transition cursor-pointer"
+              >
+                â† Wapas Bet Counter Par Jayein
+              </button>
+            </div>
           </div>
-        </div>
-      </footer>
+        )}
+      </main>
 
       {/* ============================================================== */}
-      {/* 4. MASSIVE WINNER 3D POP OVERLAY (POPS OUT IN CENTER OF SCREEN)*/}
+      {/* STICKY BOTTOM BOOKING & PRINT BAR                              */}
       {/* ============================================================== */}
-      {phase === "result" && winner !== null && CARDS[winner] && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in zoom-in-75 duration-300 pointer-events-none">
-          {/* Radial Light Burst & Starbeam */}
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(245,158,11,0.35)_0%,transparent_70%)]" />
-          <div className="laser-sweep-beam absolute -top-[50%] -left-[50%] h-[200%] w-[200%] bg-[conic-gradient(from_0deg_at_50%_50%,rgba(245,158,11,0.3)_0deg,transparent_60deg,transparent_360deg)] animate-spin duration-1000" />
-
-          {/* The Popping Winner Card Container */}
-          <div className="relative z-10 w-full max-w-sm sm:max-w-md bg-gradient-to-b from-amber-500/25 via-zinc-900 to-zinc-950 border-4 border-amber-400 rounded-3xl p-6 sm:p-8 text-center shadow-[0_0_100px_rgba(245,158,11,0.95)] animate-in zoom-in-50 duration-500">
-            
-            {/* Top Glowing Trophy Banner */}
-            <div className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-gradient-gold text-zinc-950 font-display text-sm sm:text-base font-black uppercase tracking-widest shadow-gold mb-3 animate-pulse">
-              <span>🏆</span>
-              <span>LUCKY WINNER • 10X PAYOUT</span>
-              <span>🏆</span>
+      {activeTab === "punch" && (
+        <footer className="fixed bottom-0 inset-x-0 max-w-md mx-auto z-40 bg-card/95 backdrop-blur-md border-t border-border p-3 shadow-2xl space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center gap-1.5">
+              <span className="text-muted-foreground">Selected:</span>
+              <strong className="text-foreground">{Object.keys(selectedCards).length} Cards</strong>
+              {totalTicketStake > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearAll}
+                  className="text-destructive hover:underline text-[10px] ml-1 font-bold"
+                >
+                  Clear
+                </button>
+              )}
             </div>
 
-            {/* Giant Card Picture Frame */}
-            <div className="relative mx-auto w-52 h-52 sm:w-64 sm:h-64 my-2 rounded-2xl overflow-hidden border-4 border-amber-400/90 bg-zinc-950 shadow-[0_0_60px_rgba(245,158,11,0.8)] flex items-center justify-center p-3">
-              <img
-                src={CARDS[winner].img}
-                alt={CARDS[winner].name}
-                className="w-full h-full object-contain filter drop-shadow-2xl scale-110 animate-pulse"
-              />
-            </div>
-
-            {/* Huge Marathi Title */}
-            <h2 className="mt-3 font-display text-5xl sm:text-6xl font-black text-amber-400 tracking-wider drop-shadow-[0_4px_25px_rgba(245,158,11,0.9)]">
-              {CARDS[winner].name}
-            </h2>
-
-            {/* Round & Prize Information */}
-            <div className="mt-4 flex items-center justify-center gap-3 text-xs sm:text-sm font-mono font-bold">
-              <span className="px-3.5 py-1.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300">
-                ROUND {roundId}
-              </span>
-              <span className="px-3.5 py-1.5 rounded-xl bg-emerald-500/25 border border-emerald-500/50 text-emerald-400 font-black tracking-wide">
-                WIN PAYS 10X
+            <div className="flex items-center gap-1 font-mono">
+              <span className="text-muted-foreground">Total:</span>
+              <span className="text-base font-display font-black text-primary">
+                â‚¹{totalTicketStake}
               </span>
             </div>
           </div>
-        </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab("printer");
+                setShowPrinterModal(true);
+              }}
+              className="h-12 w-14 rounded-2xl border border-emerald-500/40 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 font-bold flex flex-col items-center justify-center shrink-0 transition active:scale-95 shadow-sm cursor-pointer"
+              title="Bluetooth Printer Setup"
+            >
+              <span className="text-base leading-none">ðŸ–¨ï¸</span>
+              <span className="text-[8px] font-black uppercase mt-0.5 tracking-tight">Printer</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handlePunchAndPrint}
+              disabled={totalTicketStake <= 0 || !isBalanceEnough || phase !== "bet"}
+              className="flex-1 py-3.5 px-4 rounded-2xl bg-gradient-gold text-primary-foreground font-display text-sm font-black shadow-gold hover:opacity-90 transition active:scale-95 flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <span>ðŸŽŸï¸</span>
+              <span>
+                {phase !== "bet"
+                  ? "BETTING CLOSED (WAIT FOR ROUND)"
+                  : totalTicketStake <= 0
+                  ? "SELECT CARDS TO BET"
+                  : !isBalanceEnough
+                  ? "INSUFFICIENT BALANCE (RECHARGE)"
+                  : `PUNCH BET & PRINT SLIP (â‚¹${totalTicketStake})`}
+              </span>
+            </button>
+          </div>
+        </footer>
       )}
-    </main>
+
+      {/* Thermal Slip Print Dialog Modal */}
+      <ThermalSlipModal
+        ticket={printTicket}
+        isOpen={showSlipModal}
+        onClose={() => setShowSlipModal(false)}
+      />
+
+      {/* Bluetooth & USB Thermal Printer Settings Modal */}
+      <PrinterSettingsModal
+        isOpen={showPrinterModal}
+        onClose={() => setShowPrinterModal(false)}
+        onTestPrint={handleTestPrint}
+      />
+    </div>
   );
 }
+
+
