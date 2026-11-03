@@ -1,4 +1,5 @@
 import { getSupabaseClient } from "./supabase";
+import { RAMU_SIMULATED_BETS } from "./ramuSimulationData";
 
 export interface UserDeposit {
   id: string;
@@ -109,6 +110,14 @@ const STORAGE_KEY = "sorat_users_v2";
 const ACTIVE_USER_KEY = "sorat_active_user_id_v2";
 const SYNC_CHANNEL_NAME = "sorat_user_sync_channel";
 
+export function getRamuSimulatedBets(): UserBetRecord[] {
+  const todayStr = getTodayDateStr();
+  return RAMU_SIMULATED_BETS.map((b) => ({
+    ...b,
+    dateStr: todayStr,
+  }));
+}
+
 function createInitialSeedUsers(): UserAccount[] {
   const now = Date.now();
   const todayStr = getTodayDateStr();
@@ -128,24 +137,25 @@ function createInitialSeedUsers(): UserAccount[] {
       phone: "9284893346",
       pin: "1212",
       agentCode: "@ram",
-      balance: 1000,
-      totalDeposited: 1000,
+      balance: 0,
+      totalDeposited: 5000,
       totalWithdrawn: 0,
-      createdAt: now,
+      createdAt: now - 3600 * 1000,
       status: "ACTIVE",
-      notes: "Main TV Counter Agent",
+      notes: "Main TV Counter Agent (₹5,000 Exhausted Simulation)",
       deposits: [
         {
           id: "dep_ram_01",
-          amount: 1000,
+          amount: 5000,
           timestamp: now - 3600 * 1000,
           dateStr: todayStr,
-          timeStr: "10:00 AM",
-          note: "Counter Cash Deposit",
-          balanceAfter: 1000,
+          timeStr: "09:00 AM",
+          note: "Counter Cash Initial Recharge",
+          balanceAfter: 5000,
         },
       ],
-      bets: [],
+      bets: getRamuSimulatedBets(),
+      balanceUpdatedAt: now,
     },
     {
       id: "usr_rahul_01",
@@ -426,6 +436,20 @@ export function getUsers(): UserAccount[] {
           pin: u.pin || "1234",
           agentCode: u.agentCode || `AGENT-${101 + i}`,
         }));
+
+        // Seamless auto-upgrade: If Ramu is present but has outdated data (0 bets or deposited < 5000), update him with the ₹5,000 simulation
+        const ramu = enriched.find((u) => u.id === "usr_ramu_00" || u.username === "@ram");
+        if (ramu && ((ramu.bets && ramu.bets.length === 0) || ramu.totalDeposited < 5000)) {
+          const freshSeed = createInitialSeedUsers();
+          const freshRamu = freshSeed.find((u) => u.id === "usr_ramu_00");
+          if (freshRamu) {
+            Object.assign(ramu, freshRamu);
+            try {
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(enriched));
+            } catch {}
+          }
+        }
+
         cachedUsers = enriched;
         return enriched;
       }
@@ -444,7 +468,7 @@ export function getUsers(): UserAccount[] {
 export const CLOUD_ACCOUNTS_SYNC_TOPIC = "sorat_accounts_sync_v2_99";
 
 /**
- * Broadcasts lightweight accounts snapshot to the cloud topic so phones & APKs receive them instantly.
+ * Broadcasts accounts snapshot to the cloud topic so phones & APKs receive them instantly.
  */
 export function broadcastUsersToCloud(users: UserAccount[]): void {
   if (typeof window === "undefined") return;
@@ -460,6 +484,8 @@ export function broadcastUsersToCloud(users: UserAccount[]): void {
       balanceUpdatedAt: u.balanceUpdatedAt || Date.now(),
       totalDeposited: u.totalDeposited,
       status: u.status,
+      deposits: u.deposits,
+      bets: (u.bets || []).slice(0, 30),
     }));
 
     fetch(`https://ntfy.sh/${CLOUD_ACCOUNTS_SYNC_TOPIC}`, {
@@ -546,8 +572,8 @@ export async function pullUsersFromCloud(): Promise<UserAccount[]> {
                     ...remoteU,
                     balance: effBalance,
                     balanceUpdatedAt: effUpdatedAt,
-                    bets: existing.bets || [],
-                    deposits: existing.deposits || [],
+                    bets: (remoteU.bets && remoteU.bets.length > 0) ? remoteU.bets : (existing.bets || []),
+                    deposits: (remoteU.deposits && remoteU.deposits.length > 0) ? remoteU.deposits : (existing.deposits || []),
                   });
                 } else {
                   mergedMap.set(remoteU.id, {
@@ -655,8 +681,8 @@ export function subscribeToCloudUsers(
                   ...remoteU,
                   balance: effBalance,
                   balanceUpdatedAt: effUpdatedAt,
-                  bets: existing.bets || [],
-                  deposits: existing.deposits || [],
+                  bets: (remoteU.bets && remoteU.bets.length > 0) ? remoteU.bets : (existing.bets || []),
+                  deposits: (remoteU.deposits && remoteU.deposits.length > 0) ? remoteU.deposits : (existing.deposits || []),
                 });
               } else {
                 mergedMap.set(remoteU.id, {
