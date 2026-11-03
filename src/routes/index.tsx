@@ -262,7 +262,7 @@ export default function AgentPage() {
     }
 
     if (!isBalanceEnough) {
-      alert(`Balance kam hai! Needed: â‚¹${totalTicketStake}, Available: â‚¹${agentBalance}. Kripya counter recharge karein!`);
+      alert(`Balance kam hai! Needed: ₹${totalTicketStake}, Available: ₹${agentBalance}. Kripya counter recharge karein!`);
       return;
     }
 
@@ -332,7 +332,7 @@ export default function AgentPage() {
     const updated = claimTicket(ticketId);
     if (updated) {
       setTicketsList(getTickets(agentUser?.id || agentUser?.username));
-      alert(`Ticket #${ticketId} prize of â‚¹${updated.winningPayout} marked as PAID! Customer ko cash de dijiye.`);
+      alert(`Ticket #${ticketId} prize of ₹${updated.winningPayout} marked as PAID! Customer ko cash de dijiye.`);
     }
   };
 
@@ -347,8 +347,8 @@ export default function AgentPage() {
       agentName: agentUser.displayName,
       customerName: "PRINTER TEST SLIP",
       items: [
-        { cardIndex: 0, cardName: "à¤ªà¤¤à¤‚à¤— (TEST OK)", stake: 10, potentialPayout: 100 },
-        { cardIndex: 11, cardName: "à¤—à¤¾à¤¯ (TEST OK)", stake: 10, potentialPayout: 100 },
+        { cardIndex: 0, cardName: "पतंग (TEST OK)", stake: 10, potentialPayout: 100 },
+        { cardIndex: 11, cardName: "गाय (TEST OK)", stake: 10, potentialPayout: 100 },
       ],
       totalStake: 20,
       totalAmount: 20,
@@ -397,10 +397,10 @@ export default function AgentPage() {
     try {
       const fresh = await pullUsersFromCloud();
       setAvailableUsers([...fresh]);
-      setSyncNotice(`âœ… ${fresh.length} Agent Accounts Cloud Se Sync Ho Gaye!`);
+      setSyncNotice(`✅ ${fresh.length} Agent Accounts Cloud Se Sync Ho Gaye!`);
       setTimeout(() => setSyncNotice(null), 3500);
     } catch {
-      setSyncNotice("âš ï¸ Cloud sync fail hua.");
+      setSyncNotice("⚠️ Cloud sync fail hua.");
       setTimeout(() => setSyncNotice(null), 3000);
     } finally {
       setIsSyncingAccounts(false);
@@ -441,7 +441,7 @@ export default function AgentPage() {
               Counter Booking & Thermal Printer App
             </p>
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/30 text-primary text-xs font-bold font-mono">
-              <span>ðŸŽ° Live Round:</span> {roundId} â€¢ <span>{timer}s</span>
+              <span>🎰 Live Round:</span> {roundId} • <span>{timer}s</span>
             </div>
           </div>
 
@@ -476,20 +476,20 @@ export default function AgentPage() {
                 maxLength={8}
                 value={loginPinInput}
                 onChange={(e) => setLoginPinInput(e.target.value)}
-                placeholder="â€¢â€¢â€¢â€¢ (e.g. 1111 ya 1234)"
+                placeholder="•••• (e.g. 1111 ya 1234)"
                 className="w-full bg-background border border-border focus:border-primary rounded-xl px-4 py-3 text-sm font-bold text-foreground tracking-widest placeholder:tracking-normal placeholder:text-muted-foreground/50 outline-none transition"
               />
             </div>
 
             {loginError && (
               <div className="rounded-xl bg-destructive/15 border border-destructive/40 p-3 text-xs text-destructive font-bold text-center space-y-1.5">
-                <div>âš ï¸ {loginError}</div>
+                <div>⚠️ {loginError}</div>
                 <button
                   type="button"
                   onClick={handleManualSyncAccounts}
                   className="text-[11px] underline text-primary hover:text-primary/80 font-bold block mx-auto cursor-pointer"
                 >
-                  ðŸ”„ Admin se naya account abhi sync karein
+                  🔄 Admin se naya account abhi sync karein
                 </button>
               </div>
             )}
@@ -499,7 +499,7 @@ export default function AgentPage() {
               disabled={isLoggingIn}
               className="w-full py-3.5 rounded-xl bg-gradient-gold text-primary-foreground font-display text-base font-black tracking-wide shadow-gold hover:brightness-110 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
-              <span>{isLoggingIn ? "â³" : "ðŸ”"}</span>
+              <span>{isLoggingIn ? "⏳" : "🔐"}</span>
               <span>{isLoggingIn ? "CHECKING CREDENTIALS..." : "LOGIN & OPEN COUNTER"}</span>
             </button>
           </form>
@@ -516,7 +516,7 @@ export default function AgentPage() {
                 disabled={isSyncingAccounts}
                 className="text-[10px] font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer"
               >
-                <span>{isSyncingAccounts ? "â³ Syncing..." : "ðŸ”„ Refresh Cloud"}</span>
+                <span>{isSyncingAccounts ? "⏳ Syncing..." : "🔄 Refresh Cloud"}</span>
               </button>
             </div>
 
@@ -542,10 +542,10 @@ export default function AgentPage() {
                 >
                   <div className="text-[11px] font-black text-foreground truncate flex items-center justify-between">
                     <span>{u.displayName}</span>
-                    <span className="text-[9px] text-emerald-400 font-mono">â‚¹{u.balance}</span>
+                    <span className="text-[9px] text-emerald-400 font-mono">₹{u.balance}</span>
                   </div>
                   <div className="text-[9px] text-primary font-mono font-bold truncate">
-                    {u.phone ? `ðŸ“± ${u.phone}` : `@${u.username}`}
+                    {u.phone ? `📱 ${u.phone}` : `@${u.username}`}
                   </div>
                   <div className="text-[9px] text-muted-foreground font-mono">
                     PIN: <strong className="text-foreground">{u.pin || "1234"}</strong>
@@ -582,7 +582,7 @@ export default function AgentPage() {
 
           <div className="flex items-center gap-1.5">
             <span className="rounded-lg bg-primary/20 border border-primary/40 px-2 py-0.5 text-xs font-mono font-black text-primary">
-              ðŸŽ° {roundId}
+              🎰 {roundId}
             </span>
 
             <span
@@ -594,7 +594,7 @@ export default function AgentPage() {
                   : "bg-amber-500/20 text-amber-300 border-amber-500/40"
               }`}
             >
-              {phase === "bet" ? `â³ ${timer}s` : `âš¡ ${timer}s RESULT`}
+              {phase === "bet" ? `⏳ ${timer}s` : `⚡ ${timer}s RESULT`}
             </span>
 
             <a
@@ -604,7 +604,7 @@ export default function AgentPage() {
               className="p-1 rounded-lg bg-muted text-muted-foreground hover:text-foreground text-xs"
               title="Open TV Arena"
             >
-              ðŸ“º
+              📺
             </a>
 
             <PrinterStatusBadge showTextOnMobile={true} />
@@ -618,7 +618,7 @@ export default function AgentPage() {
               Counter Live Balance
             </span>
             <div className="text-xl font-display font-black text-primary leading-none mt-0.5 flex items-center gap-1">
-              <span>ðŸª™</span> â‚¹{agentBalance.toLocaleString("en-IN")}
+              <span>🪙</span> ₹{agentBalance.toLocaleString("en-IN")}
             </div>
           </div>
 
@@ -640,7 +640,7 @@ export default function AgentPage() {
               className="p-1.5 rounded-lg bg-destructive/15 hover:bg-destructive/25 text-destructive border border-destructive/30 text-xs font-bold transition flex items-center gap-1"
               title="Logout from counter"
             >
-              <span>ðŸšª</span>
+              <span>🚪</span>
               <span className="text-[10px]">Exit</span>
             </button>
           </div>
@@ -699,7 +699,7 @@ export default function AgentPage() {
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            <span className="text-sm">ðŸŽ¯</span>
+            <span className="text-sm">🎯</span>
             <span className="text-[10px] leading-tight">Bet Book</span>
           </button>
 
@@ -715,7 +715,7 @@ export default function AgentPage() {
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            <span className="text-sm">ðŸŽŸï¸</span>
+            <span className="text-sm">🎟️</span>
             <span className="text-[10px] leading-tight">Tickets ({ticketsList.length})</span>
           </button>
 
@@ -728,7 +728,7 @@ export default function AgentPage() {
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            <span className="text-sm">ðŸ’¼</span>
+            <span className="text-sm">💼</span>
             <span className="text-[10px] leading-tight">Shift</span>
           </button>
 
@@ -745,7 +745,7 @@ export default function AgentPage() {
             }`}
             title="Printer Connect & Bluetooth Settings"
           >
-            <span className="text-sm">ðŸ–¨ï¸</span>
+            <span className="text-sm">🖨️</span>
             <span className="text-[10px] leading-tight font-black">Printer</span>
           </button>
         </div>
@@ -762,17 +762,17 @@ export default function AgentPage() {
             {phase === "result" && declaredWinner !== null && (
               <div className="rounded-2xl border-2 border-emerald-400 bg-gradient-to-r from-emerald-950 via-zinc-900 to-emerald-950 p-3.5 text-center space-y-1.5 shadow-2xl animate-in zoom-in-95 duration-300">
                 <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400 text-emerald-300 text-[10px] font-mono font-bold tracking-wider uppercase">
-                  <span>âš¡</span> ROUND {roundId} WINNER RESULT <span>âš¡</span>
+                  <span>⚡</span> ROUND {roundId} WINNER RESULT <span>⚡</span>
                 </div>
                 <div className="flex items-center justify-center gap-2 pt-0.5">
-                  <span className="text-3xl animate-bounce">ðŸ†</span>
+                  <span className="text-3xl animate-bounce">🏆</span>
                   <span className="font-display text-xl font-black text-amber-300 tracking-wide drop-shadow-md">
                     {CARDS[declaredWinner]?.name}
                   </span>
-                  <span className="text-3xl animate-bounce">ðŸ†</span>
+                  <span className="text-3xl animate-bounce">🏆</span>
                 </div>
                 <div className="text-[11px] font-black text-emerald-400">
-                  ðŸŽ‰ WINNING CARD: {CARDS[declaredWinner]?.englishName} (10X PAYOUT)
+                  🎉 WINNING CARD: {CARDS[declaredWinner]?.englishName} (10X PAYOUT)
                 </div>
               </div>
             )}
@@ -781,7 +781,7 @@ export default function AgentPage() {
             <div className="flex items-center justify-between rounded-2xl bg-emerald-950/40 border border-emerald-500/40 p-2.5 shadow-sm">
               <div className="flex items-center gap-2.5">
                 <div className="h-8 w-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 grid place-items-center text-base">
-                  ðŸ–¨ï¸
+                  🖨️
                 </div>
                 <div>
                   <div className="flex items-center gap-1.5">
@@ -802,14 +802,14 @@ export default function AgentPage() {
                 onClick={() => setShowPrinterModal(true)}
                 className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-black text-xs uppercase shadow transition active:scale-95 flex items-center gap-1 cursor-pointer"
               >
-                <span>âš™ï¸</span> Connect
+                <span>⚙️</span> Connect
               </button>
             </div>
 
             {/* Customer Name & Chips Selector */}
             <div className="space-y-2 bg-card p-2.5 rounded-2xl border border-border shadow-sm">
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">ðŸ‘¤</span>
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">👤</span>
                 <input
                   type="text"
                   value={customerName}
@@ -832,7 +832,7 @@ export default function AgentPage() {
                         : "bg-background border-border text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    â‚¹{chip}
+                    ₹{chip}
                   </button>
                 ))}
               </div>
@@ -857,7 +857,7 @@ export default function AgentPage() {
                     {/* Winner Badge on declared card */}
                     {phase === "result" && declaredWinner === i && (
                       <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-emerald-500 text-zinc-950 font-black text-[9px] px-2 py-0.5 rounded-full shadow-lg border border-emerald-300 uppercase tracking-wider whitespace-nowrap animate-bounce z-10">
-                        ðŸ† WINNER 10X
+                        🏆 WINNER 10X
                       </div>
                     )}
                     {/* Clear Cross */}
@@ -870,7 +870,7 @@ export default function AgentPage() {
                         }}
                         className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-destructive text-white text-[10px] font-black grid place-items-center shadow-sm"
                       >
-                        âœ•
+                        ✕
                       </button>
                     )}
 
@@ -891,7 +891,7 @@ export default function AgentPage() {
                           : "text-muted-foreground/60 bg-muted/40"
                       }`}
                     >
-                      {staked > 0 ? `â‚¹${staked}` : "+ Add"}
+                      {staked > 0 ? `₹${staked}` : "+ Add"}
                     </span>
                   </div>
                 );
@@ -906,7 +906,7 @@ export default function AgentPage() {
             {/* Quick Printer Status Banner in Tickets View */}
             <div className="flex items-center justify-between rounded-xl bg-card border border-border p-2.5 shadow-sm text-xs">
               <div className="flex items-center gap-2">
-                <span className="text-base">ðŸ–¨ï¸</span>
+                <span className="text-base">🖨️</span>
                 <div>
                   <span className="font-bold text-foreground text-xs block">
                     Printer: {printerName || "POS-58"}
@@ -921,7 +921,7 @@ export default function AgentPage() {
                 onClick={() => setShowPrinterModal(true)}
                 className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px] font-black uppercase hover:bg-emerald-500/30 transition active:scale-95 cursor-pointer"
               >
-                âš™ï¸ Printer Setup
+                ⚙️ Printer Setup
               </button>
             </div>
 
@@ -941,7 +941,7 @@ export default function AgentPage() {
                     }}
                     className="text-[10px] text-destructive hover:underline font-bold cursor-pointer"
                   >
-                    ðŸ—‘ï¸ Clear Slips
+                    🗑️ Clear Slips
                   </button>
                 )}
                 <span className="text-[10px] text-muted-foreground">
@@ -982,17 +982,17 @@ export default function AgentPage() {
                       }`}
                     >
                       {t.status === "WON"
-                        ? `ðŸ† WON â‚¹${t.winningPayout}`
+                        ? `🏆 WON ₹${t.winningPayout}`
                         : t.status === "CLAIMED"
-                        ? "âœ“ PAID OUT"
+                        ? "✓ PAID OUT"
                         : t.status === "LOST"
                         ? "LOST"
-                        : "â³ IN PLAY"}
+                        : "⏳ IN PLAY"}
                     </span>
                   </div>
 
                   <div className="text-[11px] text-muted-foreground">
-                    Client: <strong className="text-foreground">{t.customerName}</strong> â€¢ Round {t.roundId}
+                    Client: <strong className="text-foreground">{t.customerName}</strong> • Round {t.roundId}
                   </div>
 
                   <div className="flex items-center gap-1.5 flex-wrap">
@@ -1001,11 +1001,11 @@ export default function AgentPage() {
                         key={idx}
                         className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-background border border-border"
                       >
-                        {item.cardName}: â‚¹{item.amount}
+                        {item.cardName}: ₹{item.amount}
                       </span>
                     ))}
                     <span className="text-[10px] font-mono font-black text-primary">
-                      Total: â‚¹{t.totalAmount}
+                      Total: ₹{t.totalAmount}
                     </span>
                   </div>
 
@@ -1018,7 +1018,7 @@ export default function AgentPage() {
                           onClick={() => handleClaimPrize(t.ticketId)}
                           className="py-1 px-3 rounded-lg bg-emerald-500 text-black font-display text-xs font-black shadow-gold"
                         >
-                          ðŸ’µ Pay Out â‚¹{t.winningPayout}
+                          💵 Pay Out ₹{t.winningPayout}
                         </button>
                       )}
                       <button
@@ -1029,7 +1029,7 @@ export default function AgentPage() {
                         }}
                         className="py-1 px-2.5 rounded-lg bg-muted text-foreground text-xs font-bold border border-border"
                       >
-                        ðŸ–¨ï¸ Reprint
+                        🖨️ Reprint
                       </button>
                     </div>
                   </div>
@@ -1058,7 +1058,7 @@ export default function AgentPage() {
                     }}
                     className="text-[10px] text-primary hover:underline font-bold cursor-pointer"
                   >
-                    ðŸ”„ Start New Shift
+                    🔄 Start New Shift
                   </button>
                 )}
               </div>
@@ -1066,22 +1066,22 @@ export default function AgentPage() {
               <div className="space-y-2 text-xs font-mono">
                 <div className="flex justify-between py-1.5 border-b border-border/50">
                   <span className="text-muted-foreground">Total Bets Punched:</span>
-                  <span className="font-bold text-foreground">â‚¹{totalSalesToday.toLocaleString("en-IN")}</span>
+                  <span className="font-bold text-foreground">₹{totalSalesToday.toLocaleString("en-IN")}</span>
                 </div>
                 <div className="flex justify-between py-1.5 border-b border-border/50">
                   <span className="text-muted-foreground">Payouts Given:</span>
-                  <span className="font-bold text-emerald-400">â‚¹{totalPayoutsToday.toLocaleString("en-IN")}</span>
+                  <span className="font-bold text-emerald-400">₹{totalPayoutsToday.toLocaleString("en-IN")}</span>
                 </div>
                 <div className="flex justify-between py-1.5 border-b border-border/50">
                   <span className="text-muted-foreground">Cash Surplus in Drawer:</span>
                   <span className="font-bold text-foreground">
-                    â‚¹{Math.max(0, totalSalesToday - totalPayoutsToday).toLocaleString("en-IN")}
+                    ₹{Math.max(0, totalSalesToday - totalPayoutsToday).toLocaleString("en-IN")}
                   </span>
                 </div>
                 <div className="flex justify-between py-2 bg-primary/10 px-2 rounded-xl border border-primary/30">
                   <span className="font-sans font-bold text-primary">Your 10% Commission:</span>
                   <span className="font-display font-black text-sm text-primary">
-                    +â‚¹{agentCommission10.toLocaleString("en-IN")}
+                    +₹{agentCommission10.toLocaleString("en-IN")}
                   </span>
                 </div>
               </div>
@@ -1096,7 +1096,7 @@ export default function AgentPage() {
               <div className="flex items-center justify-between border-b border-border/80 pb-3">
                 <div className="flex items-center gap-2">
                   <div className="h-10 w-10 rounded-2xl bg-gradient-gold grid place-items-center text-zinc-950 font-black text-xl shadow-gold">
-                    ðŸ–¨ï¸
+                    🖨️
                   </div>
                   <div>
                     <h3 className="font-display text-base font-black text-foreground leading-tight">
@@ -1121,7 +1121,7 @@ export default function AgentPage() {
                       {printerName || "POS-58 Bluetooth Thermal"}
                     </span>
                     <span className="text-[10px] text-emerald-400/80 font-mono block">
-                      ESC/POS Standard â€¢ Ready to Print
+                      ESC/POS Standard • Ready to Print
                     </span>
                   </div>
                 </div>
@@ -1140,7 +1140,7 @@ export default function AgentPage() {
                 onClick={() => setShowPrinterModal(true)}
                 className="w-full py-3.5 rounded-2xl bg-gradient-gold text-zinc-950 font-black text-sm uppercase tracking-wide shadow-gold hover:brightness-110 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer"
               >
-                <span>ðŸ”Œ</span>
+                <span>🔌</span>
                 <span>SCAN & PAIR BLUETOOTH PRINTER</span>
               </button>
 
@@ -1150,14 +1150,14 @@ export default function AgentPage() {
                 onClick={handleTestPrint}
                 className="w-full py-3 rounded-2xl border border-border bg-card hover:bg-muted text-foreground font-black text-xs transition flex items-center justify-center gap-2 active:scale-95 cursor-pointer shadow-sm"
               >
-                <span>ðŸ§¾</span>
+                <span>🧾</span>
                 <span>PRINT TEST ALIGNMENT SLIP</span>
               </button>
 
               {/* Step-by-Step Hindi Guide */}
               <div className="rounded-2xl bg-background/80 border border-border p-3.5 text-xs text-muted-foreground space-y-2">
                 <span className="font-bold text-primary block uppercase tracking-wider text-[11px] flex items-center gap-1">
-                  <span>ðŸ’¡</span> Bluetooth Thermal Printer Kaise Connect Karein:
+                  <span>💡</span> Bluetooth Thermal Printer Kaise Connect Karein:
                 </span>
                 <p className="leading-relaxed">
                   1. Apne <strong>Bluetooth Thermal Printer</strong> ka power button ON karein.
@@ -1175,7 +1175,7 @@ export default function AgentPage() {
                 onClick={() => setActiveTab("punch")}
                 className="w-full py-2.5 rounded-xl bg-muted text-muted-foreground hover:text-foreground font-bold text-xs transition cursor-pointer"
               >
-                â† Wapas Bet Counter Par Jayein
+                ← Wapas Bet Counter Par Jayein
               </button>
             </div>
           </div>
@@ -1205,7 +1205,7 @@ export default function AgentPage() {
             <div className="flex items-center gap-1 font-mono">
               <span className="text-muted-foreground">Total:</span>
               <span className="text-base font-display font-black text-primary">
-                â‚¹{totalTicketStake}
+                ₹{totalTicketStake}
               </span>
             </div>
           </div>
@@ -1220,7 +1220,7 @@ export default function AgentPage() {
               className="h-12 w-14 rounded-2xl border border-emerald-500/40 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 font-bold flex flex-col items-center justify-center shrink-0 transition active:scale-95 shadow-sm cursor-pointer"
               title="Bluetooth Printer Setup"
             >
-              <span className="text-base leading-none">ðŸ–¨ï¸</span>
+              <span className="text-base leading-none">🖨️</span>
               <span className="text-[8px] font-black uppercase mt-0.5 tracking-tight">Printer</span>
             </button>
 
@@ -1230,7 +1230,7 @@ export default function AgentPage() {
               disabled={totalTicketStake <= 0 || !isBalanceEnough || phase !== "bet"}
               className="flex-1 py-3.5 px-4 rounded-2xl bg-gradient-gold text-primary-foreground font-display text-sm font-black shadow-gold hover:opacity-90 transition active:scale-95 flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
             >
-              <span>ðŸŽŸï¸</span>
+              <span>🎟️</span>
               <span>
                 {phase !== "bet"
                   ? "BETTING CLOSED (WAIT FOR ROUND)"
@@ -1238,7 +1238,7 @@ export default function AgentPage() {
                   ? "SELECT CARDS TO BET"
                   : !isBalanceEnough
                   ? "INSUFFICIENT BALANCE (RECHARGE)"
-                  : `PUNCH BET & PRINT SLIP (â‚¹${totalTicketStake})`}
+                  : `PUNCH BET & PRINT SLIP (₹${totalTicketStake})`}
               </span>
             </button>
           </div>
