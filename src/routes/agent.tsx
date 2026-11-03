@@ -11,6 +11,7 @@ import { CARDS } from "@/lib/cards";
 import {
   createTicket,
   getTickets,
+  clearTickets,
   claimTicket,
   settleTicketsForRound,
   ThermalTicket,
@@ -78,8 +79,20 @@ export default function AgentPage() {
   const [customerName, setCustomerName] = useState("");
   const [activeChip, setActiveChip] = useState<number>(10);
   const [selectedCards, setSelectedCards] = useState<Record<number, number>>({});
-  const [ticketsList, setTicketsList] = useState<ThermalTicket[]>(() => getTickets());
+  const [ticketsList, setTicketsList] = useState<ThermalTicket[]>(() => {
+    const u = getLoggedInAgent();
+    return u ? getTickets(u.id || u.username) : [];
+  });
   const [activeTab, setActiveTab] = useState<"punch" | "tickets" | "shift" | "printer">("punch");
+
+  // Keep ticketsList strictly scoped to current logged-in agent
+  useEffect(() => {
+    if (loggedInAgent) {
+      setTicketsList(getTickets(loggedInAgent.id || loggedInAgent.username));
+    } else {
+      setTicketsList([]);
+    }
+  }, [loggedInAgent?.id, loggedInAgent?.username]);
 
   // Print Slip State
   const [printTicket, setPrintTicket] = useState<ThermalTicket | null>(null);
@@ -196,7 +209,7 @@ export default function AgentPage() {
           setDeclaredWinner(msg.winner);
           settleTicketsForRound(msg.roundId, msg.winner, CARDS[msg.winner]?.name || "");
           settleRoundBets(msg.roundId, msg.winner, CARDS[msg.winner]?.name || "", false);
-          setTicketsList(getTickets());
+          setTicketsList(getTickets(agentUser?.id || agentUser?.username));
         }
       } else if (msg.type === "SET_AGENT_BALANCE") {
         setAgentBalance(msg.balance);
@@ -282,6 +295,8 @@ export default function AgentPage() {
       roundNumber,
       customerName: customerName.trim() || undefined,
       agentName: agentUser.displayName || "Counter Kiosk",
+      agentId: agentUser.id,
+      username: agentUser.username,
       items,
     });
 
@@ -294,8 +309,8 @@ export default function AgentPage() {
       roundId,
     });
 
-    // Refresh tickets & clear staged selection
-    setTicketsList(getTickets());
+    // Refresh tickets & clear staged selection (scoped to current agent)
+    setTicketsList(getTickets(agentUser.id || agentUser.username));
     setSelectedCards({});
     setCustomerName("");
 
@@ -314,7 +329,7 @@ export default function AgentPage() {
   const handleClaimPrize = (ticketId: string) => {
     const updated = claimTicket(ticketId);
     if (updated) {
-      setTicketsList(getTickets());
+      setTicketsList(getTickets(agentUser?.id || agentUser?.username));
       alert(`Ticket #${ticketId} prize of ₹${updated.winningPayout} marked as PAID! Customer ko cash de dijiye.`);
     }
   };
@@ -365,6 +380,7 @@ export default function AgentPage() {
         setLoggedInAgentState(res.user);
         setAgentUser(res.user);
         setAgentBalance(res.user.balance);
+        setTicketsList(getTickets(res.user.id || res.user.username));
       } else {
         setLoginError(res.error || "Login fail! Sahi Agent ID aur 4-digit PIN daalein.");
       }
@@ -394,6 +410,7 @@ export default function AgentPage() {
       setLoggedInAgent(null);
       setLoggedInAgentState(null);
       setLoginPinInput("");
+      setTicketsList([]);
     }
   };
 
@@ -515,6 +532,7 @@ export default function AgentPage() {
                       setLoggedInAgentState(res.user);
                       setAgentUser(res.user);
                       setAgentBalance(res.user.balance);
+                      setTicketsList(getTickets(res.user.id || res.user.username));
                     }
                   }}
                   className="p-2.5 rounded-xl bg-muted/60 hover:bg-muted border border-border text-left transition hover:border-primary/50 cursor-pointer active:scale-95"
@@ -675,7 +693,7 @@ export default function AgentPage() {
           <button
             type="button"
             onClick={() => {
-              setTicketsList(getTickets());
+              setTicketsList(getTickets(agentUser?.id || agentUser?.username));
               setActiveTab("tickets");
             }}
             className={`py-2 text-center rounded-lg font-bold transition flex flex-col items-center justify-center gap-0.5 ${
@@ -898,9 +916,25 @@ export default function AgentPage() {
               <span className="text-xs font-bold text-muted-foreground">
                 Recent Issued Slips ({ticketsList.length})
               </span>
-              <span className="text-[10px] text-muted-foreground">
-                Inam aane par "Pay Out" karein
-              </span>
+              <div className="flex items-center gap-2">
+                {ticketsList.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (confirm("Kya aap counter slip history clear karke fresh shift shuru karna chahte hain?")) {
+                        clearTickets(agentUser?.id || agentUser?.username);
+                        setTicketsList([]);
+                      }
+                    }}
+                    className="text-[10px] text-destructive hover:underline font-bold cursor-pointer"
+                  >
+                    🗑️ Clear Slips
+                  </button>
+                )}
+                <span className="text-[10px] text-muted-foreground">
+                  Inam aane par "Pay Out" karein
+                </span>
+              </div>
             </div>
 
             {ticketsList.length === 0 ? (
@@ -996,9 +1030,25 @@ export default function AgentPage() {
         {activeTab === "shift" && (
           <div className="space-y-3">
             <div className="rounded-2xl border border-border bg-card p-4 space-y-3 shadow-sm">
-              <h3 className="font-display text-sm font-black text-foreground">
-                Agent Counter Shift Summary
-              </h3>
+              <div className="flex items-center justify-between">
+                <h3 className="font-display text-sm font-black text-foreground">
+                  Agent Counter Shift Summary
+                </h3>
+                {ticketsList.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (confirm("Kya aap naya shift shuru karke shift sales 0 se start karna chahte hain?")) {
+                        clearTickets(agentUser?.id || agentUser?.username);
+                        setTicketsList([]);
+                      }
+                    }}
+                    className="text-[10px] text-primary hover:underline font-bold cursor-pointer"
+                  >
+                    🔄 Start New Shift
+                  </button>
+                )}
+              </div>
 
               <div className="space-y-2 text-xs font-mono">
                 <div className="flex justify-between py-1.5 border-b border-border/50">

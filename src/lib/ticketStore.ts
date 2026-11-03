@@ -17,6 +17,8 @@ export interface ThermalTicket {
   timeStr: string;
   customerName: string;
   agentName: string;
+  agentId?: string;
+  username?: string;
   items: BetItem[];
   totalAmount: number;
   status: "ACTIVE" | "WON" | "LOST" | "CLAIMED";
@@ -48,21 +50,35 @@ function notifySync(type: string, data?: any) {
   } catch {}
 }
 
-export function getTickets(): ThermalTicket[] {
+export function getTickets(agentId?: string): ThermalTicket[] {
   if (typeof window === "undefined") return [];
-  if (cachedTickets) return cachedTickets;
+  let all: ThermalTicket[] = [];
 
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        cachedTickets = parsed;
-        return parsed;
+        all = parsed;
       }
     }
   } catch {}
-  return [];
+
+  cachedTickets = all;
+  if (!agentId || agentId === "all") return all;
+
+  const cleanAgent = agentId.toLowerCase().replace(/^@/, "");
+  return all.filter((t) => {
+    const tAgentId = (t.agentId || "").toLowerCase();
+    const tUsername = (t.username || "").toLowerCase().replace(/^@/, "");
+    const tAgentName = (t.agentName || "").toLowerCase();
+
+    return (
+      tAgentId === cleanAgent ||
+      tUsername === cleanAgent ||
+      tAgentName === cleanAgent
+    );
+  });
 }
 
 export function saveTickets(tickets: ThermalTicket[]): void {
@@ -76,6 +92,34 @@ export function saveTickets(tickets: ThermalTicket[]): void {
 }
 
 /**
+ * Clears tickets for a specific agent or all tickets.
+ */
+export function clearTickets(agentId?: string): void {
+  if (!agentId || agentId === "all") {
+    cachedTickets = [];
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(STORAGE_KEY);
+      notifySync("TICKETS_UPDATED", []);
+    }
+    return;
+  }
+  const all = getTickets("all");
+  const cleanAgent = agentId.toLowerCase().replace(/^@/, "");
+  const remaining = all.filter((t) => {
+    const tAgentId = (t.agentId || "").toLowerCase();
+    const tUsername = (t.username || "").toLowerCase().replace(/^@/, "");
+    const tAgentName = (t.agentName || "").toLowerCase();
+
+    return (
+      tAgentId !== cleanAgent &&
+      tUsername !== cleanAgent &&
+      tAgentName !== cleanAgent
+    );
+  });
+  saveTickets(remaining);
+}
+
+/**
  * Creates and prints a new thermal bet slip (Parchi).
  */
 export function createTicket(data: {
@@ -83,6 +127,8 @@ export function createTicket(data: {
   roundNumber: number;
   customerName?: string;
   agentName?: string;
+  agentId?: string;
+  username?: string;
   items: BetItem[];
 }): ThermalTicket {
   const now = Date.now();
@@ -103,12 +149,14 @@ export function createTicket(data: {
     timeStr: formatTime(now),
     customerName: data.customerName?.trim() || `Customer #${randomSuffix.toString().slice(-2)}`,
     agentName: data.agentName || "Kiosk Agent",
+    agentId: data.agentId,
+    username: data.username,
     items: data.items,
     totalAmount,
     status: "ACTIVE",
   };
 
-  const tickets = getTickets();
+  const tickets = getTickets("all");
   tickets.unshift(newTicket);
   // Keep last 500 tickets in cache
   if (tickets.length > 500) tickets.length = 500;
