@@ -123,6 +123,8 @@ export default function TvArenaPage() {
 
   const lastProcessedRoundRef = useRef<number>(initialSync.roundNumber);
   const lastDecidedWinnerRoundRef = useRef<number | null>(null);
+  const forcedWinnerRef = useRef<number | null>(null);
+  const [forcedWinner, setForcedWinner] = useState<number | null>(null);
   const hostSyncRef = useRef<TVHostSync | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
 
@@ -239,6 +241,25 @@ export default function TvArenaPage() {
         }));
         setTotalTurnover((t) => t + msg.amount);
         playBeep(720, 0.08, "sine");
+      } else if (msg.type === "FORCE_WINNER") {
+        const card = msg.card !== undefined && msg.card !== null ? Number(msg.card) : null;
+        setForcedWinner(card);
+        forcedWinnerRef.current = card;
+        playBeep(880, 0.15, "triangle");
+      } else if (msg.type === "CLEAR_ALL_BETS") {
+        setBets({});
+        playBeep(440, 0.1, "sine");
+      } else if (msg.type === "TRIGGER_SPIN") {
+        setPhase("select");
+        setT(5);
+        playBeep(960, 0.15, "sine");
+      } else if (msg.type === "RESET_FINANCIALS") {
+        setTotalTurnover(0);
+        setTotalPayouts(0);
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("sorat_total_turnover");
+          localStorage.removeItem("sorat_total_payouts");
+        }
       }
     };
 
@@ -262,6 +283,8 @@ export default function TvArenaPage() {
         setWinner(null);
         setSpot(null);
         lastDecidedWinnerRoundRef.current = null;
+        setForcedWinner(null);
+        forcedWinnerRef.current = null;
       }
 
       // Audio countdown cues in final 5 seconds of betting phase
@@ -284,7 +307,7 @@ export default function TvArenaPage() {
         bets,
         totalTurnover,
         totalPayouts,
-        null
+        forcedWinnerRef.current
       );
 
       const w = decision.winner;
@@ -294,6 +317,9 @@ export default function TvArenaPage() {
       if (prize > 0) {
         setTotalPayouts((p) => p + prize);
       }
+
+      // Automatically settle all pending bets placed by agents/players for this round
+      settleRoundBets(roundId, w, CARDS[w].name, false);
 
       // Record to recent history
       const nowStr = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
@@ -321,7 +347,7 @@ export default function TvArenaPage() {
         bets,
         pool: Object.values(bets).reduce((a, b) => a + b, 0),
         winner: w,
-        forcedWinner: null,
+        forcedWinner: forcedWinnerRef.current,
         agentBalance: 0,
         totalTurnover,
         totalPayouts: totalPayouts + prize,
@@ -345,7 +371,7 @@ export default function TvArenaPage() {
         bets,
         pool: Object.values(bets).reduce((a, b) => a + b, 0),
         winner,
-        forcedWinner: null,
+        forcedWinner: forcedWinnerRef.current,
         agentBalance: 0,
         totalTurnover,
         totalPayouts,

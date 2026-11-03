@@ -189,6 +189,7 @@ export default function AgentPage() {
         if (msg.winner !== null && msg.winner >= 0 && msg.winner < 12) {
           setDeclaredWinner(msg.winner);
           settleTicketsForRound(msg.roundId, msg.winner, CARDS[msg.winner]?.name || "");
+          settleRoundBets(msg.roundId, msg.winner, CARDS[msg.winner]?.name || "", false);
           setTicketsList(getTickets());
         }
       } else if (msg.type === "SET_AGENT_BALANCE") {

@@ -733,7 +733,9 @@ export function subscribeToCloudUsers(
             const target = current.find(
               (u) =>
                 u.id.toLowerCase() === rawId ||
-                u.username.toLowerCase().replace(/^@/, "") === cleanId
+                u.id.toLowerCase() === cleanId ||
+                u.username.toLowerCase().replace(/^@/, "") === cleanId ||
+                (isRamuUser(u) && (cleanId === "ram" || cleanId.includes("ramu")))
             );
 
             if (target) {
@@ -987,13 +989,21 @@ export function deductAgentBalance(
   items: { cardIndex: number; cardName: string; amount: number }[]
 ): { success: boolean; newBalance: number; error?: string } {
   const users = getUsers();
-  const cleanId = (agentIdentifier || "").trim().toLowerCase();
-  const idx = users.findIndex(
-    (u) =>
+  const rawId = (agentIdentifier || "").trim().toLowerCase();
+  const cleanId = rawId.replace(/^@/, "");
+  const idx = users.findIndex((u) => {
+    const uRaw = (u.username || "").toLowerCase();
+    const uName = uRaw.replace(/^@/, "");
+    const uCode = (u.agentCode || "").toLowerCase().replace(/^@/, "");
+    return (
+      u.id.toLowerCase() === rawId ||
       u.id.toLowerCase() === cleanId ||
-      u.username.toLowerCase() === cleanId ||
-      (u.agentCode && u.agentCode.toLowerCase() === cleanId)
-  );
+      uName === cleanId ||
+      uRaw === rawId ||
+      uCode === cleanId ||
+      (isRamuUser(u) && (cleanId === "ram" || cleanId.includes("ramu")))
+    );
+  });
 
   if (idx === -1) {
     return { success: false, newBalance: 0, error: `Agent "${agentIdentifier}" not found` };

@@ -862,38 +862,32 @@ export function UserAccountsView({
                   </div>
 
                   <div>
-                    <span className="text-muted-foreground">Net Period Profit: </span>
-                    <span
-                      className={`font-black ${
-                        (betPeriodFilter === "today"
-                          ? profitStats.todayNetProfit
+                    <span className="text-muted-foreground">House Margin: </span>
+                    {(() => {
+                      const totalBet =
+                        betPeriodFilter === "today"
+                          ? profitStats.todayBetAmount
                           : betPeriodFilter === "yesterday"
-                          ? profitStats.yesterdayNetProfit
-                          : profitStats.netBetProfit) >= 0
-                          ? "text-emerald-400"
-                          : "text-destructive"
-                      }`}
-                    >
-                      {(betPeriodFilter === "today"
-                        ? profitStats.todayNetProfit
-                        : betPeriodFilter === "yesterday"
-                        ? profitStats.yesterdayNetProfit
-                        : profitStats.netBetProfit) >= 0
-                        ? `+₹${
-                            betPeriodFilter === "today"
-                              ? profitStats.todayNetProfit
-                              : betPeriodFilter === "yesterday"
-                              ? profitStats.yesterdayNetProfit
-                              : profitStats.netBetProfit
-                          }`
-                        : `-₹${Math.abs(
-                            betPeriodFilter === "today"
-                              ? profitStats.todayNetProfit
-                              : betPeriodFilter === "yesterday"
-                              ? profitStats.yesterdayNetProfit
-                              : profitStats.netBetProfit
-                          )}`}
-                    </span>
+                          ? profitStats.yesterdayBetAmount
+                          : profitStats.totalBetAmount;
+                      const totalWon =
+                        betPeriodFilter === "today"
+                          ? profitStats.todayWonAmount
+                          : betPeriodFilter === "yesterday"
+                          ? profitStats.yesterdayWonAmount
+                          : profitStats.totalWonAmount;
+                      const houseMargin = totalBet - totalWon;
+                      const isGreen = houseMargin >= 0;
+                      return (
+                        <span
+                          className={`font-black ${
+                            isGreen ? "text-emerald-400" : "text-destructive"
+                          }`}
+                        >
+                          {isGreen ? `+₹${houseMargin.toLocaleString("en-IN")}` : `-₹${Math.abs(houseMargin).toLocaleString("en-IN")}`}
+                        </span>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>

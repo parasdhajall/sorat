@@ -15,6 +15,7 @@ import {
   getActiveUser,
   pullUsersFromCloud,
   subscribeToCloudUsers,
+  settleRoundBets,
 } from "@/lib/userStore";
 import { UserAccountsView } from "@/components/admin/UserAccountsView";
 import { OverviewView } from "@/components/admin/OverviewView";
@@ -182,7 +183,10 @@ export default function AdminPage() {
         setRoundNumber(msg.roundNumber);
         setRoundId(msg.roundId);
         setBets(msg.bets || {});
-        if (msg.winner !== null) setLastWinner(msg.winner);
+        if (msg.winner !== null && msg.winner >= 0 && msg.winner < 12) {
+          setLastWinner(msg.winner);
+          settleRoundBets(msg.roundId, msg.winner, CARDS[msg.winner]?.name || "", false);
+        }
         setForcedWinner(msg.forcedWinner);
         setAgentBalance(msg.agentBalance ?? 1000);
         setTotalTurnover(msg.totalTurnover ?? 0);
