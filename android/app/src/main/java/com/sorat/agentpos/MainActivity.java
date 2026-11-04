@@ -87,6 +87,8 @@ public class MainActivity extends AppCompatActivity {
 
         swipeRefresh.setColorSchemeColors(getColor(R.color.primary));
         swipeRefresh.setProgressBackgroundColorSchemeColor(getColor(R.color.surface));
+        // Disable accidental pull-to-refresh reload inside POS terminal so tabs and views never flicker
+        swipeRefresh.setEnabled(false);
     }
 
     @SuppressLint("SetJavaScriptEnabled")

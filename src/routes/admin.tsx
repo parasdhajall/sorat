@@ -5,6 +5,7 @@ import {
   DEFAULT_ROOM_ID,
   GameMessage,
   getSynchronizedRoundState,
+  getDeterministicRoundWinner,
   analyzeCardProfitability,
 } from "@/lib/realtime";
 import { CARDS } from "@/lib/cards";
@@ -16,6 +17,7 @@ import {
   pullUsersFromCloud,
   subscribeToCloudUsers,
   settleRoundBets,
+  autoSettleAllPendingBets,
 } from "@/lib/userStore";
 import { UserAccountsView } from "@/components/admin/UserAccountsView";
 import { OverviewView } from "@/components/admin/OverviewView";
@@ -137,6 +139,9 @@ export default function AdminPage() {
   // Synchronized Game Clock Ticker
   useEffect(() => {
     const updateTick = () => {
+      let curRound = 0;
+      let curPhase: "bet" | "select" | "result" = "bet";
+
       if (tvMasterSyncRef.current) {
         const elapsedSec = Math.floor((Date.now() - tvMasterSyncRef.current.receivedAt) / 1000);
         const currentT = Math.max(0, tvMasterSyncRef.current.t - elapsedSec);
@@ -144,19 +149,32 @@ export default function AdminPage() {
         setPhase(tvMasterSyncRef.current.phase as any);
         setRoundNumber(tvMasterSyncRef.current.roundNumber);
         setRoundId(`#${String(tvMasterSyncRef.current.roundNumber).padStart(4, "0")}`);
+        curRound = tvMasterSyncRef.current.roundNumber;
+        curPhase = tvMasterSyncRef.current.phase as any;
       } else {
         const sync = getSynchronizedRoundState();
         setTimer(sync.timeLeft);
         setPhase(sync.phase);
         setRoundNumber(sync.roundNumber);
         setRoundId(sync.roundId);
+        curRound = sync.roundNumber;
+        curPhase = sync.phase;
+      }
+
+      // Auto-settle any pending bets whose round has ended or reached result phase
+      if (curRound > 0) {
+        const effWinner = lastWinner ?? getDeterministicRoundWinner(curRound);
+        const didSettle = autoSettleAllPendingBets(curRound, curPhase, effWinner);
+        if (didSettle) {
+          reloadUsers();
+        }
       }
     };
 
     updateTick();
     const id = setInterval(updateTick, 250);
     return () => clearInterval(id);
-  }, []);
+  }, [lastWinner, reloadUsers]);
 
   const handlePinSubmit = (e: React.FormEvent) => {
     e.preventDefault();

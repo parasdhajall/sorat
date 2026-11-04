@@ -10,6 +10,7 @@ import rabbit from "@/assets/rabbit.jpg";
 import top from "@/assets/top.jpg";
 import bucket from "@/assets/bucket.jpg";
 import cow from "@/assets/cow.jpg";
+import { getSynchronizedRoundState, getDeterministicRoundWinner } from "./realtime";
 
 export interface CardDef {
   index: number;
@@ -109,5 +110,65 @@ export function getCardDisplayName(name: string): string {
 
 export function getCardByIndex(idx: number): CardDef {
   return CARDS[idx] || CARDS[0];
+}
+
+export interface RoundHistoryItem {
+  roundNumber: number;
+  roundId: string;
+  cardIndex: number;
+  card: CardDef;
+  timeStr: string;
+}
+
+export function getPastRoundsHistory(count: number = 40): RoundHistoryItem[] {
+  const sync = getSynchronizedRoundState();
+  const currentRound = sync.roundNumber;
+  const history: RoundHistoryItem[] = [];
+
+  let savedHistory: Record<number, number> = {};
+  if (typeof window !== "undefined") {
+    try {
+      const raw = localStorage.getItem("sorat_round_winners_history");
+      if (raw) savedHistory = JSON.parse(raw);
+    } catch {}
+  }
+
+  // Include current round if it has reached result phase
+  const startOffset = sync.phase === "result" ? 0 : 1;
+
+  for (let i = startOffset; i < startOffset + count; i++) {
+    const rNum = currentRound - i;
+    if (rNum <= 0) break;
+
+    const winIdx = savedHistory[rNum] ?? getDeterministicRoundWinner(rNum);
+    const card = CARDS[winIdx] || CARDS[0];
+
+    const mins = Math.max(0, rNum - 1);
+    const hours = Math.floor(mins / 60) % 24;
+    const remMins = mins % 60;
+    const h12 = hours % 12 || 12;
+    const ampm = hours < 12 ? "AM" : "PM";
+    const timeStr = `${String(h12).padStart(2, "0")}:${String(remMins).padStart(2, "0")} ${ampm}`;
+
+    history.push({
+      roundNumber: rNum,
+      roundId: `#${String(rNum).padStart(4, "0")}`,
+      cardIndex: winIdx,
+      card,
+      timeStr,
+    });
+  }
+
+  return history;
+}
+
+export function recordRoundWinnerHistory(roundNumber: number, winnerCardIndex: number): void {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = localStorage.getItem("sorat_round_winners_history");
+    const map = raw ? JSON.parse(raw) : {};
+    map[roundNumber] = winnerCardIndex;
+    localStorage.setItem("sorat_round_winners_history", JSON.stringify(map));
+  } catch {}
 }
 

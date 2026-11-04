@@ -1,5 +1,7 @@
 import { getSupabaseClient, placeSoratBetsRpc, depositToPlayerRpc } from "./supabase";
 import { RAMU_SIMULATED_BETS } from "./ramuSimulationData";
+import { getDeterministicRoundWinner } from "./realtime";
+import { CARDS } from "./cards";
 
 export interface UserDeposit {
   id: string;
@@ -1646,6 +1648,7 @@ export function settleRoundBets(
 ): void {
   const users = getUsers();
   let changed = false;
+  const cleanTarget = (roundId || "").replace(/^#/, "").trim();
 
   for (let i = 0; i < users.length; i++) {
     const user = { ...users[i] };
@@ -1653,7 +1656,10 @@ export function settleRoundBets(
 
     if (user.bets) {
       const updatedBets = user.bets.map((bet) => {
-        if (bet.roundId === roundId && bet.status === "PENDING") {
+        const cleanBetId = (bet.roundId || "").replace(/^#/, "").trim();
+        const matchesRound = cleanBetId === cleanTarget || String(bet.roundNumber) === cleanTarget;
+
+        if (matchesRound && bet.status === "PENDING") {
           userChanged = true;
           const isWin = bet.cardIndex === winningCardIndex;
           const payout = isWin ? bet.stake * 10 : 0;
@@ -1685,6 +1691,70 @@ export function settleRoundBets(
   if (changed) {
     saveUsers(users);
   }
+}
+
+/**
+ * Automatically settles any pending bets whose rounds have finished or reached result phase.
+ * Guarantees zero bets ever get stuck in "PENDING" ("⏳ IN PLAY").
+ */
+export function autoSettleAllPendingBets(
+  currentRoundNumber: number,
+  currentPhase: string,
+  currentWinner?: number | null
+): boolean {
+  const users = getUsers();
+  let changed = false;
+
+  for (let i = 0; i < users.length; i++) {
+    const user = { ...users[i] };
+    let userChanged = false;
+
+    if (user.bets && user.bets.length > 0) {
+      const updatedBets = user.bets.map((bet) => {
+        if (bet.status !== "PENDING") return bet;
+
+        const betRoundNum = bet.roundNumber || parseInt((bet.roundId || "").replace(/\D/g, ""), 10) || 0;
+        const isPastRound = betRoundNum > 0 && betRoundNum < currentRoundNumber;
+        const isCurrentRoundSettled =
+          betRoundNum === currentRoundNumber &&
+          (currentPhase === "select" || currentPhase === "result") &&
+          currentWinner !== null &&
+          currentWinner !== undefined;
+
+        if (isPastRound || isCurrentRoundSettled) {
+          userChanged = true;
+          const winIdx = isCurrentRoundSettled
+            ? currentWinner!
+            : getDeterministicRoundWinner(betRoundNum);
+
+          const winCard = CARDS[winIdx];
+          const isWin = bet.cardIndex === winIdx;
+          const payout = isWin ? bet.stake * 10 : 0;
+
+          return {
+            ...bet,
+            winningCardIndex: winIdx,
+            winningCardName: winCard?.name || `Card ${winIdx}`,
+            payout,
+            isWin,
+            status: "SETTLED" as const,
+          };
+        }
+        return bet;
+      });
+
+      if (userChanged) {
+        user.bets = updatedBets;
+        users[i] = user;
+        changed = true;
+      }
+    }
+  }
+
+  if (changed) {
+    saveUsers(users);
+  }
+  return changed;
 }
 
 /**

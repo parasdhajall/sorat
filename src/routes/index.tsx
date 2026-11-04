@@ -7,7 +7,12 @@ import {
   getSynchronizedRoundState,
   getDeterministicRoundWinner,
 } from "@/lib/realtime";
-import { CARDS } from "@/lib/cards";
+import {
+  CARDS,
+  getPastRoundsHistory,
+  recordRoundWinnerHistory,
+  RoundHistoryItem,
+} from "@/lib/cards";
 import {
   createTicket,
   getTickets,
@@ -26,6 +31,7 @@ import {
   recordUserBet,
   getUsers,
   settleRoundBets,
+  autoSettleAllPendingBets,
   UserAccount,
   deductAgentBalance,
   pullUsersFromCloud,
@@ -85,15 +91,51 @@ export default function AgentPage() {
     const u = getLoggedInAgent();
     return u ? getTickets(u.id || u.username) : [];
   });
-  const [activeTab, setActiveTab] = useState<"punch" | "tickets" | "shift" | "printer">("punch");
 
-  // Keep ticketsList strictly scoped to current logged-in agent
+  // Persist Active Tab so page updates/reloads never reset the agent from Tickets/Shift/History back to Bet Book
+  const [activeTab, setActiveTabState] = useState<"punch" | "tickets" | "shift" | "history" | "printer">(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("sorat_active_agent_tab");
+        if (saved === "punch" || saved === "tickets" || saved === "shift" || saved === "history" || saved === "printer") {
+          return saved;
+        }
+      } catch {}
+    }
+    return "punch";
+  });
+
+  const setActiveTab = (tab: "punch" | "tickets" | "shift" | "history" | "printer") => {
+    setActiveTabState(tab);
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem("sorat_active_agent_tab", tab);
+      } catch {}
+    }
+  };
+
+  // Recent Round Winners History (35 past rounds)
+  const [recentWinners, setRecentWinners] = useState<RoundHistoryItem[]>(() => getPastRoundsHistory(35));
+
+  const agentUserRef = useRef(agentUser);
   useEffect(() => {
-    if (loggedInAgent) {
-      setTicketsList(getTickets(loggedInAgent.id || loggedInAgent.username));
+    agentUserRef.current = agentUser;
+  }, [agentUser]);
+
+  // Helper to always fetch tickets strictly scoped to the active/logged-in agent
+  const refreshAgentTickets = () => {
+    const currentAgent = loggedInAgent || agentUserRef.current || getLoggedInAgent();
+    const id = currentAgent?.id || currentAgent?.username;
+    if (id) {
+      setTicketsList(getTickets(id));
     } else {
       setTicketsList([]);
     }
+  };
+
+  // Keep ticketsList strictly scoped to current logged-in agent
+  useEffect(() => {
+    refreshAgentTickets();
   }, [loggedInAgent?.id, loggedInAgent?.username]);
 
   // Print Slip State
@@ -104,18 +146,25 @@ export default function AgentPage() {
     typeof window !== "undefined" ? localStorage.getItem("sorat_printer_name") || "POS-58" : "POS-58"
   );
 
-  // PWA Install State
+  // PWA & Native App Mode Detection
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isStandalone, setIsStandalone] = useState(false);
+  const [isNativeApp, setIsNativeApp] = useState(false);
 
   const clientSyncRef = useRef<AdminClientSync | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
 
-  // Detect standalone PWA mode
+  // Detect standalone PWA mode and native Android App
   useEffect(() => {
     if (typeof window !== "undefined") {
       const isStandaloneMode = window.matchMedia("(display-mode: standalone)").matches || (window.navigator as any).standalone;
       setIsStandalone(Boolean(isStandaloneMode));
+
+      const isNative =
+        (typeof navigator !== "undefined" && navigator.userAgent.includes("SoratApp")) ||
+        Boolean((window as any).AndroidBridge) ||
+        Boolean((window as any).AndroidPrinter);
+      setIsNativeApp(isNative);
 
       const handler = (e: any) => {
         e.preventDefault();
@@ -135,9 +184,10 @@ export default function AgentPage() {
       setPhase(sync.phase);
       setTimer(sync.timeLeft);
 
-      // New round rollover: clear old winner
+      // New round rollover: clear old winner and refresh history
       if (sync.phase === "bet" && declaredWinner !== null) {
         setDeclaredWinner(null);
+        setRecentWinners(getPastRoundsHistory(35));
       }
 
       // If in result phase and winner has not been declared yet from TV:
@@ -147,8 +197,12 @@ export default function AgentPage() {
         if (declaredWinner === null) {
           setDeclaredWinner(fallbackWinner);
         }
+        recordRoundWinnerHistory(sync.roundNumber, fallbackWinner);
         settleTicketsForRound(sync.roundId, fallbackWinner, CARDS[fallbackWinner]?.name || "");
-        setTicketsList(getTickets());
+        settleRoundBets(sync.roundId, fallbackWinner, CARDS[fallbackWinner]?.name || "", false);
+        autoSettleAllPendingBets(sync.roundNumber, sync.phase, fallbackWinner);
+        refreshAgentTickets();
+        setRecentWinners(getPastRoundsHistory(35));
       }
     }, 250);
     return () => clearInterval(id);
@@ -168,7 +222,10 @@ export default function AgentPage() {
         setAgentBalance(u.balance);
       }
       if (e.key === "sorat_thermal_tickets_v1") {
-        setTicketsList(getTickets());
+        refreshAgentTickets();
+      }
+      if (e.key === "sorat_round_winners_history") {
+        setRecentWinners(getPastRoundsHistory(35));
       }
     };
     window.addEventListener("storage", handleStorage);
@@ -209,9 +266,12 @@ export default function AgentPage() {
         // Accept winner immediately whether in select or result phase
         if (msg.winner !== null && msg.winner >= 0 && msg.winner < 12) {
           setDeclaredWinner(msg.winner);
+          recordRoundWinnerHistory(msg.roundNumber, msg.winner);
           settleTicketsForRound(msg.roundId, msg.winner, CARDS[msg.winner]?.name || "");
           settleRoundBets(msg.roundId, msg.winner, CARDS[msg.winner]?.name || "", false);
-          setTicketsList(getTickets(agentUser?.id || agentUser?.username));
+          autoSettleAllPendingBets(msg.roundNumber, msg.phase, msg.winner);
+          refreshAgentTickets();
+          setRecentWinners(getPastRoundsHistory(35));
         }
       } else if (msg.type === "SET_AGENT_BALANCE") {
         setAgentBalance(msg.balance);
@@ -646,8 +706,8 @@ export default function AgentPage() {
           </div>
         </div>
 
-        {/* App Install & APK Download Banner */}
-        {!isStandalone && (
+        {/* App Install & APK Download Banner (Hidden inside Native Android APK) */}
+        {!isStandalone && !isNativeApp && (
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 rounded-xl bg-gradient-to-r from-amber-500/20 via-primary/15 to-amber-500/10 border border-primary/30 p-2.5 shadow-sm text-xs">
             <div className="flex items-center gap-2">
               <span className="text-xl">📲</span>
@@ -689,7 +749,7 @@ export default function AgentPage() {
         )}
 
         {/* App Sub-Navigation Tabs */}
-        <div className="grid grid-cols-4 gap-1 bg-muted/80 p-1 rounded-xl border border-border text-xs">
+        <div className="grid grid-cols-5 gap-1 bg-muted/80 p-1 rounded-xl border border-border text-xs">
           <button
             type="button"
             onClick={() => setActiveTab("punch")}
@@ -700,13 +760,13 @@ export default function AgentPage() {
             }`}
           >
             <span className="text-sm">🎯</span>
-            <span className="text-[10px] leading-tight">Bet Book</span>
+            <span className="text-[9px] leading-tight font-bold">Bet Book</span>
           </button>
 
           <button
             type="button"
             onClick={() => {
-              setTicketsList(getTickets(agentUser?.id || agentUser?.username));
+              refreshAgentTickets();
               setActiveTab("tickets");
             }}
             className={`py-2 text-center rounded-lg font-bold transition flex flex-col items-center justify-center gap-0.5 ${
@@ -716,7 +776,7 @@ export default function AgentPage() {
             }`}
           >
             <span className="text-sm">🎟️</span>
-            <span className="text-[10px] leading-tight">Tickets ({ticketsList.length})</span>
+            <span className="text-[9px] leading-tight font-bold">Tickets ({ticketsList.length})</span>
           </button>
 
           <button
@@ -729,7 +789,23 @@ export default function AgentPage() {
             }`}
           >
             <span className="text-sm">💼</span>
-            <span className="text-[10px] leading-tight">Shift</span>
+            <span className="text-[9px] leading-tight font-bold">Shift</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setRecentWinners(getPastRoundsHistory(35));
+              setActiveTab("history");
+            }}
+            className={`py-2 text-center rounded-lg font-bold transition flex flex-col items-center justify-center gap-0.5 ${
+              activeTab === "history"
+                ? "bg-primary text-primary-foreground shadow-sm font-black"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <span className="text-sm">📜</span>
+            <span className="text-[9px] leading-tight font-bold">History</span>
           </button>
 
           <button
@@ -746,7 +822,7 @@ export default function AgentPage() {
             title="Printer Connect & Bluetooth Settings"
           >
             <span className="text-sm">🖨️</span>
-            <span className="text-[10px] leading-tight font-black">Printer</span>
+            <span className="text-[9px] leading-tight font-black">Printer</span>
           </button>
         </div>
       </header>
@@ -837,6 +913,45 @@ export default function AgentPage() {
                 ))}
               </div>
             </div>
+
+            {/* Recent Winners Horizontal Preview Strip */}
+            {recentWinners.length > 0 && (
+              <div className="rounded-2xl border border-border/70 bg-card/70 p-2 space-y-1.5 shadow-sm">
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                    <span>🏆</span> Recent Winners (मागील निकाल)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("history")}
+                    className="text-[10px] text-primary hover:underline font-bold cursor-pointer"
+                  >
+                    View All →
+                  </button>
+                </div>
+                <div className="flex items-center gap-2 overflow-x-auto pb-0.5 scrollbar-none">
+                  {recentWinners.slice(0, 10).map((r) => (
+                    <div
+                      key={r.roundNumber}
+                      onClick={() => setActiveTab("history")}
+                      className="flex flex-col items-center shrink-0 w-14 p-1 rounded-xl border border-border/80 bg-background/90 text-center shadow-xs cursor-pointer hover:border-primary/50 transition active:scale-95"
+                    >
+                      <span className="text-[9px] font-mono font-bold text-muted-foreground leading-none">
+                        {r.roundId}
+                      </span>
+                      <img
+                        src={r.card.img}
+                        alt={r.card.name}
+                        className="h-8 w-8 object-contain my-1 rounded-lg"
+                      />
+                      <span className="text-[10px] font-black text-foreground leading-tight truncate w-full">
+                        {r.card.name}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* 12-Card Fast Touch Grid */}
             <div className="grid grid-cols-3 gap-2">
@@ -1089,7 +1204,95 @@ export default function AgentPage() {
           </div>
         )}
 
-        {/* TAB 4: DEDICATED THERMAL PRINTER SETTINGS & BLUETOOTH CONNECT */}
+        {/* TAB 4: ROUND RESULTS & WINNERS HISTORY */}
+        {activeTab === "history" && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between px-1">
+              <div className="flex items-center gap-1.5">
+                <span className="text-base">📜</span>
+                <h3 className="font-display text-sm font-black text-foreground">
+                  Round Results History (मागील निकाल)
+                </h3>
+              </div>
+              <span className="text-[10px] font-mono text-muted-foreground font-bold">
+                Last {recentWinners.length} Rounds
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 gap-2">
+              {recentWinners.map((r) => {
+                const roundTickets = ticketsList.filter(
+                  (t) => t.roundNumber === r.roundNumber || t.roundId === r.roundId
+                );
+                const hasWonTicket = roundTickets.some((t) => t.status === "WON" || t.status === "CLAIMED");
+
+                return (
+                  <div
+                    key={r.roundNumber}
+                    className={`rounded-2xl border p-2.5 flex items-center justify-between gap-3 transition shadow-xs ${
+                      hasWonTicket
+                        ? "border-emerald-500/50 bg-emerald-500/10"
+                        : "border-border bg-card/90"
+                    }`}
+                  >
+                    {/* Left: Winning Card Picture + Name + Symbol */}
+                    <div className="flex items-center gap-3">
+                      <div className="h-12 w-12 rounded-xl overflow-hidden border border-border/80 shrink-0 bg-background flex items-center justify-center p-1 shadow-inner">
+                        <img
+                          src={r.card.img}
+                          alt={r.card.name}
+                          className="w-full h-full object-contain filter drop-shadow"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-display text-base font-black text-foreground leading-none">
+                            {r.card.name}
+                          </span>
+                          <span className="text-sm">{r.card.symbol}</span>
+                          <span className="text-[10px] font-mono text-muted-foreground font-bold">
+                            ({r.card.englishName})
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="px-2 py-0.5 rounded-md bg-primary/15 border border-primary/30 text-primary text-[10px] font-mono font-black">
+                            {r.roundId}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground font-mono">
+                            {r.timeStr}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Right: 10X Payout Badge + Counter Ticket Indicator */}
+                    <div className="text-right shrink-0">
+                      <span className="inline-block px-2.5 py-1 rounded-lg bg-gradient-gold text-zinc-950 font-black text-[10px] uppercase shadow-sm">
+                        🏆 WINNER 10X
+                      </span>
+
+                      {roundTickets.length > 0 && (
+                        <span
+                          className={`block mt-1 text-[10px] font-bold font-mono ${
+                            hasWonTicket ? "text-emerald-400 font-black" : "text-muted-foreground"
+                          }`}
+                        >
+                          {hasWonTicket
+                            ? "🎉 Counter Won!"
+                            : `${roundTickets.length} Slip(s) Booked`}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 5: DEDICATED THERMAL PRINTER SETTINGS & BLUETOOTH CONNECT */}
         {activeTab === "printer" && (
           <div className="space-y-3">
             <div className="rounded-3xl border border-emerald-500/40 bg-zinc-900/90 p-4 space-y-4 shadow-xl">

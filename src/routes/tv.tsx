@@ -15,8 +15,10 @@ import {
   getUsers,
   setActiveUserId,
   settleRoundBets,
+  autoSettleAllPendingBets,
   UserAccount,
 } from "@/lib/userStore";
+import { recordRoundWinnerHistory } from "@/lib/cards";
 import { settleTicketsForRound } from "@/lib/ticketStore";
 import kite from "@/assets/kite.jpg";
 import umbrella from "@/assets/umbrella.jpg";
@@ -320,6 +322,8 @@ export default function TvArenaPage() {
 
       // Automatically settle all pending bets placed by agents/players for this round
       settleRoundBets(roundId, w, CARDS[w].name, false);
+      autoSettleAllPendingBets(roundNumber, "select", w);
+      recordRoundWinnerHistory(roundNumber, w);
 
       // Record to recent history
       const nowStr = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });

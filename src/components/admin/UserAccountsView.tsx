@@ -13,7 +13,9 @@ import {
   setActiveUserId,
   getActiveUserId,
   broadcastUsersToCloud,
+  autoSettleAllPendingBets,
 } from "@/lib/userStore";
+import { getSynchronizedRoundState } from "@/lib/realtime";
 import { CARDS, getCardByIndex } from "@/lib/cards";
 
 interface UserAccountsViewProps {
@@ -83,6 +85,20 @@ export function UserAccountsView({
       setSelectedUserId(selectedUser.id);
     }
   }, [selectedUser?.id]);
+
+  // Periodic check to auto-settle any round bets that completed so "IN PLAY" never lags
+  useEffect(() => {
+    const checkSettlement = () => {
+      const sync = getSynchronizedRoundState();
+      const didSettle = autoSettleAllPendingBets(sync.roundNumber, sync.phase);
+      if (didSettle) {
+        onUsersChange();
+      }
+    };
+    checkSettlement();
+    const id = setInterval(checkSettlement, 1500);
+    return () => clearInterval(id);
+  }, [onUsersChange]);
 
   // Filtered users for search
   const filteredUsers = users.filter((u) => {
@@ -804,8 +820,24 @@ export function UserAccountsView({
                   </h3>
                 </div>
 
-                {/* Period Filter Tabs */}
-                <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-xl border border-border/60">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const sync = getSynchronizedRoundState();
+                      autoSettleAllPendingBets(sync.roundNumber, sync.phase);
+                      onUsersChange();
+                      showNotification("⚡ All live bets settled instantly!");
+                    }}
+                    className="px-2.5 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/40 text-[11px] font-black uppercase transition active:scale-95 flex items-center gap-1 cursor-pointer"
+                    title="Force instant settlement of finished rounds"
+                  >
+                    <span>⚡</span>
+                    <span>Instant Settle</span>
+                  </button>
+
+                  {/* Period Filter Tabs */}
+                  <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-xl border border-border/60">
                   <button
                     type="button"
                     onClick={() => setBetPeriodFilter("today")}
@@ -843,6 +875,7 @@ export function UserAccountsView({
                   </button>
                 </div>
               </div>
+            </div>
 
               {/* Period Performance Summary Strip */}
               <div className="rounded-xl border border-border/80 bg-background/80 p-2.5 flex flex-wrap items-center justify-between gap-3 text-xs">
