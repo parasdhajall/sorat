@@ -24,12 +24,16 @@ export function ThermalSlipModal({
     const paperWidth = ((typeof window !== "undefined" && localStorage.getItem("sorat_printer_width")) as any) || "58mm";
     setPrintStatus("Printing...");
     const res = await executeDirectPrint(ticket, paperWidth);
-    if (res.method === "direct_bluetooth") {
-      setPrintStatus("✓ Direct Slip Printed via Bluetooth!");
-    } else if (res.method === "rawbt") {
-      setPrintStatus("✓ Sent to Thermal Printer (RawBT)!");
+    if (res.success) {
+      if (res.method === "direct_bluetooth") {
+        setPrintStatus("✓ Direct Slip Printed via Bluetooth!");
+      } else if (res.method === "rawbt") {
+        setPrintStatus("✓ Sent to Thermal Printer (RawBT)!");
+      } else {
+        setPrintStatus(null);
+      }
     } else {
-      setPrintStatus(null);
+      setPrintStatus(res.message || "⚠️ Printer not connected. Connect Bluetooth printer in header.");
     }
   };
 

@@ -517,7 +517,20 @@ export function printViaRawBT(ticket: ThermalTicket, paperWidth: "58mm" | "80mm"
       binary += String.fromCharCode(rawBytes[i]);
     }
     const base64 = window.btoa(binary);
-    window.location.href = `rawbt:data:application/octet-stream;base64,${base64}`;
+    const rawbtUrl = `rawbt:data:application/octet-stream;base64,${base64}`;
+
+    // CRITICAL: NEVER navigate window.location.href to custom schemes in mobile web / WebView!
+    // If the RawBT app is not installed, window.location.href crashes the WebView with net::ERR_UNKNOWN_URL_SCHEME.
+    // Use an invisible iframe which safely attempts to trigger the app without breaking the current web page.
+    const iframe = document.createElement("iframe");
+    iframe.style.display = "none";
+    iframe.src = rawbtUrl;
+    document.body.appendChild(iframe);
+    setTimeout(() => {
+      try {
+        document.body.removeChild(iframe);
+      } catch {}
+    }, 2000);
     return true;
   } catch {
     return false;
@@ -527,21 +540,35 @@ export function printViaRawBT(ticket: ThermalTicket, paperWidth: "58mm" | "80mm"
 export async function executeDirectPrint(
   ticket: ThermalTicket,
   paperWidth: "58mm" | "80mm" = "58mm"
-): Promise<{ method: "direct_bluetooth" | "rawbt" | "system_print"; success: boolean }> {
+): Promise<{ method: "direct_bluetooth" | "rawbt" | "system_print"; success: boolean; message?: string }> {
+  // 1. Direct Web Bluetooth or Native Android Bridge
   if (printerManager.isConnected()) {
     const res = await printerManager.print(ticket, paperWidth);
-    if (res.success) return { method: "direct_bluetooth", success: true };
+    if (res.success) {
+      return { method: "direct_bluetooth", success: true, message: "Receipt printed via Bluetooth!" };
+    }
+    // If Bluetooth print failed, return failure gracefully without crashing to rawbt
+    return { method: "direct_bluetooth", success: false, message: res.message || "Bluetooth print failed." };
   }
 
-  if (typeof navigator !== "undefined" && /android/i.test(navigator.userAgent || "")) {
+  // 2. ONLY if user explicitly enabled RawBT driver in settings
+  const useRawBt = typeof window !== "undefined" && localStorage.getItem("sorat_use_rawbt") === "true";
+  if (useRawBt && typeof navigator !== "undefined" && /android/i.test(navigator.userAgent || "")) {
     const rawOk = printViaRawBT(ticket, paperWidth);
-    if (rawOk) return { method: "rawbt", success: true };
+    if (rawOk) return { method: "rawbt", success: true, message: "Sent to RawBT printer." };
   }
 
-  if (typeof window !== "undefined") {
-    window.print();
-    return { method: "system_print", success: true };
+  // 3. System Print Dialog (Standard browser print preview)
+  if (!isAndroidNativeApp() && typeof window !== "undefined" && typeof window.print === "function") {
+    try {
+      window.print();
+      return { method: "system_print", success: true, message: "Opening System Print..." };
+    } catch {}
   }
 
-  return { method: "system_print", success: false };
+  return {
+    method: "system_print",
+    success: false,
+    message: "Printer not connected. Tap 'Connect Printer' in header to connect 58mm Bluetooth printer.",
+  };
 }

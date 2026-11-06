@@ -466,7 +466,11 @@ export default function AgentPage() {
     const autoPrint = typeof window !== "undefined" && localStorage.getItem("sorat_auto_print") !== "false";
 
     if (autoPrint && isDirectPrinterConnected()) {
-      executeDirectPrint(newTicket, paperWidth);
+      executeDirectPrint(newTicket, paperWidth).then((res) => {
+        if (!res.success) {
+          setShowSlipModal(true);
+        }
+      });
     } else {
       setShowSlipModal(true);
     }
