@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import {
   TVHostSync,
   DEFAULT_ROOM_ID,
+  sanitizeRoomId,
   GameMessage,
   getSynchronizedRoundState,
   calculateProfitGuaranteedWinner,
@@ -20,6 +21,7 @@ import {
 } from "@/lib/userStore";
 import { recordRoundWinnerHistory } from "@/lib/cards";
 import { settleTicketsForRound } from "@/lib/ticketStore";
+import { saveRecordedRoundWinner } from "@/lib/roundSettlement";
 import { declareSoratRoundRpc } from "@/lib/supabase";
 import kite from "@/assets/kite.jpg";
 import umbrella from "@/assets/umbrella.jpg";
@@ -77,6 +79,26 @@ export default function TvArenaPage() {
   const [phase, setPhase] = useState<Phase>(initialSync.phase);
   const [t, setT] = useState(initialSync.timeLeft);
 
+  // Room / Counter ID (Accepts ?room=agent_kalyan_01 or ?counter=agent_kalyan_01 or defaults to logged in agent)
+  const [activeRoomId, setActiveRoomId] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const sp = new URLSearchParams(window.location.search);
+      const r = sp.get("room") || sp.get("counter") || sp.get("agent");
+      if (r) return sanitizeRoomId(r);
+    }
+    const agent = getLoggedInAgent();
+    if (agent?.agentCode || agent?.username || agent?.id) {
+      return sanitizeRoomId(agent.agentCode || agent.username || agent.id);
+    }
+    return DEFAULT_ROOM_ID;
+  });
+
+  const hasUrlRoom = typeof window !== "undefined" && Boolean(
+    new URLSearchParams(window.location.search).get("room") ||
+    new URLSearchParams(window.location.search).get("counter") ||
+    new URLSearchParams(window.location.search).get("agent")
+  );
+
   // TV Agent Authentication State
   const [tvAgent, setTvAgent] = useState<UserAccount | null>(() => getLoggedInAgent());
   const [loginIdInput, setLoginIdInput] = useState("");
@@ -90,27 +112,31 @@ export default function TvArenaPage() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Financials for Guaranteed 30% Margin Engine
+  // Financials for Guaranteed 30%-35% Margin Engine (Isolated to this Room / Counter)
   const [totalTurnover, setTotalTurnover] = useState<number>(() => {
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("sorat_total_turnover");
+      const saved = localStorage.getItem(`sorat_total_turnover_${activeRoomId}`);
       if (saved) return Number(saved);
+      const legacy = localStorage.getItem("sorat_total_turnover");
+      if (legacy && activeRoomId === DEFAULT_ROOM_ID) return Number(legacy);
     }
     return 0;
   });
   const [totalPayouts, setTotalPayouts] = useState<number>(() => {
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("sorat_total_payouts");
+      const saved = localStorage.getItem(`sorat_total_payouts_${activeRoomId}`);
       if (saved) return Number(saved);
+      const legacy = localStorage.getItem("sorat_total_payouts");
+      if (legacy && activeRoomId === DEFAULT_ROOM_ID) return Number(legacy);
     }
     return 0;
   });
 
-  // Recent Winners History
+  // Recent Winners History (Room-scoped)
   const [resultsHistory, setResultsHistory] = useState<ResultHistoryItem[]>(() => {
     if (typeof window !== "undefined") {
       try {
-        const saved = localStorage.getItem("sorat_tv_results_history");
+        const saved = localStorage.getItem(`sorat_tv_results_history_${activeRoomId}`);
         if (saved) return JSON.parse(saved);
       } catch {}
     }
@@ -220,9 +246,9 @@ export default function TvArenaPage() {
     return () => window.removeEventListener("storage", handleStorage);
   }, []);
 
-  // Initialize TV Host Sync to receive live bets from Agent POS Mobile App
+  // Initialize TV Host Sync to receive live bets from Agent POS Mobile App (Scoped to activeRoomId)
   useEffect(() => {
-    const host = new TVHostSync(DEFAULT_ROOM_ID);
+    const host = new TVHostSync(activeRoomId);
     hostSyncRef.current = host;
 
     host.onMessage = (msg: GameMessage) => {
@@ -235,14 +261,26 @@ export default function TvArenaPage() {
           });
           return next;
         });
-        setTotalTurnover((t) => t + msg.totalAmount);
+        setTotalTurnover((t) => {
+          const next = t + msg.totalAmount;
+          if (typeof window !== "undefined") {
+            localStorage.setItem(`sorat_total_turnover_${activeRoomId}`, String(next));
+          }
+          return next;
+        });
         playBeep(720, 0.08, "sine");
       } else if (msg.type === "ADD_BET") {
         setBets((prev) => ({
           ...prev,
           [msg.card]: (prev[msg.card] ?? 0) + msg.amount,
         }));
-        setTotalTurnover((t) => t + msg.amount);
+        setTotalTurnover((t) => {
+          const next = t + msg.amount;
+          if (typeof window !== "undefined") {
+            localStorage.setItem(`sorat_total_turnover_${activeRoomId}`, String(next));
+          }
+          return next;
+        });
         playBeep(720, 0.08, "sine");
       } else if (msg.type === "FORCE_WINNER") {
         const card = msg.card !== undefined && msg.card !== null ? Number(msg.card) : null;
@@ -260,15 +298,15 @@ export default function TvArenaPage() {
         setTotalTurnover(0);
         setTotalPayouts(0);
         if (typeof window !== "undefined") {
-          localStorage.removeItem("sorat_total_turnover");
-          localStorage.removeItem("sorat_total_payouts");
+          localStorage.removeItem(`sorat_total_turnover_${activeRoomId}`);
+          localStorage.removeItem(`sorat_total_payouts_${activeRoomId}`);
         }
       }
     };
 
     host.connect();
     return () => host.destroy();
-  }, [soundEnabled]);
+  }, [activeRoomId, soundEnabled]);
 
   // Synchronized Clock Ticker
   useEffect(() => {
@@ -301,7 +339,7 @@ export default function TvArenaPage() {
     return () => clearInterval(id);
   }, [soundEnabled]);
 
-  // Determine Winner When Entering "select" Phase
+  // Determine Winner When Entering "select" Phase (Scoped strictly to this Counter / Room)
   useEffect(() => {
     if (phase === "select" && lastDecidedWinnerRoundRef.current !== roundNumber) {
       lastDecidedWinnerRoundRef.current = roundNumber;
@@ -318,13 +356,21 @@ export default function TvArenaPage() {
       setWinner(w);
 
       if (prize > 0) {
-        setTotalPayouts((p) => p + prize);
+        setTotalPayouts((p) => {
+          const next = p + prize;
+          if (typeof window !== "undefined") {
+            localStorage.setItem(`sorat_total_payouts_${activeRoomId}`, String(next));
+          }
+          return next;
+        });
       }
 
-      // Automatically settle all pending bets placed by agents/players for this round
+      // Automatically settle tickets and bets placed on this round & room
+      settleTicketsForRound(roundId, w, CARDS[w].name, activeRoomId);
       settleRoundBets(roundId, w, CARDS[w].name, false);
       autoSettleAllPendingBets(roundNumber, "select", w);
       recordRoundWinnerHistory(roundNumber, w);
+      saveRecordedRoundWinner(roundNumber, w, activeRoomId);
 
       // Persist round declaration in Supabase
       try {
@@ -332,7 +378,7 @@ export default function TvArenaPage() {
           roundId,
           winningCard: w,
           winningCardName: CARDS[w].name,
-          selectionReason: decision.reason,
+          selectionReason: `${decision.reason} [Counter: ${activeRoomId}]`,
         }).catch(() => {});
       } catch {}
 
@@ -347,12 +393,24 @@ export default function TvArenaPage() {
       setResultsHistory((prev) => {
         const next = [newHistItem, ...prev.slice(0, 11)];
         if (typeof window !== "undefined") {
-          localStorage.setItem("sorat_tv_results_history", JSON.stringify(next));
+          localStorage.setItem(`sorat_tv_results_history_${activeRoomId}`, JSON.stringify(next));
         }
         return next;
       });
 
-      // Broadcast to Agent Mobile POS Apps (early heads-up during spin)
+      // 1. Authoritative Winner Declaration broadcast via Supabase Realtime channel
+      hostSyncRef.current?.broadcast({
+        type: "WINNER_DECLARED",
+        roundNumber,
+        roundId,
+        winner: w,
+        winnerName: CARDS[w].name,
+        netPayout: prize,
+        reason: decision.reason,
+        roomId: activeRoomId,
+      });
+
+      // 2. Full State Sync to Agent Mobile POS Apps
       hostSyncRef.current?.broadcast({
         type: "SYNC_FROM_TV",
         roundNumber,
@@ -367,12 +425,13 @@ export default function TvArenaPage() {
         totalTurnover,
         totalPayouts: totalPayouts + prize,
         houseProfit: totalTurnover - (totalPayouts + prize),
-        profitPercentage: 30,
+        profitPercentage: 35,
+        roomId: activeRoomId,
       });
 
       playVictoryFanfare();
     }
-  }, [phase, roundNumber, bets, totalTurnover, totalPayouts, soundEnabled]);
+  }, [phase, roundNumber, bets, totalTurnover, totalPayouts, soundEnabled, activeRoomId]);
 
   // Broadcast again when entering "result" phase so all agents reveal winner simultaneously
   useEffect(() => {
@@ -391,10 +450,11 @@ export default function TvArenaPage() {
         totalTurnover,
         totalPayouts,
         houseProfit: totalTurnover - totalPayouts,
-        profitPercentage: 30,
+        profitPercentage: 35,
+        roomId: activeRoomId,
       });
     }
-  }, [phase, winner]);
+  }, [phase, winner, activeRoomId]);
 
   // High-Speed Selection Animation during "select" phase
   useEffect(() => {
@@ -426,16 +486,19 @@ export default function TvArenaPage() {
   };
 
   const handleTvLogout = () => {
-    if (confirm("Kya aap TV screen se agent logout karna chahte hain?")) {
+    if (confirm("Kya aap TV screen se counter disconnect karna chahte hain?")) {
       setLoggedInAgent(null);
       setTvAgent(null);
+      if (typeof window !== "undefined") {
+        window.location.href = "/tv";
+      }
     }
   };
 
   // =========================================================================
-  // SCREEN 1: TV AGENT LOGIN GATE (If TV is not connected to an agent)
+  // SCREEN 1: TV AGENT LOGIN GATE (If TV is not connected via URL or logged-in agent)
   // =========================================================================
-  if (!tvAgent) {
+  if (!tvAgent && !hasUrlRoom) {
     return (
       <main className="h-screen w-full bg-zinc-950 text-zinc-100 flex flex-col items-center justify-center p-4 relative overflow-hidden select-none">
         {/* Ambient Glow */}
@@ -614,12 +677,13 @@ export default function TvArenaPage() {
         {/* Right Info & Display Controls */}
         <div className="flex items-center gap-3">
           {/* Active Counter Badge */}
-          <div className="hidden md:flex flex-col text-right">
-            <span className="text-[9px] uppercase font-bold text-muted-foreground">
-              Connected Counter
+          <div className="hidden sm:flex flex-col text-right">
+            <span className="text-[9px] uppercase font-bold text-muted-foreground flex items-center justify-end gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Counter Room
             </span>
-            <span className="text-xs font-black text-primary truncate max-w-[140px]">
-              {tvAgent.displayName}
+            <span className="text-xs font-black text-primary font-mono truncate max-w-[160px]">
+              📡 {activeRoomId.toUpperCase()}
             </span>
           </div>
 

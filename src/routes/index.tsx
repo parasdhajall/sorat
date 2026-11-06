@@ -3,6 +3,7 @@ import { useEffect, useState, useRef, useMemo } from "react";
 import {
   AdminClientSync,
   DEFAULT_ROOM_ID,
+  sanitizeRoomId,
   GameMessage,
   getSynchronizedRoundState,
   getDeterministicRoundWinner,
@@ -85,6 +86,35 @@ export default function AgentPage() {
     const u = getLoggedInAgent() || getActiveUser();
     return u ? u.balance : 1000;
   });
+
+  // Room / Counter ID (Isolated profit and TV channel)
+  const [activeRoomId, setActiveRoomId] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const sp = new URLSearchParams(window.location.search);
+      const r = sp.get("room") || sp.get("counter");
+      if (r) return sanitizeRoomId(r);
+    }
+    const agent = getLoggedInAgent();
+    if (agent?.agentCode || agent?.username || agent?.id) {
+      return sanitizeRoomId(agent.agentCode || agent.username || agent.id);
+    }
+    return DEFAULT_ROOM_ID;
+  });
+
+  // Keep activeRoomId in sync when agent logs in/changes
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const sp = new URLSearchParams(window.location.search);
+      const r = sp.get("room") || sp.get("counter");
+      if (r) {
+        setActiveRoomId(sanitizeRoomId(r));
+        return;
+      }
+    }
+    if (agentUser?.agentCode || agentUser?.username || agentUser?.id) {
+      setActiveRoomId(sanitizeRoomId(agentUser.agentCode || agentUser.username || agentUser.id));
+    }
+  }, [agentUser?.id, agentUser?.username, agentUser?.agentCode]);
 
   // POS Booking State
   const [customerName, setCustomerName] = useState("");
@@ -199,19 +229,19 @@ export default function AgentPage() {
       if (sync.phase === "result" && lastSettledRoundRef.current !== sync.roundNumber) {
         lastSettledRoundRef.current = sync.roundNumber;
         const fallbackWinner =
-          declaredWinner ?? resolveProfitGuaranteedWinnerForRound(sync.roundNumber, sync.roundId);
+          declaredWinner ?? resolveProfitGuaranteedWinnerForRound(sync.roundNumber, sync.roundId, null, undefined, activeRoomId);
         if (declaredWinner === null) {
           setDeclaredWinner(fallbackWinner);
         }
         recordRoundWinnerHistory(sync.roundNumber, fallbackWinner);
-        settleTicketsForRound(sync.roundId, fallbackWinner, CARDS[fallbackWinner]?.name || "");
+        settleTicketsForRound(sync.roundId, fallbackWinner, CARDS[fallbackWinner]?.name || "", activeRoomId);
         settleRoundBets(sync.roundId, fallbackWinner, CARDS[fallbackWinner]?.name || "", false);
         autoSettleAllPendingBets(sync.roundNumber, sync.phase, fallbackWinner);
         refreshAgentTickets();
       }
     }, 250);
     return () => clearInterval(id);
-  }, [declaredWinner]);
+  }, [declaredWinner, activeRoomId]);
 
   // Sync Storage
   useEffect(() => {
@@ -254,13 +284,20 @@ export default function AgentPage() {
     return () => unsub();
   }, []);
 
-  // Realtime Sync with TV Screen
+  // Realtime Sync with TV Screen (Counter-Isolated via activeRoomId)
   useEffect(() => {
-    const client = new AdminClientSync(DEFAULT_ROOM_ID);
+    const client = new AdminClientSync(activeRoomId);
     clientSyncRef.current = client;
 
     client.onMessage = (msg: GameMessage) => {
-      if (msg.type === "SYNC_FROM_TV") {
+      if (msg.type === "WINNER_DECLARED") {
+        setDeclaredWinner(msg.winner);
+        recordRoundWinnerHistory(msg.roundNumber, msg.winner);
+        settleTicketsForRound(msg.roundId, msg.winner, msg.winnerName, activeRoomId);
+        settleRoundBets(msg.roundId, msg.winner, msg.winnerName, false);
+        autoSettleAllPendingBets(msg.roundNumber, "select", msg.winner);
+        refreshAgentTickets();
+      } else if (msg.type === "SYNC_FROM_TV") {
         setRoundNumber(msg.roundNumber);
         setRoundId(msg.roundId);
         setPhase(msg.phase);
@@ -269,7 +306,7 @@ export default function AgentPage() {
         if (msg.winner !== null && msg.winner >= 0 && msg.winner < 12) {
           setDeclaredWinner(msg.winner);
           recordRoundWinnerHistory(msg.roundNumber, msg.winner);
-          settleTicketsForRound(msg.roundId, msg.winner, CARDS[msg.winner]?.name || "");
+          settleTicketsForRound(msg.roundId, msg.winner, CARDS[msg.winner]?.name || "", activeRoomId);
           settleRoundBets(msg.roundId, msg.winner, CARDS[msg.winner]?.name || "", false);
           autoSettleAllPendingBets(msg.roundNumber, msg.phase, msg.winner);
           refreshAgentTickets();
@@ -285,7 +322,7 @@ export default function AgentPage() {
 
     client.connect();
     return () => client.destroy();
-  }, []);
+  }, [activeRoomId]);
 
   const totalTicketStake = Object.values(selectedCards).reduce((a, b) => a + b, 0);
   const isBalanceEnough = agentBalance >= totalTicketStake;
@@ -352,7 +389,7 @@ export default function AgentPage() {
     setAgentBalance(deductRes.newBalance);
     setAgentUser((prev) => ({ ...prev, balance: deductRes.newBalance }));
 
-    // 4. Create Ticket
+    // 4. Create Ticket (Isolated to Counter Room)
     const newTicket = createTicket({
       roundId,
       roundNumber,
@@ -360,16 +397,18 @@ export default function AgentPage() {
       agentName: agentUser.displayName || "Counter Kiosk",
       agentId: agentUser.id,
       username: agentUser.username,
+      roomId: activeRoomId,
       items,
     });
 
-    // 5. Send single ATOMIC bet packet to TV Screen
+    // 5. Send single ATOMIC bet packet to TV Screen for this Counter Room
     clientSyncRef.current?.send({
       type: "ADD_TICKET_BETS",
       bets: { ...selectedCards },
       totalAmount: totalTicketStake,
       agentName: agentUser.displayName,
       roundId,
+      roomId: activeRoomId,
     });
 
     // Refresh tickets & clear staged selection (scoped to current agent)
@@ -809,17 +848,35 @@ export default function AgentPage() {
             </span>
 
             <a
-              href="/tv"
+              href={`/tv?room=${activeRoomId}`}
               target="_blank"
               rel="noreferrer"
-              className="p-1 rounded-lg bg-muted text-muted-foreground hover:text-foreground text-xs"
-              title="Open TV Arena"
+              className="p-1 rounded-lg bg-muted text-muted-foreground hover:text-foreground text-xs font-bold flex items-center gap-1"
+              title={`Open TV Arena Display for Room ${activeRoomId}`}
             >
-              📺
+              <span>📺</span>
+              <span className="text-[10px] hidden sm:inline">TV</span>
             </a>
 
             <PrinterStatusBadge showTextOnMobile={true} />
           </div>
+        </div>
+
+        {/* Room / Counter Live Sync Status Bar */}
+        <div className="flex items-center justify-between rounded-lg bg-muted/40 border border-border/60 px-2.5 py-1 text-[10px]">
+          <div className="flex items-center gap-1.5 font-mono">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-muted-foreground uppercase font-bold">Room:</span>
+            <span className="text-primary font-black uppercase tracking-wider">{activeRoomId}</span>
+          </div>
+          <a
+            href={`/tv?room=${activeRoomId}`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-[10px] text-primary hover:underline font-bold flex items-center gap-1"
+          >
+            <span>📺 Open Room TV ↗</span>
+          </a>
         </div>
 
         {/* Counter Balance Status Card */}

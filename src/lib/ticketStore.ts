@@ -20,6 +20,7 @@ export interface ThermalTicket {
   agentName: string;
   agentId?: string;
   username?: string;
+  roomId?: string; // Room / Counter Isolation
   items: BetItem[];
   totalAmount: number;
   status: "ACTIVE" | "WON" | "LOST" | "CLAIMED";
@@ -94,10 +95,12 @@ export function getTickets(agentId?: string): ThermalTicket[] {
   return all.filter((t) => {
     const tAgentId = (t.agentId || "").toLowerCase().trim();
     const tUsername = (t.username || "").toLowerCase().replace(/^@/, "").trim();
+    const tRoomId = (t.roomId || "").toLowerCase().trim();
 
     return (
       (tAgentId !== "" && tAgentId === cleanAgent) ||
-      (tUsername !== "" && tUsername === cleanAgent)
+      (tUsername !== "" && tUsername === cleanAgent) ||
+      (tRoomId !== "" && tRoomId === cleanAgent)
     );
   });
 }
@@ -129,8 +132,9 @@ export function clearTickets(agentId?: string): void {
   const remaining = all.filter((t) => {
     const tAgentId = (t.agentId || "").toLowerCase().trim();
     const tUsername = (t.username || "").toLowerCase().replace(/^@/, "").trim();
+    const tRoomId = (t.roomId || "").toLowerCase().trim();
 
-    return tAgentId !== cleanAgent && tUsername !== cleanAgent;
+    return tAgentId !== cleanAgent && tUsername !== cleanAgent && tRoomId !== cleanAgent;
   });
   saveTickets(remaining);
 }
@@ -145,6 +149,7 @@ export function createTicket(data: {
   agentName?: string;
   agentId?: string;
   username?: string;
+  roomId?: string;
   items: BetItem[];
 }): ThermalTicket {
   const now = Date.now();
@@ -166,6 +171,10 @@ export function createTicket(data: {
     .toLowerCase()
     .replace(/^@/, "")
     .trim();
+  const cleanRoomId = (data.roomId || data.agentId || data.username || "sorat_main")
+    .toLowerCase()
+    .replace(/^@/, "")
+    .trim();
 
   const newTicket: ThermalTicket = {
     ticketId,
@@ -179,6 +188,7 @@ export function createTicket(data: {
     agentName: data.agentName || "Kiosk Agent",
     agentId: cleanAgentId,
     username: cleanUsername,
+    roomId: cleanRoomId,
     items: data.items,
     totalAmount,
     status: "ACTIVE",
@@ -199,14 +209,23 @@ export function createTicket(data: {
 export function settleTicketsForRound(
   roundId: string,
   winningCardIndex: number,
-  winningCardName: string
+  winningCardName: string,
+  roomId?: string
 ): void {
-  const tickets = getTickets();
+  const tickets = getTickets("all");
   let changed = false;
+  const cleanRoom = roomId ? roomId.toLowerCase().replace(/^@/, "").trim() : "";
 
   for (let i = 0; i < tickets.length; i++) {
     const t = tickets[i];
-    if (t.roundId === roundId && t.status === "ACTIVE") {
+    const isMatchingRound = t.roundId === roundId;
+    const isMatchingRoom =
+      !cleanRoom ||
+      (t.roomId && t.roomId.toLowerCase() === cleanRoom) ||
+      (t.agentId && t.agentId.toLowerCase() === cleanRoom) ||
+      (t.username && t.username.toLowerCase() === cleanRoom);
+
+    if (isMatchingRound && isMatchingRoom && t.status === "ACTIVE") {
       changed = true;
       const winningItem = t.items.find((item) => item.cardIndex === winningCardIndex);
       const isWin = Boolean(winningItem && winningItem.amount > 0);

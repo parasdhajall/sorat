@@ -1,3 +1,5 @@
+import { getSupabaseClient } from "./supabase";
+
 export const BET_DURATION = 50; // 50s for bets
 export const SELECT_DURATION = 5; // 5s for card spin
 export const RESULT_DURATION = 5; // 5s for winner reveal
@@ -186,20 +188,30 @@ export function getDeterministicRoundWinner(roundNumber: number): number {
 }
 
 export type GameMessage =
-  | { type: "ADD_BET"; card: number; amount: number }
-  | { type: "ADD_TICKET_BETS"; bets: Record<number, number>; totalAmount: number; agentName?: string; roundId: string }
-  | { type: "SUB_BET"; card: number; amount: number }
-  | { type: "CLEAR_CARD"; card: number }
-  | { type: "CLEAR_ALL_BETS" }
-  | { type: "FORCE_WINNER"; card: number | null }
-  | { type: "TRIGGER_SPIN" }
-  | { type: "RESET_ROUND" }
-  | { type: "RECHARGE_AGENT"; amount: number }
-  | { type: "SET_AGENT_BALANCE"; balance: number }
-  | { type: "RESET_FINANCIALS" }
-  | { type: "USER_DEPOSIT"; userId: string; amount: number; note?: string }
-  | { type: "SWITCH_ACTIVE_USER"; userId: string }
-  | { type: "SYNC_USERS" }
+  | { type: "ADD_BET"; card: number; amount: number; roomId?: string }
+  | { type: "ADD_TICKET_BETS"; bets: Record<number, number>; totalAmount: number; agentName?: string; roundId: string; roomId?: string }
+  | { type: "SUB_BET"; card: number; amount: number; roomId?: string }
+  | { type: "CLEAR_CARD"; card: number; roomId?: string }
+  | { type: "CLEAR_ALL_BETS"; roomId?: string }
+  | { type: "FORCE_WINNER"; card: number | null; roomId?: string }
+  | { type: "TRIGGER_SPIN"; roomId?: string }
+  | { type: "RESET_ROUND"; roomId?: string }
+  | { type: "RECHARGE_AGENT"; amount: number; roomId?: string }
+  | { type: "SET_AGENT_BALANCE"; balance: number; roomId?: string }
+  | { type: "RESET_FINANCIALS"; roomId?: string }
+  | { type: "USER_DEPOSIT"; userId: string; amount: number; note?: string; roomId?: string }
+  | { type: "SWITCH_ACTIVE_USER"; userId: string; roomId?: string }
+  | { type: "SYNC_USERS"; roomId?: string }
+  | {
+      type: "WINNER_DECLARED";
+      roundNumber: number;
+      roundId: string;
+      winner: number;
+      winnerName: string;
+      netPayout: number;
+      reason: string;
+      roomId: string;
+    }
   | {
       type: "SYNC_FROM_TV";
       roundNumber: number;
@@ -215,14 +227,30 @@ export type GameMessage =
       totalPayouts: number;
       houseProfit: number;
       profitPercentage: number;
+      roomId?: string;
     };
 
-export const DEFAULT_ROOM_ID = "sorat-arena-88";
-export const NTFY_TOPIC = "sorat_arena_live_v2_99";
+export const DEFAULT_ROOM_ID = "sorat_main";
 
-// TV Host Connection Class (Powered by High-Reliability ntfy.sh SSE + Local Broadcast)
+/**
+ * Sanitizes room/counter identifiers (e.g. "@agent1" -> "agent1", lowercase, safe characters).
+ */
+export function sanitizeRoomId(roomId?: string): string {
+  if (!roomId) return DEFAULT_ROOM_ID;
+  const clean = roomId
+    .toString()
+    .toLowerCase()
+    .replace(/^@/, "")
+    .replace(/[^a-z0-9_-]/g, "_")
+    .trim();
+  return clean || DEFAULT_ROOM_ID;
+}
+
+// TV Host Connection Class (Powered by Supabase Realtime Channels + Local Broadcast + Cloud Fallback)
 export class TVHostSync {
+  public roomId: string;
   private broadcastChannel: BroadcastChannel | null = null;
+  private supabaseChannel: any = null;
   private sse: EventSource | null = null;
   private pollInterval: any = null;
   private isDestroyed = false;
@@ -230,7 +258,8 @@ export class TVHostSync {
   public onMessage: (msg: GameMessage) => void = () => {};
   public onStatusChange: (status: "connecting" | "connected" | "waiting" | "disconnected", peerId?: string) => void = () => {};
 
-  constructor(public roomId = DEFAULT_ROOM_ID) {
+  constructor(roomId: string = DEFAULT_ROOM_ID) {
+    this.roomId = sanitizeRoomId(roomId);
     this.setupLocalChannels();
   }
 
@@ -270,10 +299,38 @@ export class TVHostSync {
     this.isDestroyed = false;
     this.onStatusChange("connected");
 
-    // 1. Instant Cloud Server-Sent Events (SSE) Stream
+    // 1. Primary: Supabase Realtime WebSocket Broadcast Channel (Sub-50ms latency across networks)
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        this.supabaseChannel = supabase.channel(`sorat_room_${this.roomId}`, {
+          config: { broadcast: { ack: false, self: false } },
+        });
+
+        this.supabaseChannel
+          .on("broadcast", { event: "GAME_MESSAGE" }, (payload: any) => {
+            if (this.isDestroyed) return;
+            const wire = payload.payload;
+            if (wire && wire._from === "admin" && wire.payload) {
+              this.onStatusChange("connected");
+              this.onMessage(wire.payload);
+            }
+          })
+          .subscribe((status: string) => {
+            if (status === "SUBSCRIBED") {
+              this.onStatusChange("connected");
+            }
+          });
+      } catch (err) {
+        console.warn("TVHostSync: Supabase channel connection fallback to local/cloud:", err);
+      }
+    }
+
+    // 2. Secondary Cloud Fallback: Room-Scoped Server-Sent Events (SSE) Stream
+    const ntfyRoomTopic = `sorat_room_${this.roomId}`;
     if (typeof window !== "undefined" && "EventSource" in window) {
       try {
-        this.sse = new EventSource(`https://ntfy.sh/${NTFY_TOPIC}/sse`);
+        this.sse = new EventSource(`https://ntfy.sh/${ntfyRoomTopic}/sse`);
         this.sse.onopen = () => {
           this.onStatusChange("connected");
         };
@@ -283,7 +340,7 @@ export class TVHostSync {
             const ntfyMsg = JSON.parse(event.data);
             if (ntfyMsg.event === "message" && ntfyMsg.message) {
               const wire = JSON.parse(ntfyMsg.message);
-              if (wire && wire._from === "admin") {
+              if (wire && wire._from === "admin" && wire.payload) {
                 this.onStatusChange("connected");
                 this.onMessage(wire.payload);
               }
@@ -293,11 +350,11 @@ export class TVHostSync {
       } catch {}
     }
 
-    // 2. Initial state polling to recover any past commands
+    // 3. Initial state polling to recover past commands
     const pollRecent = async () => {
       if (this.isDestroyed) return;
       try {
-        const res = await fetch(`https://ntfy.sh/${NTFY_TOPIC}/json?poll=1&since=all`);
+        const res = await fetch(`https://ntfy.sh/${ntfyRoomTopic}/json?poll=1&since=all`);
         if (res.ok) {
           const text = await res.text();
           const lines = text.trim().split("\n");
@@ -306,7 +363,7 @@ export class TVHostSync {
               const item = JSON.parse(lines[i]);
               if (item.event === "message" && item.message) {
                 const wire = JSON.parse(item.message);
-                if (wire && wire._from === "admin") {
+                if (wire && wire._from === "admin" && wire.payload) {
                   this.onStatusChange("connected");
                   this.onMessage(wire.payload);
                   break;
@@ -327,20 +384,33 @@ export class TVHostSync {
 
     const wire = {
       _from: "tv",
+      roomId: this.roomId,
       payload: msg,
       time: Date.now(),
     };
 
+    // 1. Send via Supabase Realtime Channel
+    try {
+      this.supabaseChannel?.send({
+        type: "broadcast",
+        event: "GAME_MESSAGE",
+        payload: wire,
+      });
+    } catch {}
+
+    // 2. Send via Local BroadcastChannel
     try {
       this.broadcastChannel?.postMessage(wire);
     } catch {}
 
+    // 3. Save to localStorage for cross-tab sync
     try {
       localStorage.setItem(`sorat_tv_msg_${this.roomId}`, JSON.stringify(wire));
     } catch {}
 
-    // Broadcast state to Cloud channel
-    fetch(`https://ntfy.sh/${NTFY_TOPIC}`, {
+    // 4. Room-isolated cloud channel fallback
+    const ntfyRoomTopic = `sorat_room_${this.roomId}`;
+    fetch(`https://ntfy.sh/${ntfyRoomTopic}`, {
       method: "POST",
       body: JSON.stringify(wire),
     }).catch(() => {});
@@ -349,6 +419,15 @@ export class TVHostSync {
   destroy() {
     this.isDestroyed = true;
     clearInterval(this.pollInterval);
+
+    try {
+      if (this.supabaseChannel) {
+        const supabase = getSupabaseClient();
+        supabase?.removeChannel(this.supabaseChannel);
+        this.supabaseChannel = null;
+      }
+    } catch {}
+
     try {
       this.sse?.close();
       this.broadcastChannel?.close();
@@ -356,9 +435,11 @@ export class TVHostSync {
   }
 }
 
-// Admin / Phone Client Connection Class (Powered by High-Reliability ntfy.sh SSE + Local Broadcast)
+// Admin / Phone Client Connection Class (Powered by Supabase Realtime Channels + Local Broadcast + Cloud Fallback)
 export class AdminClientSync {
+  public roomId: string;
   private broadcastChannel: BroadcastChannel | null = null;
+  private supabaseChannel: any = null;
   private sse: EventSource | null = null;
   private pollInterval: any = null;
   private isDestroyed = false;
@@ -366,7 +447,8 @@ export class AdminClientSync {
   public onMessage: (msg: GameMessage) => void = () => {};
   public onStatusChange: (status: "connecting" | "connected" | "disconnected" | "error") => void = () => {};
 
-  constructor(public roomId = DEFAULT_ROOM_ID) {
+  constructor(roomId: string = DEFAULT_ROOM_ID) {
+    this.roomId = sanitizeRoomId(roomId);
     this.setupLocalChannels();
   }
 
@@ -405,10 +487,38 @@ export class AdminClientSync {
     this.isDestroyed = false;
     this.onStatusChange("connected");
 
-    // 1. Instant Cloud Server-Sent Events (SSE) Stream
+    // 1. Primary: Supabase Realtime WebSocket Broadcast Channel
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        this.supabaseChannel = supabase.channel(`sorat_room_${this.roomId}`, {
+          config: { broadcast: { ack: false, self: false } },
+        });
+
+        this.supabaseChannel
+          .on("broadcast", { event: "GAME_MESSAGE" }, (payload: any) => {
+            if (this.isDestroyed) return;
+            const wire = payload.payload;
+            if (wire && wire.payload) {
+              this.onStatusChange("connected");
+              this.onMessage(wire.payload);
+            }
+          })
+          .subscribe((status: string) => {
+            if (status === "SUBSCRIBED") {
+              this.onStatusChange("connected");
+            }
+          });
+      } catch (err) {
+        console.warn("AdminClientSync: Supabase channel connection fallback to local/cloud:", err);
+      }
+    }
+
+    // 2. Secondary Cloud Fallback: Room-Scoped Server-Sent Events (SSE) Stream
+    const ntfyRoomTopic = `sorat_room_${this.roomId}`;
     if (typeof window !== "undefined" && "EventSource" in window) {
       try {
-        this.sse = new EventSource(`https://ntfy.sh/${NTFY_TOPIC}/sse`);
+        this.sse = new EventSource(`https://ntfy.sh/${ntfyRoomTopic}/sse`);
         this.sse.onopen = () => {
           this.onStatusChange("connected");
         };
@@ -428,11 +538,11 @@ export class AdminClientSync {
       } catch {}
     }
 
-    // 2. Initial state poll to get latest TV state
+    // 3. Initial state poll to get latest TV state
     const pollRecent = async () => {
       if (this.isDestroyed) return;
       try {
-        const res = await fetch(`https://ntfy.sh/${NTFY_TOPIC}/json?poll=1&since=all`);
+        const res = await fetch(`https://ntfy.sh/${ntfyRoomTopic}/json?poll=1&since=all`);
         if (res.ok) {
           const text = await res.text();
           const lines = text.trim().split("\n");
@@ -441,7 +551,7 @@ export class AdminClientSync {
               const item = JSON.parse(lines[i]);
               if (item.event === "message" && item.message) {
                 const wire = JSON.parse(item.message);
-                if (wire && wire._from === "tv" && wire.payload?.type === "SYNC_FROM_TV") {
+                if (wire && (wire._from === "tv" || wire._from === "admin") && wire.payload) {
                   this.onStatusChange("connected");
                   this.onMessage(wire.payload);
                   break;
@@ -462,20 +572,33 @@ export class AdminClientSync {
 
     const wire = {
       _from: "admin",
+      roomId: this.roomId,
       payload: msg,
       time: Date.now(),
     };
 
+    // 1. Send via Supabase Realtime Channel
+    try {
+      this.supabaseChannel?.send({
+        type: "broadcast",
+        event: "GAME_MESSAGE",
+        payload: wire,
+      });
+    } catch {}
+
+    // 2. Send via Local BroadcastChannel
     try {
       this.broadcastChannel?.postMessage(wire);
     } catch {}
 
+    // 3. Save to localStorage for cross-tab sync
     try {
       localStorage.setItem(`sorat_admin_msg_${this.roomId}`, JSON.stringify(wire));
     } catch {}
 
-    // Push action to Cloud channel
-    fetch(`https://ntfy.sh/${NTFY_TOPIC}`, {
+    // 4. Room-isolated cloud channel fallback
+    const ntfyRoomTopic = `sorat_room_${this.roomId}`;
+    fetch(`https://ntfy.sh/${ntfyRoomTopic}`, {
       method: "POST",
       body: JSON.stringify(wire),
     }).catch(() => {});
@@ -484,6 +607,15 @@ export class AdminClientSync {
   destroy() {
     this.isDestroyed = true;
     clearInterval(this.pollInterval);
+
+    try {
+      if (this.supabaseChannel) {
+        const supabase = getSupabaseClient();
+        supabase?.removeChannel(this.supabaseChannel);
+        this.supabaseChannel = null;
+      }
+    } catch {}
+
     try {
       this.sse?.close();
       this.broadcastChannel?.close();
