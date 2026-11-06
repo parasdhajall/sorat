@@ -574,6 +574,28 @@ export async function declareSoratRoundRpc(params: {
       _selection_reason: params.selectionReason || "30_PERCENT_PROFIT_LOCK",
     });
 
+    // Enforce strict 9X payout directly in sorat_bets to prevent any 10X discrepancy
+    try {
+      const { data: roundBets } = await client
+        .from("sorat_bets")
+        .select("id, card_index, amount")
+        .eq("round_id", params.roundId);
+
+      if (roundBets && roundBets.length > 0) {
+        for (const b of roundBets) {
+          const isWin = Number(b.card_index) === params.winningCard;
+          const status = isWin ? "won" : "lost";
+          const payout = isWin ? Number(b.amount || 0) * 9 : 0;
+          await client
+            .from("sorat_bets")
+            .update({ status, payout })
+            .eq("id", b.id);
+        }
+      }
+    } catch (dbErr) {
+      console.warn("Direct 9X payout update warning:", dbErr);
+    }
+
     if (error) return { success: false, error: error.message };
     return { success: true, data };
   } catch (e: any) {
@@ -704,8 +726,9 @@ export async function toggleCounterKillSwitchRpc(
 
 export interface AgentDailyCloudSummary {
   sales: number;
-  claimsPaid: number;
+  claimsPaid: number; // Total won payouts (वाटप) - strictly 9X (1 ka 9)
   unclaimedWon: number;
+  totalWonPayouts: number;
   commission10: number;
   netCashToCollect: number;
   ticketsCount: number;
@@ -765,6 +788,7 @@ export async function fetchAgentDailyTicketsAndBets(
           sales: 0,
           claimsPaid: 0,
           unclaimedWon: 0,
+          totalWonPayouts: 0,
           commission10: 0,
           netCashToCollect: 0,
           ticketsCount: 0,
@@ -809,12 +833,21 @@ export async function fetchAgentDailyTicketsAndBets(
         amount: Number(b.amount || 0),
       }));
       const totalAmount = items.reduce((s, it) => s + it.amount, 0);
-      const totalPayout = tBets.reduce((s, b) => s + Number(b.payout || 0), 0);
+
+      // STRICT 9X PAYOUT (1 ka 9): Any winning bet gets amount * 9. Never 10X!
+      const totalPayout = tBets.reduce((s, b) => {
+        const isWin = b.status === "won" || b.status === "claimed" || (b.payout && Number(b.payout) > 0);
+        if (isWin) {
+          const strictPayout = Number(b.amount || 0) * 9;
+          return s + (strictPayout > 0 ? strictPayout : Number(b.payout || 0));
+        }
+        return s;
+      }, 0);
 
       totalSales += totalAmount;
 
       const hasClaimed = tBets.some((b) => b.status === "claimed" || b.claimed_at);
-      const hasWon = tBets.some((b) => b.status === "won" || (b.payout && b.payout > 0));
+      const hasWon = tBets.some((b) => b.status === "won" || (b.payout && Number(b.payout) > 0));
 
       let ticketStatus: "ACTIVE" | "WON" | "LOST" | "CLAIMED" = "LOST";
       if (hasClaimed) {
@@ -822,8 +855,6 @@ export async function fetchAgentDailyTicketsAndBets(
         totalClaimsPaid += totalPayout;
       } else if (hasWon) {
         ticketStatus = "WON";
-        // In physical counter operations, won tickets represent customer payouts from drawer
-        totalClaimsPaid += totalPayout;
         totalUnclaimedWon += totalPayout;
       } else if (tBets.some((b) => b.status === "pending")) {
         ticketStatus = "ACTIVE";
@@ -850,15 +881,17 @@ export async function fetchAgentDailyTicketsAndBets(
       });
     }
 
+    const totalWonPayouts = totalClaimsPaid + totalUnclaimedWon;
     const commission10 = Math.round(totalSales * 0.10);
-    const netCashToCollect = totalSales - totalClaimsPaid - commission10;
+    const netCashToCollect = totalSales - totalWonPayouts - commission10;
 
     return {
       success: true,
       data: {
         sales: totalSales,
-        claimsPaid: totalClaimsPaid,
+        claimsPaid: totalWonPayouts, // In physical counter operations, this represents all winning payouts (Claims Paid / वाटप)
         unclaimedWon: totalUnclaimedWon,
+        totalWonPayouts,
         commission10,
         netCashToCollect,
         ticketsCount: reconstructedTickets.length,

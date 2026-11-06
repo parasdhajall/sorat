@@ -854,11 +854,14 @@ export function UserAccountsView({
 
               {/* Card 3: HOUSE GROSS PROFIT */}
               {(() => {
-                const effectiveBetAmount = Math.max(profitStats.totalBetAmount, cloudDailySummary?.sales || 0);
-                const effectiveWonAmount = Math.max(
-                  profitStats.totalWonAmount,
-                  (cloudDailySummary?.claimsPaid || 0) + (cloudDailySummary?.unclaimedWon || 0)
-                );
+                const effectiveBetAmount =
+                  cloudDailySummary && cloudDailySummary.sales > 0
+                    ? cloudDailySummary.sales
+                    : profitStats.totalBetAmount;
+                const effectiveWonAmount =
+                  cloudDailySummary && (cloudDailySummary.sales > 0 || cloudDailySummary.claimsPaid > 0)
+                    ? cloudDailySummary.claimsPaid
+                    : profitStats.totalWonAmount;
                 const houseProfit = effectiveBetAmount - effectiveWonAmount;
                 const isHouseGreen = houseProfit >= 0;
                 return (
@@ -1155,7 +1158,7 @@ export function UserAccountsView({
                     <span className="font-bold text-foreground">
                       ₹
                       {betPeriodFilter === "today"
-                        ? profitStats.todayBetAmount
+                        ? (cloudDailySummary && cloudDailySummary.sales > 0 ? cloudDailySummary.sales : profitStats.todayBetAmount)
                         : betPeriodFilter === "yesterday"
                         ? profitStats.yesterdayBetAmount
                         : profitStats.totalBetAmount}
@@ -1167,7 +1170,7 @@ export function UserAccountsView({
                     <span className="font-bold text-emerald-400">
                       ₹
                       {betPeriodFilter === "today"
-                        ? profitStats.todayWonAmount
+                        ? (cloudDailySummary && (cloudDailySummary.sales > 0 || cloudDailySummary.claimsPaid > 0) ? cloudDailySummary.claimsPaid : profitStats.todayWonAmount)
                         : betPeriodFilter === "yesterday"
                         ? profitStats.yesterdayWonAmount
                         : profitStats.totalWonAmount}
@@ -1179,13 +1182,13 @@ export function UserAccountsView({
                     {(() => {
                       const totalBet =
                         betPeriodFilter === "today"
-                          ? profitStats.todayBetAmount
+                          ? (cloudDailySummary && cloudDailySummary.sales > 0 ? cloudDailySummary.sales : profitStats.todayBetAmount)
                           : betPeriodFilter === "yesterday"
                           ? profitStats.yesterdayBetAmount
                           : profitStats.totalBetAmount;
                       const totalWon =
                         betPeriodFilter === "today"
-                          ? profitStats.todayWonAmount
+                          ? (cloudDailySummary && (cloudDailySummary.sales > 0 || cloudDailySummary.claimsPaid > 0) ? cloudDailySummary.claimsPaid : profitStats.todayWonAmount)
                           : betPeriodFilter === "yesterday"
                           ? profitStats.yesterdayWonAmount
                           : profitStats.totalWonAmount;

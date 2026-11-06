@@ -227,7 +227,7 @@ function createInitialSeedUsers(): UserAccount[] {
           stake: 50,
           winningCardIndex: 0,
           winningCardName: CARD_NAMES[0],
-          payout: 500,
+          payout: 450,
           isWin: true,
           status: "SETTLED",
         },
@@ -259,7 +259,7 @@ function createInitialSeedUsers(): UserAccount[] {
           stake: 50,
           winningCardIndex: 11,
           winningCardName: CARD_NAMES[11],
-          payout: 500,
+          payout: 450,
           isWin: true,
           status: "SETTLED",
         },
@@ -276,7 +276,7 @@ function createInitialSeedUsers(): UserAccount[] {
           stake: 100,
           winningCardIndex: 4,
           winningCardName: CARD_NAMES[4],
-          payout: 1000,
+          payout: 900,
           isWin: true,
           status: "SETTLED",
         },
@@ -367,7 +367,7 @@ function createInitialSeedUsers(): UserAccount[] {
           stake: 50,
           winningCardIndex: 1,
           winningCardName: CARD_NAMES[1],
-          payout: 500,
+          payout: 450,
           isWin: true,
           status: "SETTLED",
         },
@@ -410,7 +410,7 @@ function createInitialSeedUsers(): UserAccount[] {
           stake: 200,
           winningCardIndex: 5,
           winningCardName: CARD_NAMES[5],
-          payout: 2000,
+          payout: 1800,
           isWin: true,
           status: "SETTLED",
         },
@@ -880,7 +880,9 @@ export async function pullUsersFromCloud(): Promise<UserAccount[]> {
                 stake: Number(b.amount || 0),
                 winningCardIndex: b.winning_card_index ?? undefined,
                 winningCardName: b.winning_card_name ?? undefined,
-                payout: Number(b.payout || 0),
+                payout: (b.status === "won" || b.status === "claimed" || Boolean(b.is_win))
+                  ? Math.min(Number(b.payout || 0) > 0 ? Number(b.payout) : Number(b.amount || 0) * PAYOUT_MULTIPLIER, Number(b.amount || 0) * PAYOUT_MULTIPLIER)
+                  : 0,
                 isWin: b.status === "won" || b.status === "claimed" || Boolean(b.is_win),
                 status: (b.status === "won" || b.status === "claimed" || b.status === "lost") ? "SETTLED" as const : "PENDING" as const,
               }));
@@ -931,7 +933,9 @@ export async function pullUsersFromCloud(): Promise<UserAccount[]> {
                 stake: Number(b.amount || 0),
                 winningCardIndex: b.winning_card_index ?? undefined,
                 winningCardName: b.winning_card_name ?? undefined,
-                payout: Number(b.payout || 0),
+                payout: (b.status === "won" || b.status === "claimed" || Boolean(b.is_win))
+                  ? Math.min(Number(b.payout || 0) > 0 ? Number(b.payout) : Number(b.amount || 0) * PAYOUT_MULTIPLIER, Number(b.amount || 0) * PAYOUT_MULTIPLIER)
+                  : 0,
                 isWin: b.status === "won" || b.status === "claimed" || Boolean(b.is_win),
                 status: (b.status === "won" || b.status === "claimed" || b.status === "lost") ? "SETTLED" as const : "PENDING" as const,
               }));
@@ -1929,8 +1933,12 @@ export function getUserProfitStats(user: UserAccount): UserProfitStats {
   let yesterdayWonAmount = 0;
 
   for (const b of bets) {
+    const isWin = b.status === "SETTLED" ? Boolean(b.isWin) : (Number(b.payout || 0) > 0);
+    const maxPayout = Number(b.stake || 0) * PAYOUT_MULTIPLIER;
+    const effPayout = isWin ? (Number(b.payout || 0) > 0 ? Math.min(Number(b.payout), maxPayout) : maxPayout) : 0;
+
     totalBetAmount += b.stake;
-    totalWonAmount += b.payout || 0;
+    totalWonAmount += effPayout;
 
     if (b.status === "SETTLED") {
       if (b.isWin) winCount++;
@@ -1940,11 +1948,11 @@ export function getUserProfitStats(user: UserAccount): UserProfitStats {
     if (b.dateStr === todayStr) {
       todayBetsCount++;
       todayBetAmount += b.stake;
-      todayWonAmount += b.payout || 0;
+      todayWonAmount += effPayout;
     } else if (b.dateStr === yesterdayStr) {
       yesterdayBetsCount++;
       yesterdayBetAmount += b.stake;
-      yesterdayWonAmount += b.payout || 0;
+      yesterdayWonAmount += effPayout;
     }
   }
 
@@ -2211,8 +2219,10 @@ export async function syncFromSupabase(): Promise<{
           stake: Number(b.amount || b.stake || 0),
           winningCardIndex: b.winning_card_index ?? undefined,
           winningCardName: b.winning_card_name ?? undefined,
-          payout: Number(b.payout || 0),
-          isWin: b.status === "won" || Boolean(b.is_win),
+          payout: (b.status === "won" || b.status === "claimed" || Boolean(b.is_win))
+            ? Math.min(Number(b.payout || 0) > 0 ? Number(b.payout) : Number(b.amount || b.stake || 0) * PAYOUT_MULTIPLIER, Number(b.amount || b.stake || 0) * PAYOUT_MULTIPLIER)
+            : 0,
+          isWin: b.status === "won" || b.status === "claimed" || Boolean(b.is_win),
           status: b.status === "won" ? "SETTLED" : b.status === "lost" ? "SETTLED" : "PENDING",
         }));
 
