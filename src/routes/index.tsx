@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import {
   AdminClientSync,
   DEFAULT_ROOM_ID,
@@ -38,6 +38,10 @@ import {
   pullUsersFromCloud,
   subscribeToCloudUsers,
   getTodayDateStr,
+  getYesterdayDateStr,
+  getCategorizedUserBets,
+  getUserProfitStats,
+  UserBetRecord,
 } from "@/lib/userStore";
 import { ThermalSlipModal } from "@/components/pos/ThermalSlipModal";
 import { PrinterSettingsModal } from "@/components/pos/PrinterSettingsModal";
@@ -114,6 +118,12 @@ export default function AgentPage() {
       } catch {}
     }
   };
+
+  // Period filter states for Shift, Tickets, and History tabs ("today" | "yesterday" | "all")
+  const [shiftPeriod, setShiftPeriod] = useState<"today" | "yesterday" | "all">("today");
+  const [ticketFilterPeriod, setTicketFilterPeriod] = useState<"today" | "yesterday" | "all">("today");
+  const [historyTabMode, setHistoryTabMode] = useState<"rounds" | "mybets">("rounds");
+  const [historyPeriod, setHistoryPeriod] = useState<"today" | "yesterday" | "all">("yesterday");
 
   // Recent Round Winners History (35 past rounds)
   const [recentWinners, setRecentWinners] = useState<RoundHistoryItem[]>(() => getPastRoundsHistory(35));
@@ -478,12 +488,143 @@ export default function AgentPage() {
     }
   };
 
-  // Shift Stats strictly scoped to today and current agent
+  // Dates
   const todayStr = getTodayDateStr();
-  const todayTickets = ticketsList.filter((t) => t.dateStr === todayStr);
-  const totalSalesToday = todayTickets.reduce((sum, t) => sum + t.totalAmount, 0);
-  const totalPayoutsToday = todayTickets.reduce((sum, t) => sum + (t.winningPayout || 0), 0);
-  const agentCommission10 = Math.round(totalSalesToday * 0.10);
+  const yesterdayStr = getYesterdayDateStr();
+
+  // Categorized user bets from user store (contains persistent history synced from Supabase/cloud)
+  const categorizedBets = useMemo(() => {
+    return agentUser ? getCategorizedUserBets(agentUser) : { today: [], yesterday: [], older: [], all: [] };
+  }, [agentUser]);
+
+  // Tickets filtered by date
+  const todayTickets = useMemo(() => ticketsList.filter((t) => t.dateStr === todayStr), [ticketsList, todayStr]);
+  const yesterdayTickets = useMemo(() => ticketsList.filter((t) => t.dateStr === yesterdayStr), [ticketsList, yesterdayStr]);
+
+  // Fallback: If ticketsList in localStorage has 0 yesterday tickets, synthesize them from agentUser.bets!
+  const yesterdaySynthesizedTickets: ThermalTicket[] = useMemo(() => {
+    if (yesterdayTickets.length > 0) return yesterdayTickets;
+    if (!categorizedBets.yesterday || categorizedBets.yesterday.length === 0) return [];
+
+    const roundMap = new Map<string, typeof categorizedBets.yesterday>();
+    categorizedBets.yesterday.forEach((b) => {
+      const arr = roundMap.get(b.roundId) || [];
+      arr.push(b);
+      roundMap.set(b.roundId, arr);
+    });
+
+    return Array.from(roundMap.entries()).map(([rId, bets], idx) => {
+      const totalAmount = bets.reduce((s, b) => s + b.stake, 0);
+      const winningPayout = bets.reduce((s, b) => s + (b.payout || 0), 0);
+      const isWin = bets.some((b) => b.isWin || (b.payout && b.payout > 0));
+      const firstBet = bets[0];
+      return {
+        ticketId: firstBet.ticketId || `TKT-YEST-${idx + 1}`,
+        barcode: `YEST${idx + 1}`,
+        roundId: rId,
+        roundNumber: firstBet.roundNumber || 0,
+        timestamp: firstBet.timestamp,
+        dateStr: firstBet.dateStr || yesterdayStr,
+        timeStr: firstBet.timeStr || "12:00 PM",
+        customerName: "Counter Customer",
+        agentName: agentUser.displayName,
+        agentId: agentUser.id,
+        username: agentUser.username,
+        items: bets.map((b) => ({
+          cardIndex: b.cardIndex,
+          cardName: b.cardName,
+          amount: b.stake,
+        })),
+        totalAmount,
+        winningPayout,
+        status: isWin ? "WON" : "LOST",
+      } as ThermalTicket;
+    });
+  }, [yesterdayTickets, categorizedBets.yesterday, yesterdayStr, agentUser]);
+
+  // All tickets combined (ticketsList plus synthesized yesterday tickets if ticketsList was missing them)
+  const allTicketsCombined = useMemo(() => {
+    if (ticketsList.some((t) => t.dateStr === yesterdayStr)) return ticketsList;
+    return [...ticketsList, ...yesterdaySynthesizedTickets];
+  }, [ticketsList, yesterdayStr, yesterdaySynthesizedTickets]);
+
+  // Filtered tickets for Tickets Tab
+  const filteredTickets = useMemo(() => {
+    if (ticketFilterPeriod === "today") return todayTickets;
+    if (ticketFilterPeriod === "yesterday") return yesterdaySynthesizedTickets;
+    return allTicketsCombined;
+  }, [ticketFilterPeriod, todayTickets, yesterdaySynthesizedTickets, allTicketsCombined]);
+
+  // Shift Stats for selected period ("today" | "yesterday" | "all")
+  const shiftTickets = useMemo(() => {
+    if (shiftPeriod === "today") return todayTickets;
+    if (shiftPeriod === "yesterday") return yesterdaySynthesizedTickets;
+    return allTicketsCombined;
+  }, [shiftPeriod, todayTickets, yesterdaySynthesizedTickets, allTicketsCombined]);
+
+  const shiftSales = useMemo(() => {
+    if (shiftPeriod === "today") {
+      const tSales = todayTickets.reduce((sum, t) => sum + t.totalAmount, 0);
+      const bSales = categorizedBets.today.reduce((sum, b) => sum + b.stake, 0);
+      return tSales > 0 ? tSales : bSales;
+    }
+    if (shiftPeriod === "yesterday") {
+      const tSales = yesterdayTickets.reduce((sum, t) => sum + t.totalAmount, 0);
+      const bSales = categorizedBets.yesterday.reduce((sum, b) => sum + b.stake, 0);
+      return tSales > 0 ? tSales : bSales;
+    }
+    const tSales = allTicketsCombined.reduce((sum, t) => sum + t.totalAmount, 0);
+    const bSales = (agentUser?.bets || []).reduce((sum, b) => sum + b.stake, 0);
+    return tSales > 0 ? tSales : bSales;
+  }, [shiftPeriod, todayTickets, yesterdayTickets, allTicketsCombined, categorizedBets, agentUser]);
+
+  const shiftPayouts = useMemo(() => {
+    if (shiftPeriod === "today") {
+      const tPayouts = todayTickets.reduce((sum, t) => sum + (t.winningPayout || 0), 0);
+      const bPayouts = categorizedBets.today.reduce((sum, b) => sum + (b.payout || 0), 0);
+      return tPayouts > 0 ? tPayouts : bPayouts;
+    }
+    if (shiftPeriod === "yesterday") {
+      const tPayouts = yesterdayTickets.reduce((sum, t) => sum + (t.winningPayout || 0), 0);
+      const bPayouts = categorizedBets.yesterday.reduce((sum, b) => sum + (b.payout || 0), 0);
+      return tPayouts > 0 ? tPayouts : bPayouts;
+    }
+    const tPayouts = allTicketsCombined.reduce((sum, t) => sum + (t.winningPayout || 0), 0);
+    const bPayouts = (agentUser?.bets || []).reduce((sum, b) => sum + (b.payout || 0), 0);
+    return tPayouts > 0 ? tPayouts : bPayouts;
+  }, [shiftPeriod, todayTickets, yesterdayTickets, allTicketsCombined, categorizedBets, agentUser]);
+
+  const shiftCommission10 = Math.round(shiftSales * 0.10);
+  const shiftCashSurplus = Math.max(0, shiftSales - shiftPayouts);
+
+  // Deposits for selected period
+  const shiftDeposits = useMemo(() => {
+    const deps = agentUser?.deposits || [];
+    if (shiftPeriod === "today") {
+      return deps.filter((d) => d.dateStr === todayStr).reduce((s, d) => s + d.amount, 0);
+    }
+    if (shiftPeriod === "yesterday") {
+      return deps.filter((d) => d.dateStr === yesterdayStr).reduce((s, d) => s + d.amount, 0);
+    }
+    return deps.reduce((s, d) => s + d.amount, 0);
+  }, [agentUser?.deposits, shiftPeriod, todayStr, yesterdayStr]);
+
+  // History Tab Filtered Bets
+  const historyBets = useMemo(() => {
+    if (historyPeriod === "today") return categorizedBets.today;
+    if (historyPeriod === "yesterday") return categorizedBets.yesterday;
+    return categorizedBets.all;
+  }, [historyPeriod, categorizedBets]);
+
+  const historyBetsTotalStake = useMemo(() => {
+    return historyBets.reduce((s, b) => s + b.stake, 0);
+  }, [historyBets]);
+
+  const historyBetsTotalWon = useMemo(() => {
+    return historyBets.reduce((s, b) => s + (b.payout || 0), 0);
+  }, [historyBets]);
+
+  const historyCommission10 = Math.round(historyBetsTotalStake * 0.10);
 
   // =========================================================================
   // IF NOT LOGGED IN: DISPLAY AGENT ID & PIN LOGIN SCREEN
@@ -778,7 +919,7 @@ export default function AgentPage() {
             }`}
           >
             <span className="text-sm">🎟️</span>
-            <span className="text-[9px] leading-tight font-bold">Tickets ({ticketsList.length})</span>
+            <span className="text-[9px] leading-tight font-bold">Tickets ({allTicketsCombined.length})</span>
           </button>
 
           <button
@@ -791,7 +932,7 @@ export default function AgentPage() {
             }`}
           >
             <span className="text-sm">💼</span>
-            <span className="text-[9px] leading-tight font-bold">Shift</span>
+            <span className="text-[9px] leading-tight font-bold">Hisaab</span>
           </button>
 
           <button
@@ -1042,12 +1183,54 @@ export default function AgentPage() {
               </button>
             </div>
 
+            {/* Date Period Filter Selector (आज / काल / सर्व) */}
+            <div className="grid grid-cols-3 gap-1 bg-muted/60 p-1 rounded-xl border border-border text-xs">
+              <button
+                type="button"
+                onClick={() => setTicketFilterPeriod("today")}
+                className={`py-1.5 px-2 rounded-lg font-bold text-center transition flex items-center justify-center gap-1 ${
+                  ticketFilterPeriod === "today"
+                    ? "bg-primary text-primary-foreground font-black shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span>📅</span> आज ({todayTickets.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setTicketFilterPeriod("yesterday")}
+                className={`py-1.5 px-2 rounded-lg font-bold text-center transition flex items-center justify-center gap-1 ${
+                  ticketFilterPeriod === "yesterday"
+                    ? "bg-primary text-primary-foreground font-black shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span>⏪</span> काल ({yesterdaySynthesizedTickets.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setTicketFilterPeriod("all")}
+                className={`py-1.5 px-2 rounded-lg font-bold text-center transition flex items-center justify-center gap-1 ${
+                  ticketFilterPeriod === "all"
+                    ? "bg-primary text-primary-foreground font-black shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span>📊</span> सर्व ({allTicketsCombined.length})
+              </button>
+            </div>
+
+            {/* Period Status Badge */}
             <div className="flex items-center justify-between px-1">
               <span className="text-xs font-bold text-muted-foreground">
-                Recent Issued Slips ({ticketsList.length})
+                {ticketFilterPeriod === "today"
+                  ? `आजच्या पावत्या (${todayTickets.length}) • ${todayStr}`
+                  : ticketFilterPeriod === "yesterday"
+                  ? `कालच्या पावत्या (${yesterdaySynthesizedTickets.length}) • ${yesterdayStr}`
+                  : `एकूण सर्व पावत्या (${allTicketsCombined.length})`}
               </span>
               <div className="flex items-center gap-2">
-                {ticketsList.length > 0 && (
+                {ticketFilterPeriod === "today" && todayTickets.length > 0 && (
                   <button
                     type="button"
                     onClick={() => {
@@ -1067,12 +1250,23 @@ export default function AgentPage() {
               </div>
             </div>
 
-            {ticketsList.length === 0 ? (
-              <div className="p-8 text-center text-muted-foreground border border-dashed border-border rounded-2xl text-xs">
-                No tickets issued yet. Punch a bet to print the first thermal slip!
+            {filteredTickets.length === 0 ? (
+              <div className="p-8 text-center text-muted-foreground border border-dashed border-border rounded-2xl text-xs space-y-1">
+                <p className="font-bold">
+                  {ticketFilterPeriod === "yesterday"
+                    ? `कालच्या तारखेसाठी (${yesterdayStr}) कोणतीही पावती सापडली नाही.`
+                    : ticketFilterPeriod === "today"
+                    ? "आज अद्याप कोणतीही पावती फाडली नाही. नवीन दाव लावा!"
+                    : "कोणतीही पावती उपलब्ध नाही."}
+                </p>
+                <p className="text-[10px] text-muted-foreground/80">
+                  {ticketFilterPeriod === "yesterday"
+                    ? "काल या काऊंटरवरून कोणतेही दाव नोंदवले गेले नव्हते."
+                    : "Thermal slip print karne ke liye card select karke daav lagayein."}
+                </p>
               </div>
             ) : (
-              ticketsList.map((t) => (
+              filteredTickets.map((t) => (
                 <div
                   key={t.ticketId}
                   className={`p-3 rounded-2xl border transition flex flex-col justify-between gap-2.5 ${
@@ -1084,9 +1278,16 @@ export default function AgentPage() {
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-mono font-black text-xs text-foreground">
-                      #{t.ticketId}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono font-black text-xs text-foreground">
+                        #{t.ticketId}
+                      </span>
+                      {t.dateStr === yesterdayStr && (
+                        <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[9px] font-bold">
+                          काल
+                        </span>
+                      )}
+                    </div>
                     <span
                       className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase ${
                         t.status === "WON"
@@ -1127,7 +1328,9 @@ export default function AgentPage() {
                   </div>
 
                   <div className="flex items-center justify-between pt-1 border-t border-border/50">
-                    <span className="text-[10px] text-muted-foreground">{t.timeStr}</span>
+                    <span className="text-[10px] text-muted-foreground font-mono">
+                      🕒 {t.timeStr} • {t.dateStr}
+                    </span>
                     <div className="flex items-center gap-2">
                       {t.status === "WON" && (
                         <button
@@ -1156,15 +1359,68 @@ export default function AgentPage() {
           </div>
         )}
 
-        {/* TAB 3: SHIFT REPORT */}
+        {/* TAB 3: SHIFT REPORT & KAL KA HISAB */}
         {activeTab === "shift" && (
           <div className="space-y-3">
+            {/* Period Switcher: आज (Today) / काल (Yesterday) / एकूण (All) */}
+            <div className="grid grid-cols-3 gap-1 bg-muted/70 p-1 rounded-2xl border border-border text-xs">
+              <button
+                type="button"
+                onClick={() => setShiftPeriod("today")}
+                className={`py-2 px-3 rounded-xl font-bold transition flex items-center justify-center gap-1.5 ${
+                  shiftPeriod === "today"
+                    ? "bg-primary text-primary-foreground font-black shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span>📅</span> आज (Today)
+              </button>
+              <button
+                type="button"
+                onClick={() => setShiftPeriod("yesterday")}
+                className={`py-2 px-3 rounded-xl font-bold transition flex items-center justify-center gap-1.5 ${
+                  shiftPeriod === "yesterday"
+                    ? "bg-primary text-primary-foreground font-black shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span>⏪</span> काल (Yesterday)
+              </button>
+              <button
+                type="button"
+                onClick={() => setShiftPeriod("all")}
+                className={`py-2 px-3 rounded-xl font-bold transition flex items-center justify-center gap-1.5 ${
+                  shiftPeriod === "all"
+                    ? "bg-primary text-primary-foreground font-black shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span>📊</span> एकूण (All)
+              </button>
+            </div>
+
+            {/* Shift Summary Box */}
             <div className="rounded-2xl border border-border bg-card p-4 space-y-3 shadow-sm">
               <div className="flex items-center justify-between">
-                <h3 className="font-display text-sm font-black text-foreground">
-                  Agent Counter Shift Summary
-                </h3>
-                {ticketsList.length > 0 && (
+                <div>
+                  <h3 className="font-display text-sm font-black text-foreground flex items-center gap-1.5">
+                    <span>{shiftPeriod === "today" ? "🟢" : shiftPeriod === "yesterday" ? "🟡" : "🔵"}</span>
+                    {shiftPeriod === "today"
+                      ? "आजचा हिशोब (Today's Shift)"
+                      : shiftPeriod === "yesterday"
+                      ? "कालचा हिशोब (Yesterday's Ledger)"
+                      : "एकूण हिशोब (All Time Summary)"}
+                  </h3>
+                  <span className="text-[10px] font-mono text-muted-foreground">
+                    {shiftPeriod === "today"
+                      ? `तारीख: ${todayStr}`
+                      : shiftPeriod === "yesterday"
+                      ? `तारीख: ${yesterdayStr}`
+                      : "सर्व रेकॉर्ड केलेला कालावधी"}
+                  </span>
+                </div>
+
+                {shiftPeriod === "today" && todayTickets.length > 0 && (
                   <button
                     type="button"
                     onClick={() => {
@@ -1182,115 +1438,384 @@ export default function AgentPage() {
 
               <div className="space-y-2 text-xs font-mono">
                 <div className="flex justify-between py-1.5 border-b border-border/50">
-                  <span className="text-muted-foreground">Total Bets Punched:</span>
-                  <span className="font-bold text-foreground">₹{totalSalesToday.toLocaleString("en-IN")}</span>
+                  <span className="text-muted-foreground">Total Bets Punched (विक्री):</span>
+                  <span className="font-bold text-foreground">₹{shiftSales.toLocaleString("en-IN")}</span>
                 </div>
                 <div className="flex justify-between py-1.5 border-b border-border/50">
-                  <span className="text-muted-foreground">Payouts Given:</span>
-                  <span className="font-bold text-emerald-400">₹{totalPayoutsToday.toLocaleString("en-IN")}</span>
+                  <span className="text-muted-foreground">Payouts Given (वाटप):</span>
+                  <span className="font-bold text-emerald-400">₹{shiftPayouts.toLocaleString("en-IN")}</span>
                 </div>
                 <div className="flex justify-between py-1.5 border-b border-border/50">
-                  <span className="text-muted-foreground">Cash Surplus in Drawer:</span>
+                  <span className="text-muted-foreground">Cash Surplus in Drawer (गल्ल्यात शिल्लक):</span>
                   <span className="font-bold text-foreground">
-                    ₹{Math.max(0, totalSalesToday - totalPayoutsToday).toLocaleString("en-IN")}
+                    ₹{shiftCashSurplus.toLocaleString("en-IN")}
                   </span>
                 </div>
+
+                {shiftDeposits > 0 && (
+                  <div className="flex justify-between py-1.5 border-b border-border/50">
+                    <span className="text-muted-foreground">Counter Recharge / Deposit (जमा):</span>
+                    <span className="font-bold text-foreground">₹{shiftDeposits.toLocaleString("en-IN")}</span>
+                  </div>
+                )}
+
                 <div className="flex justify-between py-2 bg-primary/10 px-2 rounded-xl border border-primary/30">
-                  <span className="font-sans font-bold text-primary">Your 10% Commission:</span>
+                  <span className="font-sans font-bold text-primary">Your 10% Commission (१०% कमिशन):</span>
                   <span className="font-display font-black text-sm text-primary">
-                    +₹{agentCommission10.toLocaleString("en-IN")}
+                    +₹{shiftCommission10.toLocaleString("en-IN")}
                   </span>
                 </div>
               </div>
             </div>
-          </div>
-        )}
 
-        {/* TAB 4: ROUND RESULTS & WINNERS HISTORY */}
-        {activeTab === "history" && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between px-1">
-              <div className="flex items-center gap-1.5">
-                <span className="text-base">📜</span>
-                <h3 className="font-display text-sm font-black text-foreground">
-                  Round Results History (मागील निकाल)
-                </h3>
+            {/* Shift Breakdown List */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-xs font-bold text-muted-foreground">
+                  {shiftPeriod === "today"
+                    ? `आजच्या पावत्या व नोंदी (${shiftTickets.length})`
+                    : shiftPeriod === "yesterday"
+                    ? `कालच्या पावत्या व नोंदी (${shiftTickets.length})`
+                    : `सर्व पावत्या व नोंदी (${shiftTickets.length})`}
+                </span>
+                <span className="text-[10px] text-muted-foreground">
+                  {shiftPeriod === "yesterday" ? "कालचा संपूर्ण हिशोब" : "तपशीलवार पावती यादी"}
+                </span>
               </div>
-              <span className="text-[10px] font-mono text-muted-foreground font-bold">
-                Last {recentWinners.length} Rounds
-              </span>
-            </div>
 
-            <div className="grid grid-cols-1 gap-2">
-              {recentWinners.map((r) => {
-                const roundTickets = ticketsList.filter(
-                  (t) => t.roundNumber === r.roundNumber || t.roundId === r.roundId
-                );
-                const hasWonTicket = roundTickets.some((t) => t.status === "WON" || t.status === "CLAIMED");
-
-                return (
+              {shiftTickets.length === 0 ? (
+                <div className="p-6 text-center text-muted-foreground border border-dashed border-border rounded-2xl text-xs space-y-1">
+                  <p className="font-bold">
+                    {shiftPeriod === "yesterday"
+                      ? `कालच्या तारखेसाठी (${yesterdayStr}) कोणतीही नोंद आढळली नाही.`
+                      : "या कालावधीत कोणतीही पावती आढळली नाही."}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground/80">
+                    {shiftPeriod === "yesterday"
+                      ? "काल या काऊंटरवरून कोणतेही दाव लावले गेले नव्हते."
+                      : "दाव लावल्यानंतर येथे पावती तपशील दिसेल."}
+                  </p>
+                </div>
+              ) : (
+                shiftTickets.map((t) => (
                   <div
-                    key={r.roundNumber}
-                    className={`rounded-2xl border p-2.5 flex items-center justify-between gap-3 transition shadow-xs ${
-                      hasWonTicket
+                    key={t.ticketId}
+                    className={`p-3 rounded-2xl border transition flex flex-col justify-between gap-2 ${
+                      t.status === "WON"
                         ? "border-emerald-500/50 bg-emerald-500/10"
-                        : "border-border bg-card/90"
+                        : t.status === "CLAIMED"
+                        ? "border-zinc-500/30 bg-muted/30"
+                        : t.status === "LOST"
+                        ? "border-border/60 bg-card/60"
+                        : "border-border bg-card"
                     }`}
                   >
-                    {/* Left: Winning Card Picture + Name + Symbol */}
-                    <div className="flex items-center gap-3">
-                      <div className="h-12 w-12 rounded-xl overflow-hidden border border-border/80 shrink-0 bg-background flex items-center justify-center p-1 shadow-inner">
-                        <img
-                          src={r.card.img}
-                          alt={r.card.name}
-                          className="w-full h-full object-contain filter drop-shadow"
-                        />
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono font-black text-xs text-foreground">
+                          #{t.ticketId}
+                        </span>
+                        <span className="px-1.5 py-0.5 rounded bg-primary/10 border border-primary/20 text-[10px] font-mono font-bold text-primary">
+                          Round {t.roundId}
+                        </span>
                       </div>
-
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-display text-base font-black text-foreground leading-none">
-                            {r.card.name}
-                          </span>
-                          <span className="text-sm">{r.card.symbol}</span>
-                          <span className="text-[10px] font-mono text-muted-foreground font-bold">
-                            ({r.card.englishName})
-                          </span>
-                        </div>
-
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="px-2 py-0.5 rounded-md bg-primary/15 border border-primary/30 text-primary text-[10px] font-mono font-black">
-                            {r.roundId}
-                          </span>
-                          <span className="text-[10px] text-muted-foreground font-mono">
-                            {r.timeStr}
-                          </span>
-                        </div>
-                      </div>
+                      <span
+                        className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase ${
+                          t.status === "WON"
+                            ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+                            : t.status === "CLAIMED"
+                            ? "bg-zinc-500/20 text-zinc-400 border border-zinc-500/40"
+                            : t.status === "LOST"
+                            ? "bg-destructive/15 text-destructive border border-destructive/30"
+                            : "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                        }`}
+                      >
+                        {t.status === "WON"
+                          ? `🏆 WON ₹${t.winningPayout}`
+                          : t.status === "CLAIMED"
+                          ? "✓ PAID OUT"
+                          : t.status === "LOST"
+                          ? "LOST"
+                          : "⏳ IN PLAY"}
+                      </span>
                     </div>
 
-                    {/* Right: 10X Payout Badge + Counter Ticket Indicator */}
-                    <div className="text-right shrink-0">
-                      <span className="inline-block px-2.5 py-1 rounded-lg bg-gradient-gold text-zinc-950 font-black text-[10px] uppercase shadow-sm">
-                        🏆 WINNER 9X
-                      </span>
-
-                      {roundTickets.length > 0 && (
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {t.items.map((item, idx) => (
                         <span
-                          className={`block mt-1 text-[10px] font-bold font-mono ${
-                            hasWonTicket ? "text-emerald-400 font-black" : "text-muted-foreground"
-                          }`}
+                          key={idx}
+                          className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-background border border-border"
                         >
-                          {hasWonTicket
-                            ? "🎉 Counter Won!"
-                            : `${roundTickets.length} Slip(s) Booked`}
+                          {item.cardName}: ₹{item.amount}
+                        </span>
+                      ))}
+                      <span className="text-[10px] font-mono font-black text-primary ml-auto">
+                        Total: ₹{t.totalAmount}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1 border-t border-border/40 text-[10px] text-muted-foreground font-mono">
+                      <span>🕒 {t.timeStr} • {t.dateStr}</span>
+                      {t.winningPayout && t.winningPayout > 0 && (
+                        <span className="text-emerald-400 font-bold">
+                          बक्षीस: ₹{t.winningPayout}
                         </span>
                       )}
                     </div>
                   </div>
-                );
-              })}
+                ))
+              )}
             </div>
+          </div>
+        )}
+
+        {/* TAB 4: ROUND RESULTS & WINNERS HISTORY + MY BETS HISTORY */}
+        {activeTab === "history" && (
+          <div className="space-y-3">
+            {/* Mode Switcher: Round Results vs Agent My Bets History */}
+            <div className="grid grid-cols-2 gap-1 bg-muted/70 p-1 rounded-2xl border border-border text-xs">
+              <button
+                type="button"
+                onClick={() => setHistoryTabMode("rounds")}
+                className={`py-2 px-3 rounded-xl font-bold transition flex items-center justify-center gap-1.5 ${
+                  historyTabMode === "rounds"
+                    ? "bg-primary text-primary-foreground font-black shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span>🎰</span> फेऱ्यांचे निकाल (Rounds)
+              </button>
+              <button
+                type="button"
+                onClick={() => setHistoryTabMode("mybets")}
+                className={`py-2 px-3 rounded-xl font-bold transition flex items-center justify-center gap-1.5 ${
+                  historyTabMode === "mybets"
+                    ? "bg-primary text-primary-foreground font-black shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span>📜</span> माझे दाव (My Bets)
+              </button>
+            </div>
+
+            {/* SUB-VIEW 1: ROUND RESULTS */}
+            {historyTabMode === "rounds" && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between px-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-base">📜</span>
+                    <h3 className="font-display text-sm font-black text-foreground">
+                      Round Results History (मागील निकाल)
+                    </h3>
+                  </div>
+                  <span className="text-[10px] font-mono text-muted-foreground font-bold">
+                    Last {recentWinners.length} Rounds
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 gap-2">
+                  {recentWinners.map((r) => {
+                    const roundTickets = ticketsList.filter(
+                      (t) => t.roundNumber === r.roundNumber || t.roundId === r.roundId
+                    );
+                    const hasWonTicket = roundTickets.some((t) => t.status === "WON" || t.status === "CLAIMED");
+
+                    return (
+                      <div
+                        key={r.roundNumber}
+                        className={`rounded-2xl border p-2.5 flex items-center justify-between gap-3 transition shadow-xs ${
+                          hasWonTicket
+                            ? "border-emerald-500/50 bg-emerald-500/10"
+                            : "border-border bg-card/90"
+                        }`}
+                      >
+                        {/* Left: Winning Card Picture + Name + Symbol */}
+                        <div className="flex items-center gap-3">
+                          <div className="h-12 w-12 rounded-xl overflow-hidden border border-border/80 shrink-0 bg-background flex items-center justify-center p-1 shadow-inner">
+                            <img
+                              src={r.card.img}
+                              alt={r.card.name}
+                              className="w-full h-full object-contain filter drop-shadow"
+                            />
+                          </div>
+
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-display text-base font-black text-foreground leading-none">
+                                {r.card.name}
+                              </span>
+                              <span className="text-sm">{r.card.symbol}</span>
+                              <span className="text-[10px] font-mono text-muted-foreground font-bold">
+                                ({r.card.englishName})
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className="px-2 py-0.5 rounded-md bg-primary/15 border border-primary/30 text-primary text-[10px] font-mono font-black">
+                                {r.roundId}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground font-mono">
+                                {r.timeStr}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Right: 9X Payout Badge + Counter Ticket Indicator */}
+                        <div className="text-right shrink-0">
+                          <span className="inline-block px-2.5 py-1 rounded-lg bg-gradient-gold text-zinc-950 font-black text-[10px] uppercase shadow-sm">
+                            🏆 WINNER 9X
+                          </span>
+
+                          {roundTickets.length > 0 && (
+                            <span
+                              className={`block mt-1 text-[10px] font-bold font-mono ${
+                                hasWonTicket ? "text-emerald-400 font-black" : "text-muted-foreground"
+                              }`}
+                            >
+                              {hasWonTicket
+                                ? "🎉 Counter Won!"
+                                : `${roundTickets.length} Slip(s) Booked`}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* SUB-VIEW 2: AGENT MY BETS HISTORY (TODAY / YESTERDAY / ALL) */}
+            {historyTabMode === "mybets" && (
+              <div className="space-y-3">
+                {/* Period Pills */}
+                <div className="grid grid-cols-3 gap-1 bg-muted/60 p-1 rounded-xl border border-border text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setHistoryPeriod("today")}
+                    className={`py-1.5 px-2 rounded-lg font-bold text-center transition flex items-center justify-center gap-1 ${
+                      historyPeriod === "today"
+                        ? "bg-primary text-primary-foreground font-black shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <span>📅</span> आज ({categorizedBets.today.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHistoryPeriod("yesterday")}
+                    className={`py-1.5 px-2 rounded-lg font-bold text-center transition flex items-center justify-center gap-1 ${
+                      historyPeriod === "yesterday"
+                        ? "bg-primary text-primary-foreground font-black shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <span>⏪</span> काल ({categorizedBets.yesterday.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHistoryPeriod("all")}
+                    className={`py-1.5 px-2 rounded-lg font-bold text-center transition flex items-center justify-center gap-1 ${
+                      historyPeriod === "all"
+                        ? "bg-primary text-primary-foreground font-black shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <span>📊</span> सर्व ({categorizedBets.all.length})
+                  </button>
+                </div>
+
+                {/* Bets Summary Header Banner */}
+                <div className="rounded-2xl border border-border bg-card p-3 shadow-sm flex items-center justify-between text-xs font-mono">
+                  <div>
+                    <span className="text-[10px] text-muted-foreground block">
+                      {historyPeriod === "today"
+                        ? `आजचे दाव • ${todayStr}`
+                        : historyPeriod === "yesterday"
+                        ? `कालचे दाव • ${yesterdayStr}`
+                        : "सर्व दाव इतिहास"}
+                    </span>
+                    <span className="font-bold text-foreground">
+                      {historyBets.length} दाव लावले
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] text-muted-foreground block">
+                      एकूण दाव: ₹{historyBetsTotalStake}
+                    </span>
+                    <span className="font-bold text-emerald-400">
+                      बक्षीस: ₹{historyBetsTotalWon}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Bets List */}
+                {historyBets.length === 0 ? (
+                  <div className="p-8 text-center text-muted-foreground border border-dashed border-border rounded-2xl text-xs space-y-1">
+                    <p className="font-bold">
+                      {historyPeriod === "yesterday"
+                        ? `कालच्या तारखेसाठी (${yesterdayStr}) कोणतेही दाव आढळले नाहीत.`
+                        : "या कालावधीत कोणतेही दाव नाहीत."}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground/80">
+                      काऊंटरवरून दाव लावल्यानंतर येथे नोंद दिसेल.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {historyBets.map((b) => (
+                      <div
+                        key={b.id}
+                        className={`p-3 rounded-2xl border transition flex items-center justify-between gap-3 ${
+                          b.isWin || (b.payout && b.payout > 0)
+                            ? "border-emerald-500/50 bg-emerald-500/10 shadow-xs"
+                            : "border-border bg-card/80"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="h-10 w-10 rounded-xl bg-background border border-border flex items-center justify-center font-display font-black text-sm">
+                            {CARDS[b.cardIndex]?.symbol || "🃏"}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-display text-sm font-black text-foreground">
+                                {b.cardName}
+                              </span>
+                              <span className="text-[10px] font-mono font-bold text-primary px-1.5 py-0.2 rounded bg-primary/10 border border-primary/20">
+                                {b.roundId}
+                              </span>
+                            </div>
+                            <span className="text-[10px] font-mono text-muted-foreground block mt-0.5">
+                              🕒 {b.timeStr} • {b.dateStr}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          <span className="text-xs font-mono font-black text-foreground block">
+                            दाव: ₹{b.stake}
+                          </span>
+                          {b.isWin || (b.payout && b.payout > 0) ? (
+                            <span className="inline-block px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px] font-black uppercase">
+                              🏆 जिंकले ₹{b.payout}
+                            </span>
+                          ) : b.status === "SETTLED" ? (
+                            <span className="text-[10px] text-muted-foreground font-mono">
+                              Settled
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-amber-400 font-mono">
+                              In Play
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
