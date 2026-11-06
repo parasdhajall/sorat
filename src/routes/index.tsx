@@ -180,7 +180,10 @@ export default function AgentPage() {
           if (res.success && res.data?.tickets && res.data.tickets.length > 0) {
             const current = getTickets("all");
             const existingIds = new Set(current.map((t) => t.ticketId));
-            const toAdd = res.data.tickets.filter((t: any) => !existingIds.has(t.ticketId));
+            const existingRounds = new Set(current.map((t) => t.roundId));
+            const toAdd = res.data.tickets.filter(
+              (t: any) => !existingIds.has(t.ticketId) && !existingRounds.has(t.roundId)
+            );
             if (toAdd.length > 0) {
               saveTickets([...toAdd, ...current]);
               setTicketsList(getTickets(id));

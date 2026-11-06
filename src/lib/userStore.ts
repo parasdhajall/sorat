@@ -1471,7 +1471,7 @@ export function deductAgentBalance(
     betRecords
   );
 
-  // Direct Supabase Update & Stored Procedure Sync (DigitJodi pattern)
+  // Direct Supabase Update (DigitJodi pattern)
   try {
     const client = getSupabaseClient();
     if (client) {
@@ -1483,22 +1483,8 @@ export function deductAgentBalance(
         .then(() => {})
         .catch(() => {});
     }
-
-    // 2. Atomically insert bet tickets & update round turnover via RPC
-    placeSoratBetsRpc({
-      userId: users[idx].id,
-      roundId,
-      roundNumber: roundNumber || 1,
-      ticketId: `tkt_${now}`,
-      customerName: users[idx].displayName,
-      dateStr: formatDate(now),
-      timeStr: formatTime(now),
-      bets: items,
-    }).catch((err) => {
-      console.warn("placeSoratBetsRpc notice:", err);
-    });
   } catch (err) {
-    console.warn("Supabase sync notice in deductAgentBalance:", err);
+    console.warn("Supabase balance update notice in deductAgentBalance:", err);
   }
 
   return { success: true, newBalance };

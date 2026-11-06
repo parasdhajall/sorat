@@ -774,10 +774,23 @@ export async function fetchAgentDailyTicketsAndBets(
       };
     }
 
-    // Group bets by ticket_id
+    // Group bets by ticket_id and deduplicate by round_id
     const ticketMap = new Map<string, any[]>();
+    const roundToTicketId = new Map<string, string>();
+
     for (const b of bets) {
       const tId = b.ticket_id || b.id;
+      const rId = b.round_id || `#${b.round_number}`;
+
+      // If this round already has an official TKT-... ticket, ignore duplicate tkt_... from older sync
+      if (roundToTicketId.has(rId)) {
+        const existingTId = roundToTicketId.get(rId)!;
+        if (existingTId.startsWith("TKT-") && !tId.startsWith("TKT-")) {
+          continue; // Skip duplicate fallback ticket for same round
+        }
+      }
+
+      roundToTicketId.set(rId, tId);
       const list = ticketMap.get(tId) || [];
       list.push(b);
       ticketMap.set(tId, list);
@@ -809,6 +822,8 @@ export async function fetchAgentDailyTicketsAndBets(
         totalClaimsPaid += totalPayout;
       } else if (hasWon) {
         ticketStatus = "WON";
+        // In physical counter operations, won tickets represent customer payouts from drawer
+        totalClaimsPaid += totalPayout;
         totalUnclaimedWon += totalPayout;
       } else if (tBets.some((b) => b.status === "pending")) {
         ticketStatus = "ACTIVE";

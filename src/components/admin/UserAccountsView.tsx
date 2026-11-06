@@ -302,7 +302,7 @@ export function UserAccountsView({
       : betsSalesToday;
 
   const ticketClaimsToday = agentTicketsToday
-    .filter((t) => t.status === "CLAIMED")
+    .filter((t) => t.status === "CLAIMED" || t.status === "WON")
     .reduce((sum, t) => sum + (t.winningPayout || 0), 0);
   const betsPayoutsToday = userBetsToday.reduce((sum, b) => sum + (b.payout || 0), 0);
 
@@ -794,7 +794,7 @@ export function UserAccountsView({
                     -₹{liveClaimsToday.toLocaleString("en-IN")}
                   </div>
                   <span className="text-[9px] text-muted-foreground block">
-                    {agentTicketsToday.filter((t) => t.status === "CLAIMED").length} winning claim(s)
+                    {agentTicketsToday.filter((t) => t.status === "CLAIMED" || t.status === "WON").length} winning claim(s)
                   </span>
                 </div>
 
