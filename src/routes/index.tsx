@@ -16,6 +16,7 @@ import { resolveProfitGuaranteedWinnerForRound } from "@/lib/roundSettlement";
 import {
   createTicket,
   getTickets,
+  saveTickets,
   clearTickets,
   claimTicket,
   findTicketByIdOrBarcode,
@@ -50,7 +51,7 @@ import {
   executeDirectPrint,
   isDirectPrinterConnected,
 } from "@/lib/thermalPrinter";
-import { placeSoratBetsRpc } from "@/lib/supabase";
+import { placeSoratBetsRpc, fetchAgentDailyTicketsAndBets } from "@/lib/supabase";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -166,12 +167,27 @@ export default function AgentPage() {
     agentUserRef.current = agentUser;
   }, [agentUser]);
 
-  // Helper to always fetch tickets strictly scoped to the active/logged-in agent
+  // Helper to always fetch tickets strictly scoped to the active/logged-in agent (Local + Cloud Supabase)
   const refreshAgentTickets = () => {
     const currentAgent = loggedInAgent || agentUserRef.current || getLoggedInAgent();
     const id = currentAgent?.id || currentAgent?.username;
     if (id) {
       setTicketsList(getTickets(id));
+
+      // Asynchronously sync cloud tickets from Supabase `sorat_bets` across devices
+      fetchAgentDailyTicketsAndBets(id)
+        .then((res) => {
+          if (res.success && res.data?.tickets && res.data.tickets.length > 0) {
+            const current = getTickets("all");
+            const existingIds = new Set(current.map((t) => t.ticketId));
+            const toAdd = res.data.tickets.filter((t: any) => !existingIds.has(t.ticketId));
+            if (toAdd.length > 0) {
+              saveTickets([...toAdd, ...current]);
+              setTicketsList(getTickets(id));
+            }
+          }
+        })
+        .catch(() => {});
     } else {
       setTicketsList([]);
     }

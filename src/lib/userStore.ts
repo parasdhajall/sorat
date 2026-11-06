@@ -836,6 +836,19 @@ export async function pullUsersFromCloud(): Promise<UserAccount[]> {
     if (client) {
       const { data: dbPlayers, error } = await client.from("players").select("*");
       if (!error && Array.isArray(dbPlayers) && dbPlayers.length > 0) {
+        // Fetch recent bets from Supabase to keep bets history and House Gross Profit 100% in sync
+        let dbBets: any[] = [];
+        try {
+          const { data: bData } = await client
+            .from("sorat_bets")
+            .select("*")
+            .order("created_at", { ascending: false })
+            .limit(1000);
+          if (Array.isArray(bData)) {
+            dbBets = bData;
+          }
+        } catch {}
+
         const local = getUsers();
         const merged = local.map((u) => {
           const remote = dbPlayers.find(
@@ -845,6 +858,35 @@ export async function pullUsersFromCloud(): Promise<UserAccount[]> {
               (p.phone && u.phone && p.phone.replace(/\D/g, "") === u.phone.replace(/\D/g, ""))
           );
           if (remote) {
+            const uBetsFromDb = dbBets
+              .filter((b) => {
+                const bUser = (b.user_id || "").toLowerCase().replace(/^@/, "").trim();
+                const uId = (u.id || "").toLowerCase().trim();
+                const uName = (u.username || "").toLowerCase().replace(/^@/, "").trim();
+                const rId = (remote.id || "").toLowerCase().trim();
+                const rName = (remote.username || "").toLowerCase().replace(/^@/, "").trim();
+                return bUser === uId || bUser === uName || bUser === rId || bUser === rName;
+              })
+              .map((b) => ({
+                id: b.id,
+                ticketId: b.ticket_id,
+                roundId: b.round_id,
+                roundNumber: b.round_number,
+                timestamp: new Date(b.created_at).getTime(),
+                dateStr: b.date_str,
+                timeStr: b.time_str,
+                cardIndex: b.card_index,
+                cardName: b.card_name,
+                stake: Number(b.amount || 0),
+                winningCardIndex: b.winning_card_index ?? undefined,
+                winningCardName: b.winning_card_name ?? undefined,
+                payout: Number(b.payout || 0),
+                isWin: b.status === "won" || b.status === "claimed" || Boolean(b.is_win),
+                status: (b.status === "won" || b.status === "claimed" || b.status === "lost") ? "SETTLED" as const : "PENDING" as const,
+              }));
+
+            const finalBets = uBetsFromDb.length > 0 ? uBetsFromDb : u.bets;
+
             return {
               ...u,
               id: remote.id || u.id,
@@ -854,6 +896,7 @@ export async function pullUsersFromCloud(): Promise<UserAccount[]> {
               phone: remote.phone || u.phone,
               displayName: remote.display_name || u.displayName,
               status: (remote.status as any) || u.status,
+              bets: finalBets,
             };
           }
           return u;
@@ -868,6 +911,31 @@ export async function pullUsersFromCloud(): Promise<UserAccount[]> {
               (p.phone && u.phone && p.phone.replace(/\D/g, "") === u.phone.replace(/\D/g, ""))
           );
           if (!exists) {
+            const pBetsFromDb = dbBets
+              .filter((b) => {
+                const bUser = (b.user_id || "").toLowerCase().replace(/^@/, "").trim();
+                const pId = (p.id || "").toLowerCase().trim();
+                const pName = (p.username || "").toLowerCase().replace(/^@/, "").trim();
+                return bUser === pId || bUser === pName;
+              })
+              .map((b) => ({
+                id: b.id,
+                ticketId: b.ticket_id,
+                roundId: b.round_id,
+                roundNumber: b.round_number,
+                timestamp: new Date(b.created_at).getTime(),
+                dateStr: b.date_str,
+                timeStr: b.time_str,
+                cardIndex: b.card_index,
+                cardName: b.card_name,
+                stake: Number(b.amount || 0),
+                winningCardIndex: b.winning_card_index ?? undefined,
+                winningCardName: b.winning_card_name ?? undefined,
+                payout: Number(b.payout || 0),
+                isWin: b.status === "won" || b.status === "claimed" || Boolean(b.is_win),
+                status: (b.status === "won" || b.status === "claimed" || b.status === "lost") ? "SETTLED" as const : "PENDING" as const,
+              }));
+
             merged.push({
               id: p.id,
               username: p.username || p.display_name || "user",
@@ -877,7 +945,7 @@ export async function pullUsersFromCloud(): Promise<UserAccount[]> {
               totalDeposited: Number(p.total_deposited || 0),
               totalWithdrawn: Number(p.total_withdrawn || 0),
               deposits: [],
-              bets: [],
+              bets: pBetsFromDb,
               createdAt: p.created_at ? new Date(p.created_at).getTime() : Date.now(),
               status: (p.status as any) || "ACTIVE",
               pin: p.pin || "1234",

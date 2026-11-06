@@ -501,8 +501,54 @@ export async function placeSoratBetsRpc(params: {
       _bets: params.bets,
     });
 
-    if (error) return { success: false, error: error.message };
-    return { success: true, data };
+    if (!error) {
+      return { success: true, data };
+    }
+
+    console.warn("place_sorat_bets RPC warning, executing resilient direct sorat_bets insert:", error.message);
+
+    // Resilient Direct Insert: Ensure bets are NEVER lost from Supabase
+    let resolvedUserId = params.userId;
+    try {
+      const { data: pData } = await client
+        .from("players")
+        .select("id")
+        .or(`id.eq.${params.userId},username.eq.${params.userId},username.eq.${params.userId.replace(/^@/, "")}`)
+        .limit(1)
+        .maybeSingle();
+
+      if (pData?.id) {
+        resolvedUserId = pData.id;
+      }
+    } catch {}
+
+    const nowIso = new Date().toISOString();
+    const rows = params.bets.map((b, idx) => ({
+      id: `bet_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 6)}`,
+      user_id: resolvedUserId,
+      round_id: params.roundId,
+      round_number: params.roundNumber,
+      ticket_id: params.ticketId,
+      customer_name: params.customerName || "Customer",
+      card_index: b.cardIndex,
+      card_name: b.cardName,
+      amount: b.amount,
+      payout: 0,
+      status: "pending",
+      date_str: params.dateStr,
+      time_str: params.timeStr,
+      created_at: nowIso,
+    }));
+
+    const { data: insertData, error: insertError } = await client
+      .from("sorat_bets")
+      .insert(rows)
+      .select();
+
+    if (insertError) {
+      return { success: false, error: insertError.message };
+    }
+    return { success: true, data: insertData };
   } catch (e: any) {
     return { success: false, error: e.message || "Failed to place bets in Supabase" };
   }
@@ -653,6 +699,189 @@ export async function toggleCounterKillSwitchRpc(
     return { success: true, status };
   } catch (e: any) {
     return { success: false, error: e.message || "Failed to toggle kill switch in Supabase" };
+  }
+}
+
+export interface AgentDailyCloudSummary {
+  sales: number;
+  claimsPaid: number;
+  unclaimedWon: number;
+  commission10: number;
+  netCashToCollect: number;
+  ticketsCount: number;
+  tickets: any[];
+  betsCount: number;
+}
+
+/**
+ * Fetches all daily tickets and wagers from Supabase `sorat_bets` for an agent.
+ * Groups individual bets by ticket_id into reconstructed ThermalTicket objects.
+ */
+export async function fetchAgentDailyTicketsAndBets(
+  agentIdentifier: string,
+  dateStr?: string
+): Promise<{ success: boolean; data?: AgentDailyCloudSummary; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) return { success: false, error: "Supabase not configured" };
+
+  try {
+    const raw = (agentIdentifier || "").trim();
+    const clean = raw.toLowerCase().replace(/^@/, "");
+    const today = dateStr || new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+
+    // Resolve all possible user IDs for this agent (id, username, etc.)
+    const userIds = [raw, clean, `@${clean}`];
+    try {
+      const { data: pData } = await client
+        .from("players")
+        .select("id, username")
+        .or(`id.eq.${raw},username.eq.${clean},username.eq.${raw}`)
+        .limit(1)
+        .maybeSingle();
+
+      if (pData) {
+        if (pData.id && !userIds.includes(pData.id)) userIds.push(pData.id);
+        if (pData.username && !userIds.includes(pData.username)) userIds.push(pData.username);
+      }
+    } catch {}
+
+    const orCondition = userIds.map((id) => `user_id.eq.${id}`).join(",");
+
+    let query = client
+      .from("sorat_bets")
+      .select("*")
+      .or(orCondition);
+
+    if (today) {
+      query = query.eq("date_str", today);
+    }
+
+    const { data: bets, error } = await query.order("created_at", { ascending: false });
+    if (error) return { success: false, error: error.message };
+    if (!Array.isArray(bets) || bets.length === 0) {
+      return {
+        success: true,
+        data: {
+          sales: 0,
+          claimsPaid: 0,
+          unclaimedWon: 0,
+          commission10: 0,
+          netCashToCollect: 0,
+          ticketsCount: 0,
+          tickets: [],
+          betsCount: 0,
+        },
+      };
+    }
+
+    // Group bets by ticket_id
+    const ticketMap = new Map<string, any[]>();
+    for (const b of bets) {
+      const tId = b.ticket_id || b.id;
+      const list = ticketMap.get(tId) || [];
+      list.push(b);
+      ticketMap.set(tId, list);
+    }
+
+    const reconstructedTickets: any[] = [];
+    let totalSales = 0;
+    let totalClaimsPaid = 0;
+    let totalUnclaimedWon = 0;
+
+    for (const [tId, tBets] of ticketMap.entries()) {
+      const first = tBets[0];
+      const items = tBets.map((b) => ({
+        cardIndex: Number(b.card_index),
+        cardName: b.card_name,
+        amount: Number(b.amount || 0),
+      }));
+      const totalAmount = items.reduce((s, it) => s + it.amount, 0);
+      const totalPayout = tBets.reduce((s, b) => s + Number(b.payout || 0), 0);
+
+      totalSales += totalAmount;
+
+      const hasClaimed = tBets.some((b) => b.status === "claimed" || b.claimed_at);
+      const hasWon = tBets.some((b) => b.status === "won" || (b.payout && b.payout > 0));
+
+      let ticketStatus: "ACTIVE" | "WON" | "LOST" | "CLAIMED" = "LOST";
+      if (hasClaimed) {
+        ticketStatus = "CLAIMED";
+        totalClaimsPaid += totalPayout;
+      } else if (hasWon) {
+        ticketStatus = "WON";
+        totalUnclaimedWon += totalPayout;
+      } else if (tBets.some((b) => b.status === "pending")) {
+        ticketStatus = "ACTIVE";
+      }
+
+      reconstructedTickets.push({
+        ticketId: tId,
+        barcode: tId.replace(/\D/g, "").slice(-8) || "00000000",
+        roundId: first.round_id,
+        roundNumber: first.round_number || 0,
+        timestamp: first.created_at ? new Date(first.created_at).getTime() : Date.now(),
+        dateStr: first.date_str || today,
+        timeStr: first.time_str || "12:00 PM",
+        customerName: first.customer_name || "Counter Customer",
+        agentName: clean,
+        agentId: first.user_id,
+        username: clean,
+        items,
+        totalAmount,
+        winningPayout: totalPayout,
+        status: ticketStatus,
+        claimedAt: first.claimed_at ? new Date(first.claimed_at).getTime() : undefined,
+        claimedBy: first.claimed_by,
+      });
+    }
+
+    const commission10 = Math.round(totalSales * 0.10);
+    const netCashToCollect = totalSales - totalClaimsPaid - commission10;
+
+    return {
+      success: true,
+      data: {
+        sales: totalSales,
+        claimsPaid: totalClaimsPaid,
+        unclaimedWon: totalUnclaimedWon,
+        commission10,
+        netCashToCollect,
+        ticketsCount: reconstructedTickets.length,
+        tickets: reconstructedTickets,
+        betsCount: bets.length,
+      },
+    };
+  } catch (e: any) {
+    return { success: false, error: e.message || "Failed to fetch daily hisab from Supabase" };
+  }
+}
+
+/**
+ * Subscribes to Supabase Realtime changes on `sorat_bets` for instant multi-device settlement updates
+ */
+export function subscribeToSoratBetsRealtime(onChange: () => void): () => void {
+  const client = getSupabaseClient();
+  if (!client) return () => {};
+
+  try {
+    const channel = client
+      .channel(`sorat_bets_realtime_${Date.now()}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "sorat_bets" },
+        () => {
+          onChange();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      try {
+        client.removeChannel(channel);
+      } catch {}
+    };
+  } catch {
+    return () => {};
   }
 }
 

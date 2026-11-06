@@ -18,8 +18,13 @@ import {
 } from "@/lib/userStore";
 import { getSynchronizedRoundState } from "@/lib/realtime";
 import { CARDS, getCardByIndex } from "@/lib/cards";
-import { getTickets, ThermalTicket } from "@/lib/ticketStore";
+import { getTickets, saveTickets, ThermalTicket } from "@/lib/ticketStore";
 import { executeDirectPrint, isDirectPrinterConnected } from "@/lib/thermalPrinter";
+import {
+  fetchAgentDailyTicketsAndBets,
+  subscribeToSoratBetsRealtime,
+  AgentDailyCloudSummary,
+} from "@/lib/supabase";
 
 interface UserAccountsViewProps {
   users: UserAccount[];
@@ -226,20 +231,87 @@ export function UserAccountsView({
   // Today's Date in IST
   const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
 
-  // Calculate Live Daily Settlement for Selected Agent
-  const agentTicketsToday = selectedUser
+  // Cloud Live Daily Summary from Supabase `sorat_bets`
+  const [cloudDailySummary, setCloudDailySummary] = useState<AgentDailyCloudSummary | null>(null);
+  const [isSyncingHisab, setIsSyncingHisab] = useState<boolean>(false);
+
+  // Sync Supabase cloud tickets & bets for selectedUser across devices
+  useEffect(() => {
+    if (!selectedUser) {
+      setCloudDailySummary(null);
+      return;
+    }
+
+    let isMounted = true;
+    const fetchHisab = async () => {
+      try {
+        setIsSyncingHisab(true);
+        const res = await fetchAgentDailyTicketsAndBets(selectedUser.id || selectedUser.username, todayStr);
+        if (isMounted && res.success && res.data) {
+          setCloudDailySummary(res.data);
+          // If tickets arrived from Supabase, merge into local ticketStore
+          if (res.data.tickets && res.data.tickets.length > 0) {
+            const current = getTickets("all");
+            const existingIds = new Set(current.map((t) => t.ticketId));
+            const newOnes = res.data.tickets.filter((t: any) => !existingIds.has(t.ticketId));
+            if (newOnes.length > 0) {
+              saveTickets([...newOnes, ...current]);
+            }
+          }
+        }
+      } catch {} finally {
+        if (isMounted) setIsSyncingHisab(false);
+      }
+    };
+
+    fetchHisab();
+
+    // Realtime postgres changes listener on `sorat_bets`
+    const unsub = subscribeToSoratBetsRealtime(() => {
+      fetchHisab();
+    });
+
+    const intervalId = setInterval(fetchHisab, 4000);
+
+    return () => {
+      isMounted = false;
+      unsub();
+      clearInterval(intervalId);
+    };
+  }, [selectedUser?.id, selectedUser?.username, todayStr]);
+
+  // Calculate Live Daily Settlement for Selected Agent (Cloud-First with Local Fallback)
+  const localAgentTickets = selectedUser
     ? getTickets(selectedUser.id || selectedUser.username).filter((t) => t.dateStr === todayStr)
     : [];
+
+  const agentTicketsToday: ThermalTicket[] =
+    cloudDailySummary?.tickets && cloudDailySummary.tickets.length > 0
+      ? (cloudDailySummary.tickets as ThermalTicket[])
+      : localAgentTickets;
+
   const ticketSalesToday = agentTicketsToday.reduce((sum, t) => sum + t.totalAmount, 0);
   const userBetsToday = selectedUser ? (selectedUser.bets || []).filter((b) => b.dateStr === todayStr) : [];
   const betsSalesToday = userBetsToday.reduce((sum, b) => sum + b.stake, 0);
-  const liveSalesToday = ticketSalesToday > 0 ? ticketSalesToday : betsSalesToday;
+
+  const liveSalesToday =
+    cloudDailySummary && cloudDailySummary.sales > 0
+      ? cloudDailySummary.sales
+      : ticketSalesToday > 0
+      ? ticketSalesToday
+      : betsSalesToday;
 
   const ticketClaimsToday = agentTicketsToday
     .filter((t) => t.status === "CLAIMED")
     .reduce((sum, t) => sum + (t.winningPayout || 0), 0);
   const betsPayoutsToday = userBetsToday.reduce((sum, b) => sum + (b.payout || 0), 0);
-  const liveClaimsToday = ticketClaimsToday > 0 ? ticketClaimsToday : betsPayoutsToday;
+
+  const liveClaimsToday =
+    cloudDailySummary && (cloudDailySummary.claimsPaid > 0 || cloudDailySummary.sales > 0)
+      ? cloudDailySummary.claimsPaid
+      : ticketClaimsToday > 0
+      ? ticketClaimsToday
+      : betsPayoutsToday;
 
   const liveCommission10 = Math.round(liveSalesToday * 0.10);
   const liveNetCashToCollect = liveSalesToday - liveClaimsToday - liveCommission10;
@@ -782,7 +854,12 @@ export function UserAccountsView({
 
               {/* Card 3: HOUSE GROSS PROFIT */}
               {(() => {
-                const houseProfit = profitStats.totalBetAmount - profitStats.totalWonAmount;
+                const effectiveBetAmount = Math.max(profitStats.totalBetAmount, cloudDailySummary?.sales || 0);
+                const effectiveWonAmount = Math.max(
+                  profitStats.totalWonAmount,
+                  (cloudDailySummary?.claimsPaid || 0) + (cloudDailySummary?.unclaimedWon || 0)
+                );
+                const houseProfit = effectiveBetAmount - effectiveWonAmount;
                 const isHouseGreen = houseProfit >= 0;
                 return (
                   <div
@@ -812,7 +889,7 @@ export function UserAccountsView({
                         : `-₹${Math.abs(houseProfit).toLocaleString("en-IN")}`}
                     </div>
                     <span className="text-[9px] text-muted-foreground block mt-0.5 font-mono">
-                      Staked ₹{profitStats.totalBetAmount.toLocaleString("en-IN")} • Won ₹{profitStats.totalWonAmount.toLocaleString("en-IN")}
+                      Staked ₹{effectiveBetAmount.toLocaleString("en-IN")} • Won ₹{effectiveWonAmount.toLocaleString("en-IN")}
                     </span>
                   </div>
                 );
