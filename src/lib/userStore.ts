@@ -87,10 +87,14 @@ export const CARD_NAMES = [
 ];
 
 export function getTodayDateStr(date = new Date()): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(date);
+  } catch {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
 }
 
 export function formatDate(date: number | Date = new Date()): string {
@@ -1854,7 +1858,8 @@ export function settleRoundBets(
 export function autoSettleAllPendingBets(
   currentRoundNumber: number,
   currentPhase: string,
-  currentWinner?: number | null
+  currentWinner?: number | null,
+  creditBalance = false
 ): boolean {
   const users = getUsers();
   let changed = false;
@@ -1884,6 +1889,10 @@ export function autoSettleAllPendingBets(
           const winCard = CARDS[winIdx];
           const isWin = bet.cardIndex === winIdx;
           const payout = isWin ? bet.stake * PAYOUT_MULTIPLIER : 0;
+
+          if (isWin && creditBalance) {
+            user.balance += payout;
+          }
 
           return {
             ...bet,

@@ -490,8 +490,23 @@ export async function placeSoratBetsRpc(params: {
   if (!client) return { success: false, error: "Supabase not configured" };
 
   try {
+    // 1. Resolve true players.id FIRST so RPC doesn't fail on foreign key constraint!
+    let resolvedUserId = params.userId;
+    try {
+      const { data: pData } = await client
+        .from("players")
+        .select("id")
+        .or(`id.eq.${params.userId},username.eq.${params.userId},username.eq.${params.userId.replace(/^@/, "")}`)
+        .limit(1)
+        .maybeSingle();
+
+      if (pData?.id) {
+        resolvedUserId = pData.id;
+      }
+    } catch {}
+
     const { data, error } = await client.rpc("place_sorat_bets", {
-      _user_id: params.userId,
+      _user_id: resolvedUserId,
       _round_id: params.roundId,
       _round_number: params.roundNumber,
       _ticket_id: params.ticketId,
@@ -508,20 +523,7 @@ export async function placeSoratBetsRpc(params: {
     console.warn("place_sorat_bets RPC warning, executing resilient direct sorat_bets insert:", error.message);
 
     // Resilient Direct Insert: Ensure bets are NEVER lost from Supabase
-    let resolvedUserId = params.userId;
-    try {
-      const { data: pData } = await client
-        .from("players")
-        .select("id")
-        .or(`id.eq.${params.userId},username.eq.${params.userId},username.eq.${params.userId.replace(/^@/, "")}`)
-        .limit(1)
-        .maybeSingle();
-
-      if (pData?.id) {
-        resolvedUserId = pData.id;
-      }
-    } catch {}
-
+    const totalStake = params.bets.reduce((s, b) => s + Number(b.amount || 0), 0);
     const nowIso = new Date().toISOString();
     const rows = params.bets.map((b, idx) => ({
       id: `bet_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 6)}`,
@@ -548,6 +550,26 @@ export async function placeSoratBetsRpc(params: {
     if (insertError) {
       return { success: false, error: insertError.message };
     }
+
+    // Direct balance deduction in players table if RPC was bypassed
+    try {
+      const { data: pRec } = await client
+        .from("players")
+        .select("balance")
+        .eq("id", resolvedUserId)
+        .maybeSingle();
+
+      if (pRec && typeof pRec.balance === "number") {
+        await client
+          .from("players")
+          .update({
+            balance: Math.max(0, pRec.balance - totalStake),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", resolvedUserId);
+      }
+    } catch {}
+
     return { success: true, data: insertData };
   } catch (e: any) {
     return { success: false, error: e.message || "Failed to place bets in Supabase" };
@@ -574,11 +596,11 @@ export async function declareSoratRoundRpc(params: {
       _selection_reason: params.selectionReason || "30_PERCENT_PROFIT_LOCK",
     });
 
-    // Enforce strict 9X payout directly in sorat_bets to prevent any 10X discrepancy
+    // Enforce strict 9X payout directly in sorat_bets and credit winner balances
     try {
       const { data: roundBets } = await client
         .from("sorat_bets")
-        .select("id, card_index, amount")
+        .select("id, card_index, amount, user_id")
         .eq("round_id", params.roundId);
 
       if (roundBets && roundBets.length > 0) {
@@ -590,6 +612,26 @@ export async function declareSoratRoundRpc(params: {
             .from("sorat_bets")
             .update({ status, payout })
             .eq("id", b.id);
+
+          // If winner and RPC had an error, guarantee player wallet gets credited in Supabase
+          if (isWin && b.user_id && payout > 0 && error) {
+            try {
+              const { data: pRec } = await client
+                .from("players")
+                .select("balance")
+                .eq("id", b.user_id)
+                .maybeSingle();
+              if (pRec && typeof pRec.balance === "number") {
+                await client
+                  .from("players")
+                  .update({
+                    balance: Number(pRec.balance || 0) + payout,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq("id", b.user_id);
+              }
+            } catch {}
+          }
         }
       }
     } catch (dbErr) {
@@ -1022,6 +1064,53 @@ export function subscribeToSoratBetsRealtime(onChange: () => void): () => void {
     return () => {};
   }
 }
+
+/**
+ * Subscribes to Supabase Realtime changes on `players` table for instant balance updates across devices
+ */
+export function subscribeToPlayerBalanceRealtime(
+  agentIdentifier: string,
+  onBalanceUpdate: (newBalance: number) => void
+): () => void {
+  const client = getSupabaseClient();
+  if (!client) return () => {};
+
+  const clean = (agentIdentifier || "").toLowerCase().replace(/^@/, "").trim();
+  if (!clean) return () => {};
+
+  try {
+    const channel = client
+      .channel(`player_balance_${clean}_${Date.now()}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "players" },
+        (payload: any) => {
+          if (payload?.new) {
+            const p = payload.new;
+            const pId = (p.id || "").toLowerCase().trim();
+            const pUser = (p.username || "").toLowerCase().replace(/^@/, "").trim();
+            if (pId === clean || pUser === clean) {
+              if (typeof p.balance === "number") {
+                onBalanceUpdate(p.balance);
+              } else if (p.balance !== undefined && !isNaN(Number(p.balance))) {
+                onBalanceUpdate(Number(p.balance));
+              }
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      try {
+        client.removeChannel(channel);
+      } catch {}
+    };
+  } catch {
+    return () => {};
+  }
+}
+
 
 
 

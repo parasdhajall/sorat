@@ -43,6 +43,7 @@ import {
   getCategorizedUserBets,
   getUserProfitStats,
   UserBetRecord,
+  setUserBalance,
 } from "@/lib/userStore";
 import { ThermalSlipModal } from "@/components/pos/ThermalSlipModal";
 import { PrinterSettingsModal } from "@/components/pos/PrinterSettingsModal";
@@ -51,7 +52,14 @@ import {
   executeDirectPrint,
   isDirectPrinterConnected,
 } from "@/lib/thermalPrinter";
-import { placeSoratBetsRpc, fetchAgentDailyTicketsAndBets } from "@/lib/supabase";
+import {
+  placeSoratBetsRpc,
+  fetchAgentDailyTicketsAndBets,
+  subscribeToPlayerBalanceRealtime,
+  subscribeToSoratBetsRealtime,
+  AgentDailyCloudSummary,
+  getSupabaseClient,
+} from "@/lib/supabase";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -156,6 +164,9 @@ export default function AgentPage() {
   const [claimHasSearched, setClaimHasSearched] = useState(false);
   const [claimNotice, setClaimNotice] = useState<string | null>(null);
 
+  // Cloud Live Daily Summary from Supabase `sorat_bets` (Exact sync with Admin Panel)
+  const [cloudDailySummary, setCloudDailySummary] = useState<AgentDailyCloudSummary | null>(null);
+
   // Period filter states for Shift, Tickets, and History tabs ("today" | "yesterday" | "custom" | "all")
   const [shiftPeriod, setShiftPeriod] = useState<"today" | "yesterday" | "custom" | "all">("today");
   const [ticketFilterPeriod, setTicketFilterPeriod] = useState<"today" | "yesterday" | "custom" | "all">("today");
@@ -175,17 +186,33 @@ export default function AgentPage() {
       setTicketsList(getTickets(id));
 
       // Asynchronously sync cloud tickets from Supabase `sorat_bets` across devices
-      fetchAgentDailyTicketsAndBets(id)
+      const today = getTodayDateStr();
+      fetchAgentDailyTicketsAndBets(id, today)
         .then((res) => {
-          if (res.success && res.data?.tickets && res.data.tickets.length > 0) {
-            const current = getTickets("all");
-            const existingIds = new Set(current.map((t) => t.ticketId));
-            const existingRounds = new Set(current.map((t) => t.roundId));
-            const toAdd = res.data.tickets.filter(
-              (t: any) => !existingIds.has(t.ticketId) && !existingRounds.has(t.roundId)
-            );
-            if (toAdd.length > 0) {
-              saveTickets([...toAdd, ...current]);
+          if (res.success && res.data) {
+            setCloudDailySummary(res.data);
+            if (res.data.tickets && res.data.tickets.length > 0) {
+              const current = getTickets("all");
+              const currentMap = new Map(current.map((t) => [t.ticketId, t]));
+
+              // Update existing tickets with cloud settlement info, add new cloud tickets
+              for (const cloudTkt of res.data.tickets as ThermalTicket[]) {
+                if (currentMap.has(cloudTkt.ticketId)) {
+                  const existing = currentMap.get(cloudTkt.ticketId)!;
+                  currentMap.set(cloudTkt.ticketId, {
+                    ...existing,
+                    status: cloudTkt.status,
+                    winningPayout: cloudTkt.winningPayout,
+                    claimedAt: cloudTkt.claimedAt || existing.claimedAt,
+                    claimedBy: cloudTkt.claimedBy || existing.claimedBy,
+                  });
+                } else {
+                  currentMap.set(cloudTkt.ticketId, cloudTkt);
+                }
+              }
+
+              const merged = Array.from(currentMap.values());
+              saveTickets(merged);
               setTicketsList(getTickets(id));
             }
           }
@@ -193,6 +220,7 @@ export default function AgentPage() {
         .catch(() => {});
     } else {
       setTicketsList([]);
+      setCloudDailySummary(null);
     }
   };
 
@@ -262,13 +290,67 @@ export default function AgentPage() {
         }
         recordRoundWinnerHistory(sync.roundNumber, fallbackWinner);
         settleTicketsForRound(sync.roundId, fallbackWinner, CARDS[fallbackWinner]?.name || "", activeRoomId);
-        settleRoundBets(sync.roundId, fallbackWinner, CARDS[fallbackWinner]?.name || "", false);
-        autoSettleAllPendingBets(sync.roundNumber, sync.phase, fallbackWinner);
+        settleRoundBets(sync.roundId, fallbackWinner, CARDS[fallbackWinner]?.name || "", true);
+        autoSettleAllPendingBets(sync.roundNumber, sync.phase, fallbackWinner, true);
         refreshAgentTickets();
+
+        // Instant Counter Balance update (No refresh needed!)
+        const u = getLoggedInAgent() || getActiveUser();
+        if (u) {
+          setAgentUser(u);
+          setAgentBalance(u.balance);
+        }
+        const sb = getSupabaseClient();
+        const curAgent = loggedInAgent || agentUserRef.current;
+        const targetId = curAgent?.id || curAgent?.username;
+        if (sb && targetId) {
+          sb.from("players")
+            .select("balance")
+            .or(`id.eq.${targetId},username.eq.${targetId}`)
+            .maybeSingle()
+            .then(({ data }) => {
+              if (data && typeof data.balance === "number") {
+                setAgentBalance(data.balance);
+                setAgentUser((prev) => ({ ...prev, balance: data.balance }));
+                setUserBalance(targetId, data.balance);
+              }
+            });
+        }
       }
     }, 250);
     return () => clearInterval(id);
   }, [declaredWinner, activeRoomId]);
+
+  // Realtime Supabase Subscription for Instant Counter Live Balance Updates (Zero-Refresh)
+  useEffect(() => {
+    const currentAgent = loggedInAgent || agentUser || getLoggedInAgent();
+    const id = currentAgent?.id || currentAgent?.username;
+    if (!id) return;
+
+    const unsubBalance = subscribeToPlayerBalanceRealtime(id, (newBalance) => {
+      setAgentBalance(newBalance);
+      setAgentUser((prev) => ({ ...prev, balance: newBalance }));
+      setUserBalance(id, newBalance);
+    });
+
+    return () => unsubBalance();
+  }, [loggedInAgent?.id, loggedInAgent?.username, agentUser?.id, agentUser?.username]);
+
+  // Realtime Supabase Subscription for Bets and Tickets Sync across all devices
+  useEffect(() => {
+    const unsubBets = subscribeToSoratBetsRealtime(() => {
+      refreshAgentTickets();
+    });
+
+    const pollId = setInterval(() => {
+      refreshAgentTickets();
+    }, 4000);
+
+    return () => {
+      unsubBets();
+      clearInterval(pollId);
+    };
+  }, [loggedInAgent?.id, loggedInAgent?.username]);
 
   // Sync Storage
   useEffect(() => {
@@ -321,9 +403,32 @@ export default function AgentPage() {
         setDeclaredWinner(msg.winner);
         recordRoundWinnerHistory(msg.roundNumber, msg.winner);
         settleTicketsForRound(msg.roundId, msg.winner, msg.winnerName, activeRoomId);
-        settleRoundBets(msg.roundId, msg.winner, msg.winnerName, false);
-        autoSettleAllPendingBets(msg.roundNumber, "select", msg.winner);
+        settleRoundBets(msg.roundId, msg.winner, msg.winnerName, true);
+        autoSettleAllPendingBets(msg.roundNumber, "select", msg.winner, true);
         refreshAgentTickets();
+
+        // Instant Counter Balance update (No refresh needed!)
+        const u = getLoggedInAgent() || getActiveUser();
+        if (u) {
+          setAgentUser(u);
+          setAgentBalance(u.balance);
+        }
+        const sb = getSupabaseClient();
+        const curAgent = loggedInAgent || agentUserRef.current;
+        const targetId = curAgent?.id || curAgent?.username;
+        if (sb && targetId) {
+          sb.from("players")
+            .select("balance")
+            .or(`id.eq.${targetId},username.eq.${targetId}`)
+            .maybeSingle()
+            .then(({ data }) => {
+              if (data && typeof data.balance === "number") {
+                setAgentBalance(data.balance);
+                setAgentUser((prev) => ({ ...prev, balance: data.balance }));
+                setUserBalance(targetId, data.balance);
+              }
+            });
+        }
       } else if (msg.type === "SYNC_FROM_TV") {
         setRoundNumber(msg.roundNumber);
         setRoundId(msg.roundId);
@@ -334,9 +439,32 @@ export default function AgentPage() {
           setDeclaredWinner(msg.winner);
           recordRoundWinnerHistory(msg.roundNumber, msg.winner);
           settleTicketsForRound(msg.roundId, msg.winner, CARDS[msg.winner]?.name || "", activeRoomId);
-          settleRoundBets(msg.roundId, msg.winner, CARDS[msg.winner]?.name || "", false);
-          autoSettleAllPendingBets(msg.roundNumber, msg.phase, msg.winner);
+          settleRoundBets(msg.roundId, msg.winner, CARDS[msg.winner]?.name || "", true);
+          autoSettleAllPendingBets(msg.roundNumber, msg.phase, msg.winner, true);
           refreshAgentTickets();
+
+          // Instant Counter Balance update (No refresh needed!)
+          const u = getLoggedInAgent() || getActiveUser();
+          if (u) {
+            setAgentUser(u);
+            setAgentBalance(u.balance);
+          }
+          const sb = getSupabaseClient();
+          const curAgent = loggedInAgent || agentUserRef.current;
+          const targetId = curAgent?.id || curAgent?.username;
+          if (sb && targetId) {
+            sb.from("players")
+              .select("balance")
+              .or(`id.eq.${targetId},username.eq.${targetId}`)
+              .maybeSingle()
+              .then(({ data }) => {
+                if (data && typeof data.balance === "number") {
+                  setAgentBalance(data.balance);
+                  setAgentUser((prev) => ({ ...prev, balance: data.balance }));
+                  setUserBalance(targetId, data.balance);
+                }
+              });
+          }
         }
       } else if (msg.type === "SET_AGENT_BALANCE") {
         setAgentBalance(msg.balance);
@@ -680,6 +808,9 @@ export default function AgentPage() {
   }, [shiftPeriod, todayTickets, yesterdayTickets, customDateTickets, allTicketsCombined]);
 
   const shiftSales = useMemo(() => {
+    if (shiftPeriod === "today" && cloudDailySummary && (cloudDailySummary.sales > 0 || cloudDailySummary.ticketsCount > 0)) {
+      return cloudDailySummary.sales;
+    }
     const calcDateSales = (dateStr: string) => {
       const tkts = getTicketsForDate(dateStr);
       const tSales = tkts.reduce((sum, t) => sum + t.totalAmount, 0);
@@ -693,9 +824,12 @@ export default function AgentPage() {
     const tSales = allTicketsCombined.reduce((sum, t) => sum + t.totalAmount, 0);
     const bSales = (agentUser?.bets || []).reduce((sum, b) => sum + b.stake, 0);
     return tSales > 0 ? tSales : bSales;
-  }, [shiftPeriod, todayStr, yesterdayStr, customDate, allTicketsCombined, agentUser, ticketsList]);
+  }, [shiftPeriod, todayStr, yesterdayStr, customDate, allTicketsCombined, agentUser, ticketsList, cloudDailySummary]);
 
   const shiftPayouts = useMemo(() => {
+    if (shiftPeriod === "today" && cloudDailySummary && (cloudDailySummary.sales > 0 || cloudDailySummary.ticketsCount > 0)) {
+      return cloudDailySummary.claimsPaid;
+    }
     const calcDatePayouts = (dateStr: string) => {
       const tkts = getTicketsForDate(dateStr);
       const tPayouts = tkts.reduce((sum, t) => sum + (t.winningPayout || 0), 0);
@@ -709,10 +843,51 @@ export default function AgentPage() {
     const tPayouts = allTicketsCombined.reduce((sum, t) => sum + (t.winningPayout || 0), 0);
     const bPayouts = (agentUser?.bets || []).reduce((sum, b) => sum + (b.payout || 0), 0);
     return tPayouts > 0 ? tPayouts : bPayouts;
-  }, [shiftPeriod, todayStr, yesterdayStr, customDate, allTicketsCombined, agentUser, ticketsList]);
+  }, [shiftPeriod, todayStr, yesterdayStr, customDate, allTicketsCombined, agentUser, ticketsList, cloudDailySummary]);
 
   const shiftCommission10 = Math.round(shiftSales * 0.10);
   const shiftCashSurplus = Math.max(0, shiftSales - shiftPayouts);
+  const shiftNetCashToCollect = shiftSales - shiftPayouts - shiftCommission10;
+
+  const handlePrintDailyHisabSlip = () => {
+    const curAgent = loggedInAgent || agentUser || getLoggedInAgent();
+    if (!curAgent) return;
+
+    const paperWidth = ((typeof window !== "undefined" && localStorage.getItem("sorat_printer_width")) as any) || "58mm";
+    const hisabTicket: ThermalTicket = {
+      ticketId: `HISAB-${(curAgent.username || "AGENT").toUpperCase()}-${todayStr.replace(/-/g, "")}`,
+      barcode: `${todayStr.replace(/-/g, "")}99`,
+      roundId: `DAILY-${todayStr}`,
+      roundNumber: 0,
+      timestamp: Date.now(),
+      dateStr: todayStr,
+      timeStr: new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true }),
+      customerName: "DAILY CASH SETTLEMENT",
+      agentName: curAgent.displayName || curAgent.username,
+      agentId: curAgent.id,
+      username: curAgent.username,
+      items: [
+        { cardIndex: 0, cardName: "1. TOTAL SALES (विक्री)", amount: shiftSales },
+        { cardIndex: 1, cardName: "2. CLAIMS PAID (वाटप)", amount: -shiftPayouts },
+        { cardIndex: 2, cardName: "3. 10% COMMISSION", amount: -shiftCommission10 },
+        { cardIndex: 3, cardName: "4. NET CASH TO COLLECT", amount: shiftNetCashToCollect },
+      ],
+      totalAmount: shiftSales,
+      winningPayout: shiftPayouts,
+      status: "SETTLED",
+    };
+
+    setPrintTicket(hisabTicket);
+    if (isDirectPrinterConnected()) {
+      executeDirectPrint(hisabTicket, paperWidth).then((res) => {
+        if (!res.success) {
+          setShowSlipModal(true);
+        }
+      });
+    } else {
+      setShowSlipModal(true);
+    }
+  };
 
   // Deposits for selected period
   const shiftDeposits = useMemo(() => {
@@ -1939,6 +2114,30 @@ export default function AgentPage() {
                   <span className="font-display font-black text-sm text-primary">
                     +₹{shiftCommission10.toLocaleString("en-IN")}
                   </span>
+                </div>
+
+                <div className="flex justify-between py-2 bg-emerald-500/10 px-2.5 rounded-xl border border-emerald-500/30">
+                  <span className="font-sans font-bold text-emerald-400">Net Cash to Collect (निव्वळ जमा रोकड):</span>
+                  <span className="font-display font-black text-sm text-emerald-400">
+                    ₹{shiftNetCashToCollect.toLocaleString("en-IN")}
+                  </span>
+                </div>
+
+                <div className="pt-2 flex items-center justify-between gap-2 border-t border-border/40">
+                  <span className="text-[10px] text-muted-foreground flex items-center gap-1 font-mono">
+                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse inline-block" />
+                    <span>Cloud Synced with Admin</span>
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={handlePrintDailyHisabSlip}
+                    className="px-3 py-1.5 rounded-xl bg-gradient-gold text-primary-foreground font-display text-[11px] font-black shadow hover:brightness-110 active:scale-95 transition flex items-center gap-1.5 cursor-pointer"
+                    title="Print 58mm Thermal Daily Hisab Slip"
+                  >
+                    <span>🖨️</span>
+                    <span>PRINT HISAB SLIP</span>
+                  </button>
                 </div>
               </div>
             </div>

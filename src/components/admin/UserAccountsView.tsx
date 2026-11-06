@@ -23,6 +23,7 @@ import { executeDirectPrint, isDirectPrinterConnected } from "@/lib/thermalPrint
 import {
   fetchAgentDailyTicketsAndBets,
   subscribeToSoratBetsRealtime,
+  subscribeToPlayerBalanceRealtime,
   AgentDailyCloudSummary,
 } from "@/lib/supabase";
 
@@ -249,14 +250,25 @@ export function UserAccountsView({
         const res = await fetchAgentDailyTicketsAndBets(selectedUser.id || selectedUser.username, todayStr);
         if (isMounted && res.success && res.data) {
           setCloudDailySummary(res.data);
-          // If tickets arrived from Supabase, merge into local ticketStore
+          // If tickets arrived from Supabase, merge and update in local ticketStore
           if (res.data.tickets && res.data.tickets.length > 0) {
             const current = getTickets("all");
-            const existingIds = new Set(current.map((t) => t.ticketId));
-            const newOnes = res.data.tickets.filter((t: any) => !existingIds.has(t.ticketId));
-            if (newOnes.length > 0) {
-              saveTickets([...newOnes, ...current]);
+            const currentMap = new Map(current.map((t) => [t.ticketId, t]));
+            for (const cloudTkt of res.data.tickets as ThermalTicket[]) {
+              if (currentMap.has(cloudTkt.ticketId)) {
+                const existing = currentMap.get(cloudTkt.ticketId)!;
+                currentMap.set(cloudTkt.ticketId, {
+                  ...existing,
+                  status: cloudTkt.status,
+                  winningPayout: cloudTkt.winningPayout,
+                  claimedAt: cloudTkt.claimedAt || existing.claimedAt,
+                  claimedBy: cloudTkt.claimedBy || existing.claimedBy,
+                });
+              } else {
+                currentMap.set(cloudTkt.ticketId, cloudTkt);
+              }
             }
+            saveTickets(Array.from(currentMap.values()));
           }
         }
       } catch {} finally {
@@ -267,15 +279,22 @@ export function UserAccountsView({
     fetchHisab();
 
     // Realtime postgres changes listener on `sorat_bets`
-    const unsub = subscribeToSoratBetsRealtime(() => {
+    const unsubBets = subscribeToSoratBetsRealtime(() => {
       fetchHisab();
+    });
+
+    // Realtime postgres changes listener on `players` balance for instant wallet balance sync
+    const selIdentifier = selectedUser.id || selectedUser.username;
+    const unsubBalance = subscribeToPlayerBalanceRealtime(selIdentifier, () => {
+      onUsersChange();
     });
 
     const intervalId = setInterval(fetchHisab, 4000);
 
     return () => {
       isMounted = false;
-      unsub();
+      unsubBets();
+      unsubBalance();
       clearInterval(intervalId);
     };
   }, [selectedUser?.id, selectedUser?.username, todayStr]);
