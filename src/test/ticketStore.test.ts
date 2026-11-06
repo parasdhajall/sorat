@@ -4,6 +4,7 @@ import {
   getTickets,
   settleTicketsForRound,
   claimTicket,
+  findTicketByIdOrBarcode,
 } from "@/lib/ticketStore";
 
 describe("Thermal Printer Ticket POS Engine", () => {
@@ -52,9 +53,39 @@ describe("Thermal Printer Ticket POS Engine", () => {
     expect(settled.winningPayout).toBe(180);
 
     // Claim the winning payout at counter
-    const claimed = claimTicket(settled.ticketId)!;
+    const claimed = claimTicket(settled.ticketId, "Agent Kalyan")!;
     expect(claimed.status).toBe("CLAIMED");
     expect(claimed.claimedAt).toBeDefined();
+    expect(claimed.claimedBy).toBe("Agent Kalyan");
+
+    // Attempting to claim again returns already claimed ticket without re-crediting
+    const doubleClaim = claimTicket(settled.ticketId, "Agent Kalyan");
+    expect(doubleClaim?.status).toBe("CLAIMED");
+  });
+
+  it("finds ticket by ID, full barcode, or trailing 4 digits", () => {
+    const ticket = createTicket({
+      roundId: "#0870",
+      roundNumber: 870,
+      items: [{ cardIndex: 0, cardName: "पतंग", amount: 100 }],
+    });
+
+    // Search by full ticket ID
+    const foundById = findTicketByIdOrBarcode(ticket.ticketId);
+    expect(foundById?.ticketId).toBe(ticket.ticketId);
+
+    // Search by full barcode
+    const foundByBarcode = findTicketByIdOrBarcode(ticket.barcode);
+    expect(foundByBarcode?.ticketId).toBe(ticket.ticketId);
+
+    // Search by trailing 4 digits
+    const trailing4 = ticket.ticketId.slice(-4);
+    const foundByTrailing = findTicketByIdOrBarcode(trailing4);
+    expect(foundByTrailing?.ticketId).toBe(ticket.ticketId);
+
+    // Non-existent search
+    const notFound = findTicketByIdOrBarcode("NON_EXISTENT_9999");
+    expect(notFound).toBeNull();
   });
 
   it("marks ticket as LOST when none of its cards win", () => {

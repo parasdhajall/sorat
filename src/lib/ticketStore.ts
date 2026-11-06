@@ -1,6 +1,7 @@
 import { getTodayDateStr, formatTime } from "./userStore";
 import { CARDS } from "./cards";
 import { PAYOUT_MULTIPLIER } from "./realtime";
+import { claimTicketInSupabase } from "./supabase";
 
 export interface BetItem {
   cardIndex: number;
@@ -28,6 +29,7 @@ export interface ThermalTicket {
   winningCardName?: string;
   winningPayout?: number;
   claimedAt?: number;
+  claimedBy?: string;
 }
 
 const STORAGE_KEY = "sorat_thermal_tickets_v1";
@@ -247,11 +249,57 @@ export function settleTicketsForRound(
 }
 
 /**
- * Mark a winning ticket as CLAIMED (Cash paid to customer).
+ * Finds a ticket across all counters by Ticket ID, Barcode, or trailing digits.
  */
-export function claimTicket(ticketId: string): ThermalTicket | null {
-  const tickets = getTickets();
-  const idx = tickets.findIndex((t) => t.ticketId === ticketId);
+export function findTicketByIdOrBarcode(query: string): ThermalTicket | null {
+  if (!query) return null;
+  const clean = query.trim().toLowerCase().replace(/^#/, "");
+  if (!clean) return null;
+
+  const tickets = getTickets("all");
+
+  // 1. Exact match by ticketId or barcode
+  const exact = tickets.find(
+    (t) =>
+      t.ticketId.toLowerCase() === clean ||
+      t.barcode.toLowerCase() === clean
+  );
+  if (exact) return exact;
+
+  // 2. Trailing numeric match (e.g. customer entered last 4 or 6 digits like "9281" or "08459281")
+  const digitsOnly = clean.replace(/\D/g, "");
+  if (digitsOnly.length >= 4) {
+    const byDigits = tickets.find(
+      (t) =>
+        t.barcode === digitsOnly ||
+        t.barcode.endsWith(digitsOnly) ||
+        t.ticketId.replace(/\D/g, "").endsWith(digitsOnly)
+    );
+    if (byDigits) return byDigits;
+  }
+
+  // 3. Substring match
+  const partial = tickets.find(
+    (t) =>
+      t.ticketId.toLowerCase().includes(clean) ||
+      t.barcode.toLowerCase().includes(clean)
+  );
+  return partial || null;
+}
+
+/**
+ * Mark a winning ticket as CLAIMED (Cash paid to customer).
+ * Anti-Fraud Protected: Records claimedAt timestamp and claimedBy agent name.
+ */
+export function claimTicket(ticketId: string, claimedBy?: string): ThermalTicket | null {
+  const tickets = getTickets("all");
+  const clean = ticketId.trim().toLowerCase();
+  const idx = tickets.findIndex(
+    (t) =>
+      t.ticketId.toLowerCase() === clean ||
+      t.barcode.toLowerCase() === clean ||
+      t.ticketId.toLowerCase().endsWith(clean)
+  );
   if (idx === -1) return null;
 
   const target = { ...tickets[idx] };
@@ -259,8 +307,15 @@ export function claimTicket(ticketId: string): ThermalTicket | null {
 
   target.status = "CLAIMED";
   target.claimedAt = Date.now();
+  target.claimedBy = claimedBy || "Counter Agent";
   tickets[idx] = target;
   saveTickets(tickets);
+
+  // Sync claimed status to Supabase `sorat_bets`
+  try {
+    claimTicketInSupabase(target.ticketId, target.claimedBy).catch(() => {});
+  } catch {}
+
   return target;
 }
 

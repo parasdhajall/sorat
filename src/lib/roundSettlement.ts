@@ -36,6 +36,7 @@ export function getRecordedRoundWinner(roundNumber: number, roomId?: string): nu
           return map[roundNumber];
         }
       }
+      return null;
     }
     const raw = localStorage.getItem(ROUND_WINNERS_STORAGE_KEY);
     if (raw) {

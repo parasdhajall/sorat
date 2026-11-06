@@ -1,4 +1,4 @@
-import { getSupabaseClient, placeSoratBetsRpc, depositToPlayerRpc } from "./supabase";
+import { getSupabaseClient, placeSoratBetsRpc, depositToPlayerRpc, toggleCounterKillSwitchRpc } from "./supabase";
 import { RAMU_SIMULATED_BETS } from "./ramuSimulationData";
 import { getDeterministicRoundWinner, PAYOUT_MULTIPLIER } from "./realtime";
 import { CARDS, getRecordedRoundWinner } from "./cards";
@@ -41,7 +41,7 @@ export interface UserAccount {
   deposits: UserDeposit[];
   bets: UserBetRecord[];
   createdAt: number;
-  status: "ACTIVE" | "INACTIVE";
+  status: "ACTIVE" | "INACTIVE" | "PAUSED";
   notes?: string;
   pin?: string; // 4-digit PIN for Agent app login (default: "1234")
   agentCode?: string; // e.g. "AGENT-101"
@@ -1281,6 +1281,32 @@ export function updateUserPin(userId: string, newPin: string): UserAccount {
 }
 
 /**
+ * Emergency Counter Kill-Switch: Toggle pause/resume betting for any specific counter.
+ */
+export function toggleCounterKillSwitch(userId: string, isPaused?: boolean): UserAccount {
+  const users = getUsers();
+  const idx = users.findIndex((u) => u.id === userId || u.username === userId);
+  if (idx === -1) throw new Error("User account not found");
+
+  const current = users[idx];
+  const nextPaused = typeof isPaused === "boolean" ? isPaused : (current.status !== "PAUSED");
+  const target: UserAccount = {
+    ...current,
+    status: nextPaused ? "PAUSED" : "ACTIVE",
+  };
+  users[idx] = target;
+  saveUsers(users);
+  broadcastUsersToCloud(users);
+
+  // Sync to Supabase
+  try {
+    toggleCounterKillSwitchRpc(target.id, nextPaused).catch(() => {});
+  } catch {}
+
+  return target;
+}
+
+/**
  * Atomically deducts stake from an agent account and records the bets in their ledger.
  * Returns the updated balance and success status.
  */
@@ -1321,6 +1347,15 @@ export function deductAgentBalance(
 
   if (idx === -1) {
     return { success: false, newBalance: 0, error: `Agent "${agentIdentifier}" not found` };
+  }
+
+  // Emergency Counter Kill-Switch Enforcement
+  if (users[idx].status === "PAUSED" || users[idx].status === "INACTIVE") {
+    return {
+      success: false,
+      newBalance: users[idx].balance,
+      error: "🛑 Counter Betting Paused by Admin! Betting is currently suspended.",
+    };
   }
 
   if (users[idx].balance < totalStake) {

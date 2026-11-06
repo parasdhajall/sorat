@@ -564,4 +564,97 @@ export async function depositToPlayerRpc(params: {
   }
 }
 
+/**
+ * Claims a ticket in Supabase `sorat_bets` (Anti-Fraud protection)
+ */
+export async function claimTicketInSupabase(
+  ticketId: string,
+  claimedBy?: string
+): Promise<{ success: boolean; updatedCount?: number; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) return { success: false, error: "Supabase not configured" };
+
+  try {
+    const cleanId = ticketId.trim();
+    const nowIso = new Date().toISOString();
+
+    const { data, error } = await client
+      .from("sorat_bets")
+      .update({
+        status: "claimed",
+        claimed_at: nowIso,
+        claimed_by: claimedBy || "Counter Agent",
+      })
+      .or(`ticket_id.eq.${cleanId},id.eq.${cleanId}`)
+      .select();
+
+    if (error) {
+      // In case claimed_at or claimed_by columns don't exist yet, fallback to status = 'claimed'
+      const fallback = await client
+        .from("sorat_bets")
+        .update({ status: "claimed" })
+        .or(`ticket_id.eq.${cleanId},id.eq.${cleanId}`)
+        .select();
+
+      if (fallback.error) {
+        return { success: false, error: fallback.error.message };
+      }
+      return { success: true, updatedCount: fallback.data?.length || 0 };
+    }
+
+    return { success: true, updatedCount: data?.length || 0 };
+  } catch (e: any) {
+    return { success: false, error: e.message || "Failed to claim ticket in Supabase" };
+  }
+}
+
+/**
+ * Fetches ticket audit records directly from Supabase `sorat_bets`
+ */
+export async function fetchTicketAuditFromSupabase(
+  ticketId: string
+): Promise<{ success: boolean; bets?: any[]; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) return { success: false, error: "Supabase not configured" };
+
+  try {
+    const cleanId = ticketId.trim();
+    const { data, error } = await client
+      .from("sorat_bets")
+      .select("*")
+      .or(`ticket_id.eq.${cleanId},ticket_id.ilike.%${cleanId}%,id.eq.${cleanId}`);
+
+    if (error) return { success: false, error: error.message };
+    return { success: true, bets: data || [] };
+  } catch (e: any) {
+    return { success: false, error: e.message || "Failed to fetch ticket from Supabase" };
+  }
+}
+
+/**
+ * Toggles Counter Emergency Kill Switch in Supabase players table
+ */
+export async function toggleCounterKillSwitchRpc(
+  userId: string,
+  isPaused: boolean
+): Promise<{ success: boolean; status?: string; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) return { success: false, error: "Supabase not configured" };
+
+  try {
+    const status = isPaused ? "PAUSED" : "ACTIVE";
+    const { data, error } = await client
+      .from("players")
+      .update({ status, updated_at: new Date().toISOString() })
+      .or(`id.eq.${userId},username.eq.${userId}`)
+      .select();
+
+    if (error) return { success: false, error: error.message };
+    return { success: true, status };
+  } catch (e: any) {
+    return { success: false, error: e.message || "Failed to toggle kill switch in Supabase" };
+  }
+}
+
+
 

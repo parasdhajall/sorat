@@ -18,6 +18,7 @@ import {
   getTickets,
   clearTickets,
   claimTicket,
+  findTicketByIdOrBarcode,
   settleTicketsForRound,
   ThermalTicket,
   BetItem,
@@ -49,6 +50,7 @@ import {
   executeDirectPrint,
   isDirectPrinterConnected,
 } from "@/lib/thermalPrinter";
+import { placeSoratBetsRpc } from "@/lib/supabase";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -126,11 +128,11 @@ export default function AgentPage() {
   });
 
   // Persist Active Tab so page updates/reloads never reset the agent from Tickets/Shift/History back to Bet Book
-  const [activeTab, setActiveTabState] = useState<"punch" | "tickets" | "shift" | "history" | "printer">(() => {
+  const [activeTab, setActiveTabState] = useState<"punch" | "claim" | "tickets" | "shift" | "history" | "printer">(() => {
     if (typeof window !== "undefined") {
       try {
         const saved = localStorage.getItem("sorat_active_agent_tab");
-        if (saved === "punch" || saved === "tickets" || saved === "shift" || saved === "history" || saved === "printer") {
+        if (saved === "punch" || saved === "claim" || saved === "tickets" || saved === "shift" || saved === "history" || saved === "printer") {
           return saved;
         }
       } catch {}
@@ -138,7 +140,7 @@ export default function AgentPage() {
     return "punch";
   });
 
-  const setActiveTab = (tab: "punch" | "tickets" | "shift" | "history" | "printer") => {
+  const setActiveTab = (tab: "punch" | "claim" | "tickets" | "shift" | "history" | "printer") => {
     setActiveTabState(tab);
     if (typeof window !== "undefined") {
       try {
@@ -146,6 +148,12 @@ export default function AgentPage() {
       } catch {}
     }
   };
+
+  // Dedicated Ticket Claiming & Verification State
+  const [claimSearchInput, setClaimSearchInput] = useState("");
+  const [claimVerifiedTicket, setClaimVerifiedTicket] = useState<ThermalTicket | null>(null);
+  const [claimHasSearched, setClaimHasSearched] = useState(false);
+  const [claimNotice, setClaimNotice] = useState<string | null>(null);
 
   // Period filter states for Shift, Tickets, and History tabs ("today" | "yesterday" | "custom" | "all")
   const [shiftPeriod, setShiftPeriod] = useState<"today" | "yesterday" | "custom" | "all">("today");
@@ -349,6 +357,11 @@ export default function AgentPage() {
 
   // Punch Bet & Trigger Thermal Print
   const handlePunchAndPrint = () => {
+    if (agentUser.status === "PAUSED") {
+      alert("🛑 Ye counter Admin dwara PAUSE kar diya gaya hai! Betting filhaal band hai.");
+      return;
+    }
+
     if (phase !== "bet") {
       alert("Betting is currently closed for this round!");
       return;
@@ -411,12 +424,24 @@ export default function AgentPage() {
       roomId: activeRoomId,
     });
 
+    // 6. Direct Supabase Bet Persistence (Async Cloud Audit)
+    placeSoratBetsRpc({
+      userId: agentUser.id || agentUser.username,
+      roundId,
+      roundNumber,
+      ticketId: newTicket.ticketId,
+      customerName: customerName.trim() || undefined,
+      dateStr: newTicket.dateStr,
+      timeStr: newTicket.timeStr,
+      bets: items,
+    }).catch(() => {});
+
     // Refresh tickets & clear staged selection (scoped to current agent)
     setTicketsList(getTickets(agentUser.id || agentUser.username));
     setSelectedCards({});
     setCustomerName("");
 
-    // 5. Direct Thermal Print or Preview Slip
+    // 7. Direct Thermal Print or Preview Slip
     setPrintTicket(newTicket);
     const paperWidth = ((typeof window !== "undefined" && localStorage.getItem("sorat_printer_width")) as any) || "58mm";
     const autoPrint = typeof window !== "undefined" && localStorage.getItem("sorat_auto_print") !== "false";
@@ -428,10 +453,37 @@ export default function AgentPage() {
     }
   };
 
+  const handleVerifyTicketForClaim = (q?: string) => {
+    const query = (q ?? claimSearchInput).trim();
+    if (!query) {
+      setClaimVerifiedTicket(null);
+      setClaimHasSearched(false);
+      setClaimNotice("Kripya Ticket ID ya 4-digit code daalein.");
+      return;
+    }
+    setClaimHasSearched(true);
+    setClaimNotice(null);
+    const found = findTicketByIdOrBarcode(query);
+    setClaimVerifiedTicket(found);
+    if (!found) {
+      setClaimNotice(`Slip #${query} system me nahi mili. Kripya barcode ya ticket number check karein.`);
+    }
+  };
+
+  const handleDisburseClaimCash = (ticketId: string) => {
+    const updated = claimTicket(ticketId, agentUser.displayName || agentUser.username);
+    if (updated) {
+      setClaimVerifiedTicket(updated);
+      setTicketsList(getTickets(agentUser?.id || agentUser?.username));
+      setClaimNotice(`✅ Cash ₹${updated.winningPayout} grahak ko de diya gaya! Ticket CLAIMED mark ho gaya.`);
+    }
+  };
+
   const handleClaimPrize = (ticketId: string) => {
-    const updated = claimTicket(ticketId);
+    const updated = claimTicket(ticketId, agentUser.displayName || agentUser.username);
     if (updated) {
       setTicketsList(getTickets(agentUser?.id || agentUser?.username));
+      setClaimVerifiedTicket(updated);
       alert(`Ticket #${ticketId} prize of ₹${updated.winningPayout} marked as PAID! Customer ko cash de dijiye.`);
     }
   };
@@ -957,7 +1009,7 @@ export default function AgentPage() {
         )}
 
         {/* App Sub-Navigation Tabs */}
-        <div className="grid grid-cols-5 gap-1 bg-muted/80 p-1 rounded-xl border border-border text-xs">
+        <div className="grid grid-cols-6 gap-1 bg-muted/80 p-1 rounded-xl border border-border text-xs">
           <button
             type="button"
             onClick={() => setActiveTab("punch")}
@@ -968,7 +1020,24 @@ export default function AgentPage() {
             }`}
           >
             <span className="text-sm">🎯</span>
-            <span className="text-[9px] leading-tight font-bold">Bet Book</span>
+            <span className="text-[9px] leading-tight font-bold">Daav</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("claim");
+              setClaimSearchInput("");
+            }}
+            className={`py-2 text-center rounded-lg font-bold transition flex flex-col items-center justify-center gap-0.5 border ${
+              activeTab === "claim"
+                ? "bg-emerald-500 text-black border-emerald-400 shadow-md font-black"
+                : "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20"
+            }`}
+            title="Claim Winning Ticket"
+          >
+            <span className="text-sm">💰</span>
+            <span className="text-[9px] leading-tight font-black">Claim</span>
           </button>
 
           <button
@@ -984,7 +1053,7 @@ export default function AgentPage() {
             }`}
           >
             <span className="text-sm">🎟️</span>
-            <span className="text-[9px] leading-tight font-bold">Tickets ({allTicketsCombined.length})</span>
+            <span className="text-[9px] leading-tight font-bold">Slips ({allTicketsCombined.length})</span>
           </button>
 
           <button
@@ -1010,7 +1079,7 @@ export default function AgentPage() {
             }`}
           >
             <span className="text-sm">📜</span>
-            <span className="text-[9px] leading-tight font-bold">Daav Log</span>
+            <span className="text-[9px] leading-tight font-bold">Log</span>
           </button>
 
           <button
@@ -1027,7 +1096,7 @@ export default function AgentPage() {
             title="Printer Connect & Bluetooth Settings"
           >
             <span className="text-sm">🖨️</span>
-            <span className="text-[9px] leading-tight font-black">Printer</span>
+            <span className="text-[9px] leading-tight font-black">Print</span>
           </button>
         </div>
       </header>
@@ -1039,6 +1108,19 @@ export default function AgentPage() {
         {/* TAB 1: PUNCH BETS */}
         {activeTab === "punch" && (
           <div className="space-y-3">
+            {/* Emergency Counter Kill-Switch Alert */}
+            {agentUser.status === "PAUSED" && (
+              <div className="rounded-2xl border-2 border-destructive bg-destructive/20 p-3.5 text-center space-y-1.5 shadow-lg animate-pulse">
+                <span className="text-2xl block">🛑</span>
+                <h3 className="font-display text-sm font-black text-destructive uppercase">
+                  COUNTER BETTING PAUSED BY ADMIN
+                </h3>
+                <p className="text-xs text-destructive-foreground font-medium">
+                  Aapka counter Admin dwara temporarily pause kar diya gaya hai. Kripya main office se sampark karein.
+                </p>
+              </div>
+            )}
+
             {/* Live Winner Result Pop Banner */}
             {phase === "result" && declaredWinner !== null && (
               <div className="rounded-2xl border-2 border-emerald-400 bg-gradient-to-r from-emerald-950 via-zinc-900 to-emerald-950 p-3.5 text-center space-y-1.5 shadow-2xl animate-in zoom-in-95 duration-300">
@@ -1181,7 +1263,264 @@ export default function AgentPage() {
           </div>
         )}
 
-        {/* TAB 2: TICKETS LIST & CLAIM INAM */}
+        {/* ============================================================== */}
+        {/* TAB: CLAIM TICKET & ANTI-FRAUD VERIFICATION                   */}
+        {/* ============================================================== */}
+        {activeTab === "claim" && (
+          <div className="space-y-3.5">
+            {/* Header Description */}
+            <div className="rounded-2xl border border-primary/40 bg-gradient-to-r from-amber-500/15 via-primary/10 to-amber-500/5 p-3.5 shadow-sm space-y-3">
+              <div className="flex items-center gap-2.5">
+                <div className="h-10 w-10 rounded-xl bg-gradient-gold grid place-items-center font-display text-lg text-primary-foreground shadow-gold shrink-0">
+                  💰
+                </div>
+                <div>
+                  <h2 className="font-display text-sm font-black text-foreground">
+                    CLAIM TICKET / तिकीट क्लेम
+                  </h2>
+                  <p className="text-[10px] text-muted-foreground font-medium">
+                    Grahak ki winning slip verify karein aur cash disburse karein. Ek parchi sirf ek baar claim hogi.
+                  </p>
+                </div>
+              </div>
+
+              {/* Fast Input Form */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleVerifyTicketForClaim();
+                }}
+                className="flex items-center gap-2"
+              >
+                <div className="relative flex-1">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">🎟️</span>
+                  <input
+                    type="text"
+                    autoFocus
+                    value={claimSearchInput}
+                    onChange={(e) => setClaimSearchInput(e.target.value)}
+                    placeholder="Ticket ID / 4-Digit Code (उदा. 9281 किंवा TKT-0845-9281)..."
+                    className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-border bg-background text-foreground text-xs font-mono font-bold focus:border-primary outline-none"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="px-4 py-2.5 rounded-xl bg-gradient-gold text-primary-foreground font-display text-xs font-black shadow-gold hover:brightness-110 active:scale-95 transition flex items-center gap-1 cursor-pointer shrink-0"
+                >
+                  <span>🔍</span>
+                  <span>VERIFY</span>
+                </button>
+              </form>
+            </div>
+
+            {/* Notification / Error banner */}
+            {claimNotice && (
+              <div className="rounded-xl border border-primary/40 bg-primary/15 p-2.5 text-center text-xs font-bold text-primary animate-in fade-in">
+                {claimNotice}
+              </div>
+            )}
+
+            {/* VERIFICATION CARD */}
+            {claimVerifiedTicket ? (
+              <div className="space-y-3 animate-in fade-in zoom-in-95">
+                {/* CASE 1: WON & UNCLAIMED (BIG GREEN BANNER) */}
+                {claimVerifiedTicket.status === "WON" && (
+                  <div className="rounded-2xl border-2 border-emerald-500 bg-emerald-500/15 p-4 shadow-xl space-y-3.5">
+                    <div className="flex items-center justify-between border-b border-emerald-500/40 pb-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-2xl animate-bounce">🏆</span>
+                        <div>
+                          <span className="text-xs font-black uppercase text-emerald-400 tracking-wider block">
+                            WINNER: Card [{claimVerifiedTicket.winningCardName}] • Payout: ₹{claimVerifiedTicket.winningPayout?.toLocaleString("en-IN")}
+                          </span>
+                          <span className="font-mono text-xs font-bold text-foreground">
+                            Slip #{claimVerifiedTicket.ticketId} • Round {claimVerifiedTicket.roundId}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="px-2.5 py-1 rounded-full bg-emerald-500 text-black text-[10px] font-black uppercase shadow">
+                        READY TO PAY
+                      </span>
+                    </div>
+
+                    {/* Big Payout Amount Callout */}
+                    <div className="text-center py-2.5 bg-emerald-500/20 rounded-xl border border-emerald-500/40">
+                      <span className="text-[10px] font-bold uppercase text-emerald-300 tracking-widest block">
+                        CASH PAYOUT TO CUSTOMER (द्यावयाची रोकड रक्कम)
+                      </span>
+                      <div className="text-3xl font-display font-black text-emerald-300 mt-0.5">
+                        ₹{claimVerifiedTicket.winningPayout?.toLocaleString("en-IN")}
+                      </div>
+                      <span className="text-[10px] text-foreground font-medium block mt-0.5">
+                        Winning Card: <strong className="text-primary">{claimVerifiedTicket.winningCardName}</strong> (9X Payout)
+                      </span>
+                    </div>
+
+                    {/* Action Button: Disburse Cash & Mark Claimed */}
+                    <button
+                      type="button"
+                      onClick={() => handleDisburseClaimCash(claimVerifiedTicket.ticketId)}
+                      className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-black font-display text-sm font-black shadow-lg hover:brightness-110 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <span>💵</span>
+                      <span>PAY CASH & MARK CLAIMED</span>
+                    </button>
+                  </div>
+                )}
+
+                {/* CASE 2: ALREADY CLAIMED (BIG RED WARNING BANNER) */}
+                {claimVerifiedTicket.status === "CLAIMED" && (
+                  <div className="rounded-2xl border-2 border-destructive bg-destructive/15 p-4 shadow-xl space-y-3">
+                    <div className="flex items-center gap-2.5 border-b border-destructive/40 pb-2">
+                      <span className="text-3xl">⚠️</span>
+                      <div>
+                        <h3 className="font-display text-sm font-black text-destructive uppercase tracking-wide">
+                          ALREADY PAID! Do NOT pay again! (पैसे आधीच दिले आहेत)
+                        </h3>
+                        <p className="text-[11px] text-destructive-foreground font-medium">
+                          Claimed at {claimVerifiedTicket.claimedAt ? new Date(claimVerifiedTicket.claimedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true }) : "earlier"} by {claimVerifiedTicket.claimedBy || "Counter Agent"}. Do NOT pay again!
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-background/80 border border-border space-y-1 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Amount Paid:</span>
+                        <strong className="text-destructive font-mono">₹{claimVerifiedTicket.winningPayout}</strong>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Paid By Agent:</span>
+                        <strong className="text-foreground">{claimVerifiedTicket.claimedBy || "Counter Agent"}</strong>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Claimed Date & Time:</span>
+                        <strong className="text-foreground">
+                          {claimVerifiedTicket.claimedAt ? new Date(claimVerifiedTicket.claimedAt).toLocaleString("en-IN") : "Recorded"}
+                        </strong>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* CASE 3: LOST TICKET */}
+                {claimVerifiedTicket.status === "LOST" && (
+                  <div className="rounded-2xl border border-destructive/40 bg-destructive/10 p-4 space-y-2.5 text-center">
+                    <span className="text-3xl block">❌</span>
+                    <h3 className="font-display text-sm font-black text-destructive">
+                      Not a Winning Ticket (विजेता नाही)
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      Round {claimVerifiedTicket.roundId} result: <strong>{claimVerifiedTicket.winningCardName}</strong>. Is ticket par koi jeet nahi hui hai.
+                    </p>
+                  </div>
+                )}
+
+                {/* CASE 4: PENDING / ACTIVE ROUND */}
+                {claimVerifiedTicket.status === "ACTIVE" && (
+                  <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 space-y-2.5 text-center">
+                    <span className="text-3xl block animate-pulse">⏳</span>
+                    <h3 className="font-display text-sm font-black text-amber-300">
+                      Round Still Active (खेळ चालू आहे)
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      Round {claimVerifiedTicket.roundId} result abhi declare nahi hua hai. Kripya round khatam hone tak wait karein.
+                    </p>
+                  </div>
+                )}
+
+                {/* Ticket Details Receipt View */}
+                <div className="rounded-xl border border-border bg-card p-3 space-y-2 text-xs">
+                  <div className="flex items-center justify-between border-b border-border/60 pb-1.5 font-bold">
+                    <span>Grahak: {claimVerifiedTicket.customerName}</span>
+                    <span className="font-mono text-primary">#{claimVerifiedTicket.ticketId}</span>
+                  </div>
+                  <div className="flex justify-between text-[11px] text-muted-foreground">
+                    <span>Counter: {claimVerifiedTicket.agentName}</span>
+                    <span>Date: {claimVerifiedTicket.dateStr} {claimVerifiedTicket.timeStr}</span>
+                  </div>
+                  <div className="space-y-1 pt-1">
+                    <span className="text-[10px] text-muted-foreground uppercase font-bold block">Bets on Slip:</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {claimVerifiedTicket.items.map((it, idx) => (
+                        <span
+                          key={idx}
+                          className={`px-2 py-0.5 rounded text-[11px] font-mono font-bold border ${
+                            claimVerifiedTicket.winningCardIndex === it.cardIndex
+                              ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40 font-black"
+                              : "bg-muted text-foreground border-border"
+                          }`}
+                        >
+                          {it.cardName}: ₹{it.amount}
+                          {claimVerifiedTicket.winningCardIndex === it.cardIndex ? ` 🏆 (WON ₹${it.amount * 9})` : ""}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : claimHasSearched ? (
+              <div className="p-6 text-center space-y-2 border border-dashed border-border rounded-2xl bg-card/40">
+                <span className="text-3xl block">🔍</span>
+                <span className="text-sm font-black text-muted-foreground block">TICKET NOT FOUND</span>
+                <p className="text-xs text-muted-foreground">
+                  Ticket ID check karein ya slip par cha number verify karein.
+                </p>
+              </div>
+            ) : (
+              /* Quick list of unclaimed winning tickets for this agent */
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">
+                    Unclaimed Winning Tickets ({ticketsList.filter((t) => t.status === "WON").length})
+                  </span>
+                  <span className="text-[10px] text-primary font-bold">Click to Claim</span>
+                </div>
+
+                {ticketsList.filter((t) => t.status === "WON").length === 0 ? (
+                  <div className="p-4 rounded-xl border border-dashed border-border bg-card/40 text-center text-xs text-muted-foreground">
+                    Koi pending winning ticket nahi hai.
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {ticketsList
+                      .filter((t) => t.status === "WON")
+                      .slice(0, 5)
+                      .map((t) => (
+                        <div
+                          key={t.ticketId}
+                          onClick={() => {
+                            setClaimSearchInput(t.ticketId);
+                            setClaimVerifiedTicket(t);
+                            setClaimHasSearched(true);
+                          }}
+                          className="p-2.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 cursor-pointer transition flex items-center justify-between text-xs"
+                        >
+                          <div>
+                            <span className="font-mono font-black text-emerald-400 block">
+                              #{t.ticketId} • Round {t.roundId}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground block">
+                              {t.customerName} • Card: <strong>{t.winningCardName}</strong>
+                            </span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-sm font-mono font-black text-emerald-400 block">
+                              ₹{t.winningPayout}
+                            </span>
+                            <span className="text-[9px] px-2 py-0.5 rounded bg-emerald-500 text-black font-black uppercase">
+                              CLAIM CASH
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB 3: TICKETS LIST & CLAIM INAM */}
         {activeTab === "tickets" && (
           <div className="space-y-2.5">
             {/* Quick Printer Status Banner in Tickets View */}

@@ -8,6 +8,7 @@ import {
   createUser,
   deleteUser,
   updateUserPin,
+  toggleCounterKillSwitch,
   getUserProfitStats,
   getCategorizedUserBets,
   setActiveUserId,
@@ -17,6 +18,8 @@ import {
 } from "@/lib/userStore";
 import { getSynchronizedRoundState } from "@/lib/realtime";
 import { CARDS, getCardByIndex } from "@/lib/cards";
+import { getTickets, ThermalTicket } from "@/lib/ticketStore";
+import { executeDirectPrint, isDirectPrinterConnected } from "@/lib/thermalPrinter";
 
 interface UserAccountsViewProps {
   users: UserAccount[];
@@ -218,6 +221,61 @@ export function UserAccountsView({
       showNotification(`${u.displayName} is now active on the Game Board / TV!`);
     }
     onUsersChange();
+  };
+
+  // Today's Date in IST
+  const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+
+  // Calculate Live Daily Settlement for Selected Agent
+  const agentTicketsToday = selectedUser
+    ? getTickets(selectedUser.id || selectedUser.username).filter((t) => t.dateStr === todayStr)
+    : [];
+  const ticketSalesToday = agentTicketsToday.reduce((sum, t) => sum + t.totalAmount, 0);
+  const userBetsToday = selectedUser ? (selectedUser.bets || []).filter((b) => b.dateStr === todayStr) : [];
+  const betsSalesToday = userBetsToday.reduce((sum, b) => sum + b.stake, 0);
+  const liveSalesToday = ticketSalesToday > 0 ? ticketSalesToday : betsSalesToday;
+
+  const ticketClaimsToday = agentTicketsToday
+    .filter((t) => t.status === "CLAIMED")
+    .reduce((sum, t) => sum + (t.winningPayout || 0), 0);
+  const betsPayoutsToday = userBetsToday.reduce((sum, b) => sum + (b.payout || 0), 0);
+  const liveClaimsToday = ticketClaimsToday > 0 ? ticketClaimsToday : betsPayoutsToday;
+
+  const liveCommission10 = Math.round(liveSalesToday * 0.10);
+  const liveNetCashToCollect = liveSalesToday - liveClaimsToday - liveCommission10;
+
+  const handlePrintDailyHisabSlip = () => {
+    if (!selectedUser) return;
+    const hisabTicket: ThermalTicket = {
+      ticketId: `HISAB-${selectedUser.username.toUpperCase()}-${todayStr.replace(/-/g, "")}`,
+      barcode: `${todayStr.replace(/-/g, "")}99`,
+      roundId: `DAILY-${todayStr}`,
+      roundNumber: 0,
+      timestamp: Date.now(),
+      dateStr: todayStr,
+      timeStr: new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true }),
+      customerName: "DAILY CASH SETTLEMENT",
+      agentName: selectedUser.displayName,
+      agentId: selectedUser.id,
+      username: selectedUser.username,
+      items: [
+        { cardIndex: 0, cardName: "Total Sales (विक्री)", amount: liveSalesToday },
+        { cardIndex: 1, cardName: "Claims Paid (दावे वाटप)", amount: liveClaimsToday },
+        { cardIndex: 2, cardName: "10% Commission (कमिशन)", amount: liveCommission10 },
+        { cardIndex: 3, cardName: "Net Cash (जमा रोकड)", amount: liveNetCashToCollect },
+      ],
+      totalAmount: liveSalesToday,
+      status: "CLAIMED",
+      winningPayout: liveClaimsToday,
+    };
+
+    if (isDirectPrinterConnected()) {
+      executeDirectPrint(hisabTicket, "58mm");
+      showNotification(`Daily Hisab Slip sent to 58mm printer for ${selectedUser.displayName}!`);
+    } else {
+      const hisabText = `=== SORAT DAILY HISAB SLIP ===\nDate: ${todayStr}\nAgent: ${selectedUser.displayName} (@${selectedUser.username})\n-------------------------------\nTotal Sales (विक्री): Rs ${liveSalesToday}\nClaims Paid (दावे): Rs ${liveClaimsToday}\n10% Commission: Rs ${liveCommission10}\n-------------------------------\nNET CASH TO COLLECT: Rs ${liveNetCashToCollect}\n===============================\n(Connect Bluetooth thermal printer in POS App to print)`;
+      alert(hisabText);
+    }
   };
 
   const handleCreateUser = (e: React.FormEvent) => {
@@ -450,9 +508,15 @@ export function UserAccountsView({
                       <h2 className="font-display text-lg font-black text-foreground">
                         {selectedUser.displayName}
                       </h2>
-                      <span className="rounded-full bg-primary/20 border border-primary/40 px-2 py-0.5 text-[9px] font-black text-primary uppercase">
-                        {selectedUser.status}
-                      </span>
+                      {selectedUser.status === "PAUSED" ? (
+                        <span className="rounded-full bg-destructive/20 border border-destructive/50 px-2 py-0.5 text-[9px] font-black text-destructive uppercase animate-pulse">
+                          🛑 BETTING PAUSED
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-primary/20 border border-primary/40 px-2 py-0.5 text-[9px] font-black text-primary uppercase">
+                          {selectedUser.status}
+                        </span>
+                      )}
                       {selectedUser.id === activeTvUserId && (
                         <span className="rounded-full bg-emerald-500/20 border border-emerald-500/40 px-2 py-0.5 text-[9px] font-black text-emerald-400 uppercase">
                           🎮 TV Game Player
@@ -467,7 +531,36 @@ export function UserAccountsView({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 self-stretch sm:self-auto">
+                <div className="flex flex-wrap items-center gap-2 self-stretch sm:self-auto">
+                  {/* Emergency Counter Kill-Switch Toggle */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const isCurrentlyPaused = selectedUser.status === "PAUSED";
+                      const confirmMsg = isCurrentlyPaused
+                        ? `Kya aap Counter "${selectedUser.displayName}" par betting RESUME karna chahte hain?`
+                        : `🛑 DHYAN DEIN: Kya aap Counter "${selectedUser.displayName}" par betting PAUSE (Kill-Switch) karna chahte hain? Agent ticket nahi bana payega.`;
+                      if (confirm(confirmMsg)) {
+                        toggleCounterKillSwitch(selectedUser.id);
+                        onUsersChange();
+                        showNotification(
+                          isCurrentlyPaused
+                            ? `✅ Counter ${selectedUser.displayName} resumed (Active)!`
+                            : `🛑 Counter ${selectedUser.displayName} PAUSED via Kill-Switch!`
+                        );
+                      }
+                    }}
+                    className={`py-1.5 px-3 rounded-xl text-xs font-black transition active:scale-95 flex items-center justify-center gap-1 border ${
+                      selectedUser.status === "PAUSED"
+                        ? "bg-amber-500 text-black border-amber-400 hover:bg-amber-400 animate-pulse font-mono shadow-gold"
+                        : "bg-destructive/15 text-destructive border-destructive/30 hover:bg-destructive/25"
+                    }`}
+                    title="Emergency Counter Betting Kill-Switch"
+                  >
+                    <span>{selectedUser.status === "PAUSED" ? "▶️" : "🛑"}</span>
+                    <span>{selectedUser.status === "PAUSED" ? "RESUME COUNTER" : "KILL-SWITCH (PAUSE)"}</span>
+                  </button>
+
                   {selectedUser.id !== activeTvUserId ? (
                     <button
                       type="button"
@@ -563,6 +656,93 @@ export function UserAccountsView({
                   <span>📲</span>
                   <span>Share on WhatsApp</span>
                 </button>
+              </div>
+            </div>
+
+            {/* DAILY CASH-IN-HAND SETTLEMENT (दैनिक रोकड हिशोब) */}
+            <div className="rounded-2xl border border-emerald-500/40 bg-gradient-to-r from-emerald-500/15 via-emerald-600/10 to-teal-900/20 p-4 shadow-md space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-emerald-500/30 pb-2.5">
+                <div className="flex items-center gap-2.5">
+                  <div className="h-9 w-9 rounded-xl bg-emerald-500/25 border border-emerald-500/40 grid place-items-center text-lg">
+                    💵
+                  </div>
+                  <div>
+                    <h3 className="font-display text-sm font-black text-foreground flex items-center gap-2">
+                      <span>DAILY CASH-IN-HAND SETTLEMENT</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono">
+                        {todayStr}
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-muted-foreground font-medium">
+                      आजचा रोकड हिशोब: विक्री (Bikri) - वाटप (Claims) - १०% कमिशन = निव्वळ जमा रोकड
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handlePrintDailyHisabSlip}
+                    className="px-3.5 py-2 rounded-xl bg-gradient-gold text-primary-foreground font-display text-xs font-black shadow-gold hover:brightness-110 active:scale-95 transition flex items-center gap-1.5 cursor-pointer"
+                    title="Print 58mm Thermal Slip for Daily Hisab"
+                  >
+                    <span>🖨️</span>
+                    <span>PRINT HISAB SLIP</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const hisabMsg = `📊 *SORAT DAILY CASH SETTLEMENT* 📊\n\n📅 *Date:* ${todayStr}\n👤 *Agent:* ${selectedUser.displayName} (@${selectedUser.username})\n\n💰 *Total Bikri (विक्री):* ₹${liveSalesToday.toLocaleString("en-IN")}\n🏆 *Claims Paid (दावे वाटप):* ₹${liveClaimsToday.toLocaleString("en-IN")}\n🪙 *10% Commission (कमिशन):* ₹${liveCommission10.toLocaleString("en-IN")}\n\n━━━━━━━━━━━━━━━━━━━━\n💵 *NET CASH TO COLLECT (जमा रोकड):* ₹${liveNetCashToCollect.toLocaleString("en-IN")}\n━━━━━━━━━━━━━━━━━━━━\n\n_Sorat Physical Counter Network System_`;
+                      navigator.clipboard.writeText(hisabMsg);
+                      showNotification("Daily Hisab copied to clipboard!");
+                      window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(hisabMsg)}`, "_blank");
+                    }}
+                    className="p-2 rounded-xl border border-emerald-500/40 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 text-xs font-bold transition"
+                    title="Share Daily Settlement on WhatsApp"
+                  >
+                    📲
+                  </button>
+                </div>
+              </div>
+
+              {/* 4 Financial Columns: Sales | Claims Paid | 10% Comm | Net Cash to Collect */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+                <div className="rounded-xl bg-background/60 border border-border/80 p-2.5">
+                  <span className="text-[9px] uppercase font-bold text-muted-foreground block">1. Total Sales (विक्री)</span>
+                  <div className="text-base font-display font-black text-foreground mt-0.5">
+                    ₹{liveSalesToday.toLocaleString("en-IN")}
+                  </div>
+                  <span className="text-[9px] text-muted-foreground block">{agentTicketsToday.length} ticket(s)</span>
+                </div>
+
+                <div className="rounded-xl bg-background/60 border border-border/80 p-2.5">
+                  <span className="text-[9px] uppercase font-bold text-muted-foreground block">2. Claims Paid (दावे)</span>
+                  <div className="text-base font-display font-black text-destructive mt-0.5">
+                    -₹{liveClaimsToday.toLocaleString("en-IN")}
+                  </div>
+                  <span className="text-[9px] text-muted-foreground block">
+                    {agentTicketsToday.filter((t) => t.status === "CLAIMED").length} winning claim(s)
+                  </span>
+                </div>
+
+                <div className="rounded-xl bg-background/60 border border-border/80 p-2.5">
+                  <span className="text-[9px] uppercase font-bold text-muted-foreground block">3. 10% Agent Comm.</span>
+                  <div className="text-base font-display font-black text-amber-400 mt-0.5">
+                    -₹{liveCommission10.toLocaleString("en-IN")}
+                  </div>
+                  <span className="text-[9px] text-muted-foreground block">10% of Sales</span>
+                </div>
+
+                <div className="rounded-xl bg-emerald-500/25 border border-emerald-500/50 p-2.5 shadow-sm">
+                  <span className="text-[9px] uppercase font-bold text-emerald-300 block">4. Net Cash to Collect</span>
+                  <div className={`text-lg font-display font-black mt-0.5 ${liveNetCashToCollect >= 0 ? "text-emerald-300" : "text-destructive"}`}>
+                    ₹{liveNetCashToCollect.toLocaleString("en-IN")}
+                  </div>
+                  <span className="text-[9px] text-emerald-400 font-bold block">
+                    {liveNetCashToCollect >= 0 ? "जमा करावयाची रोकड" : "Payable Deficit"}
+                  </span>
+                </div>
               </div>
             </div>
 

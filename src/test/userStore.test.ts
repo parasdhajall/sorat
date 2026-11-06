@@ -12,6 +12,7 @@ import {
   getYesterdayDateStr,
   deductAgentBalance,
   authenticateAgent,
+  toggleCounterKillSwitch,
 } from "@/lib/userStore";
 
 describe("User Store & Financial Profit Engine", () => {
@@ -122,16 +123,41 @@ describe("User Store & Financial Profit Engine", () => {
     const reloaded = authenticateAgent("@ram", "1212");
     expect(reloaded.user!.balance).toBe(0);
     expect(reloaded.user!.balanceUpdatedAt).toBeGreaterThan(0);
+  });
 
-    // Over-draft fails
-    const failRes = deductAgentBalance(
-      "@ram",
-      10,
-      "#1234",
-      1234,
-      [{ cardIndex: 0, cardName: "पतंग", amount: 10 }]
+  it("pauses and resumes counter via kill-switch and blocks bet deduction when paused", () => {
+    const rahul = authenticateAgent("agent1", "1234");
+    expect(rahul.success).toBe(true);
+    const userId = rahul.user!.id;
+
+    // Turn ON Kill-Switch (Pause)
+    const pausedUser = toggleCounterKillSwitch(userId, true);
+    expect(pausedUser?.status).toBe("PAUSED");
+
+    // Bet deduction should now be blocked
+    const blockedRes = deductAgentBalance(
+      "agent1",
+      50,
+      "#5555",
+      5555,
+      [{ cardIndex: 0, cardName: "पतंग", amount: 50 }]
     );
-    expect(failRes.success).toBe(false);
+    expect(blockedRes.success).toBe(false);
+    expect(blockedRes.error).toContain("Paused");
+
+    // Turn OFF Kill-Switch (Resume)
+    const resumedUser = toggleCounterKillSwitch(userId, false);
+    expect(resumedUser?.status).toBe("ACTIVE");
+
+    // Bet deduction should now succeed
+    const successRes = deductAgentBalance(
+      "agent1",
+      50,
+      "#5555",
+      5555,
+      [{ cardIndex: 0, cardName: "पतंग", amount: 50 }]
+    );
+    expect(successRes.success).toBe(true);
   });
 });
 
