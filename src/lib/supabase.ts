@@ -737,6 +737,80 @@ export interface AgentDailyCloudSummary {
 }
 
 /**
+ * Auto-settles any past pending rounds in Supabase (self-healing for network drops or app reloads)
+ */
+export async function autoSettlePastPendingRoundsInSupabase(): Promise<void> {
+  const client = getSupabaseClient();
+  if (!client) return;
+
+  try {
+    const { data: pendingBets } = await client
+      .from("sorat_bets")
+      .select("id, round_id, round_number, card_index, amount, user_id")
+      .eq("status", "pending");
+
+    if (!pendingBets || pendingBets.length === 0) return;
+
+    // Current IST round number
+    const epochSeconds = Math.floor(Date.now() / 1000);
+    const istSeconds = epochSeconds + (5 * 3600 + 30 * 60);
+    const istDate = new Date(istSeconds * 1000);
+    const currentRoundNumber = istDate.getUTCHours() * 60 + istDate.getUTCMinutes() + 1;
+
+    // Group pending bets by round_number
+    const pastPendingByRound = new Map<number, any[]>();
+    for (const b of pendingBets) {
+      const rNum = Number(b.round_number || (b.round_id || "").replace(/\D/g, ""));
+      if (rNum && rNum < currentRoundNumber) {
+        const list = pastPendingByRound.get(rNum) || [];
+        list.push(b);
+        pastPendingByRound.set(rNum, list);
+      }
+    }
+
+    for (const [rNum, rBets] of pastPendingByRound.entries()) {
+      const roundId = rBets[0].round_id || `#${String(rNum).padStart(4, "0")}`;
+
+      const { data: roundData } = await client
+        .from("sorat_rounds")
+        .select("winning_card, winning_card_name")
+        .eq("round_number", rNum)
+        .limit(1)
+        .maybeSingle();
+
+      let winner = roundData?.winning_card;
+      let winnerName = roundData?.winning_card_name;
+
+      if (winner === null || winner === undefined) {
+        const seed = (Math.abs(rNum) * 1103515245 + 12345) & 0x7fffffff;
+        winner = seed % 12;
+      }
+
+      await client.from("sorat_rounds").upsert({
+        round_id: roundId,
+        round_number: rNum,
+        winning_card: winner,
+        winning_card_name: winnerName || `Card ${winner}`,
+        selection_reason: "AUTO_RECOVERY_PAST_ROUND",
+        status: "DECLARED",
+      });
+
+      for (const b of rBets) {
+        const isWin = Number(b.card_index) === Number(winner);
+        const payout = isWin ? Number(b.amount || 0) * 9 : 0;
+        const status = isWin ? "won" : "lost";
+        await client
+          .from("sorat_bets")
+          .update({ status, payout })
+          .eq("id", b.id);
+      }
+    }
+  } catch (err) {
+    console.warn("Auto-settle past rounds in Supabase warning:", err);
+  }
+}
+
+/**
  * Fetches all daily tickets and wagers from Supabase `sorat_bets` for an agent.
  * Groups individual bets by ticket_id into reconstructed ThermalTicket objects.
  */
@@ -748,6 +822,9 @@ export async function fetchAgentDailyTicketsAndBets(
   if (!client) return { success: false, error: "Supabase not configured" };
 
   try {
+    // Run self-healing background check for past unsettled rounds
+    autoSettlePastPendingRoundsInSupabase().catch(() => {});
+
     const raw = (agentIdentifier || "").trim();
     const clean = raw.toLowerCase().replace(/^@/, "");
     const today = dateStr || new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
@@ -825,8 +902,16 @@ export async function fetchAgentDailyTicketsAndBets(
     let totalClaimsPaid = 0;
     let totalUnclaimedWon = 0;
 
+    // Current IST round number
+    const epochSec = Math.floor(Date.now() / 1000);
+    const istSec = epochSec + (5 * 3600 + 30 * 60);
+    const curRound = new Date(istSec * 1000).getUTCHours() * 60 + new Date(istSec * 1000).getUTCMinutes() + 1;
+
     for (const [tId, tBets] of ticketMap.entries()) {
       const first = tBets[0];
+      const rNum = Number(first.round_number || (first.round_id || "").replace(/\D/g, ""));
+      const isPast = Boolean(rNum && rNum < curRound);
+
       const items = tBets.map((b) => ({
         cardIndex: Number(b.card_index),
         cardName: b.card_name,
@@ -836,7 +921,12 @@ export async function fetchAgentDailyTicketsAndBets(
 
       // STRICT 9X PAYOUT (1 ka 9): Any winning bet gets amount * 9. Never 10X!
       const totalPayout = tBets.reduce((s, b) => {
-        const isWin = b.status === "won" || b.status === "claimed" || (b.payout && Number(b.payout) > 0);
+        let isWin = b.status === "won" || b.status === "claimed" || (b.payout && Number(b.payout) > 0);
+        if (!isWin && isPast && b.status === "pending") {
+          const seed = (Math.abs(rNum) * 1103515245 + 12345) & 0x7fffffff;
+          const winner = seed % 12;
+          if (Number(b.card_index) === winner) isWin = true;
+        }
         if (isWin) {
           const strictPayout = Number(b.amount || 0) * 9;
           return s + (strictPayout > 0 ? strictPayout : Number(b.payout || 0));
@@ -847,7 +937,7 @@ export async function fetchAgentDailyTicketsAndBets(
       totalSales += totalAmount;
 
       const hasClaimed = tBets.some((b) => b.status === "claimed" || b.claimed_at);
-      const hasWon = tBets.some((b) => b.status === "won" || (b.payout && Number(b.payout) > 0));
+      const hasWon = totalPayout > 0 || tBets.some((b) => b.status === "won" || (b.payout && Number(b.payout) > 0));
 
       let ticketStatus: "ACTIVE" | "WON" | "LOST" | "CLAIMED" = "LOST";
       if (hasClaimed) {
@@ -856,7 +946,7 @@ export async function fetchAgentDailyTicketsAndBets(
       } else if (hasWon) {
         ticketStatus = "WON";
         totalUnclaimedWon += totalPayout;
-      } else if (tBets.some((b) => b.status === "pending")) {
+      } else if (tBets.some((b) => b.status === "pending") && !isPast) {
         ticketStatus = "ACTIVE";
       }
 
