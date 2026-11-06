@@ -151,12 +151,12 @@ describe("Sorat 6-User Live Arena Simulation Test & 30% Profit Audit", () => {
         (cumulativeTurnover + roundTotalTurnover) * MAX_PAYOUT_RATIO - cumulativePayouts
       );
 
-      console.log(`Max Payout Budget for >= 30% House Profit: Rs ${Math.round(maxAllowedRoundPayout)}`);
+      console.log(`Max Payout Budget for >= 35% House Profit: Rs ${Math.round(maxAllowedRoundPayout)}`);
       console.log("\nCARD-BY-CARD ENGINE AUDIT TABLE:");
       console.log(
         "Card".padEnd(16, " ") +
         "Bet (Rs)".padStart(10, " ") +
-        "10X Payout".padStart(12, " ") +
+        "9X Payout".padStart(12, " ") +
         "House Profit".padStart(14, " ") +
         "Margin %".padStart(10, " ") +
         "Engine Status".padStart(16, " ")

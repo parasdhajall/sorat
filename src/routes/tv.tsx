@@ -579,7 +579,7 @@ export default function TvArenaPage() {
               </span>
             </div>
             <div className="text-[10px] font-bold text-muted-foreground mt-0.5">
-              12 Picture Cards • 10X Payout
+              12 Picture Cards • 9X Payout
             </div>
           </div>
         </div>
@@ -714,7 +714,7 @@ export default function TvArenaPage() {
                 {/* Winner Crown Ribbon */}
                 {isWinner && (
                   <div className="absolute inset-x-0 top-1/3 z-40 bg-gradient-gold text-primary-foreground py-1 font-display text-sm sm:text-base font-black tracking-widest uppercase shadow-gold animate-pulse">
-                    🏆 WINNER (10X) 🏆
+                    🏆 WINNER (9X) 🏆
                   </div>
                 )}
               </div>
@@ -767,7 +767,7 @@ export default function TvArenaPage() {
 
           {/* Public Notice */}
           <div className="hidden lg:block text-right shrink-0 text-[10px] font-bold text-muted-foreground">
-            Bets accepted at Operator Counter only • 10x Fixed Payout
+            Bets accepted at Operator Counter only • 9x Fixed Payout
           </div>
         </div>
       </footer>
@@ -783,7 +783,7 @@ export default function TvArenaPage() {
           <div className="relative z-10 w-full max-w-sm sm:max-w-md bg-gradient-to-b from-amber-500/25 via-zinc-900 to-zinc-950 border-4 border-amber-400 rounded-3xl p-6 sm:p-8 text-center shadow-[0_0_100px_rgba(245,158,11,0.95)] animate-in zoom-in-50 duration-500">
             <div className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-gradient-gold text-zinc-950 font-display text-sm sm:text-base font-black uppercase tracking-widest shadow-gold mb-3 animate-pulse">
               <span>🏆</span>
-              <span>LUCKY WINNER • 10X PAYOUT</span>
+              <span>LUCKY WINNER • 9X PAYOUT</span>
               <span>🏆</span>
             </div>
 
@@ -804,7 +804,7 @@ export default function TvArenaPage() {
                 ROUND {roundId}
               </span>
               <span className="px-3.5 py-1.5 rounded-xl bg-emerald-500/25 border border-emerald-500/50 text-emerald-400 font-black tracking-wide">
-                WIN PAYS 10X
+                WIN PAYS 9X
               </span>
             </div>
           </div>

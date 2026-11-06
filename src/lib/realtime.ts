@@ -58,9 +58,9 @@ export function getSynchronizedRoundState(nowMs: number = Date.now()): Synchroni
   };
 }
 
-export const TARGET_PROFIT_MARGIN = 0.30; // 30% Owner Profit Guarantee
-export const MAX_PAYOUT_RATIO = 0.70; // 70% Maximum RTP to players
-export const PAYOUT_MULTIPLIER = 10; // 10x Payout for 12 cards
+export const TARGET_PROFIT_MARGIN = 0.35; // 35% Gross House Target (10% Agent Commission + 25% Admin Net Profit)
+export const MAX_PAYOUT_RATIO = 0.65; // 65% Maximum RTP to players
+export const PAYOUT_MULTIPLIER = 9; // 9x Payout for 12 cards (1 ka 9)
 
 export interface CardProfitAnalysis {
   card: number;

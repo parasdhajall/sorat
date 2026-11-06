@@ -37,7 +37,7 @@ export const Route = createFileRoute("/admin")({
 });
 
 const MASTER_PIN = "1234";
-const PAYOUT_MULTIPLIER = 10;
+const PAYOUT_MULTIPLIER = 9; // 9x Payout (1 ka 9)
 
 export default function AdminPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -488,7 +488,7 @@ export default function AdminPage() {
             }`}
           >
             <span>🔥</span>
-            <span>LIVE BETS & 10X RISK MATRIX</span>
+            <span>LIVE BETS & 9X RISK MATRIX</span>
           </button>
 
           <button
@@ -710,7 +710,7 @@ export default function AdminPage() {
             {/* 12-Card Live Bet Monitor & 30% Profitability Grid */}
             <div className="flex items-center justify-between mt-2">
               <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted-foreground">
-                Card Bets & 30% Safety Status (10x Payout):
+                Card Bets & 35% Safety Status (9x Payout):
               </span>
               <span className="text-[10px] font-bold text-emerald-400">
                 🔒 Auto picks Safe/0-Bet cards
@@ -820,7 +820,7 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* TAB 3: LIVE BETS & 10X RISK MATRIX (DIGITJODI PATTERN) */}
+        {/* TAB 3: LIVE BETS & 9X RISK MATRIX (DIGITJODI PATTERN) */}
         {activeAdminTab === "audit" && (
           <LiveBetsRiskAudit
             users={users}

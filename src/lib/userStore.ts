@@ -1,6 +1,6 @@
 import { getSupabaseClient, placeSoratBetsRpc, depositToPlayerRpc } from "./supabase";
 import { RAMU_SIMULATED_BETS } from "./ramuSimulationData";
-import { getDeterministicRoundWinner } from "./realtime";
+import { getDeterministicRoundWinner, PAYOUT_MULTIPLIER } from "./realtime";
 import { CARDS, getRecordedRoundWinner } from "./cards";
 
 export interface UserDeposit {
@@ -1723,7 +1723,7 @@ export function settleRoundBets(
         if (matchesRound && bet.status === "PENDING") {
           userChanged = true;
           const isWin = bet.cardIndex === winningCardIndex;
-          const payout = isWin ? bet.stake * 10 : 0;
+          const payout = isWin ? bet.stake * PAYOUT_MULTIPLIER : 0;
 
           if (isWin && creditBalance) {
             user.balance += payout;
@@ -1790,7 +1790,7 @@ export function autoSettleAllPendingBets(
 
           const winCard = CARDS[winIdx];
           const isWin = bet.cardIndex === winIdx;
-          const payout = isWin ? bet.stake * 10 : 0;
+          const payout = isWin ? bet.stake * PAYOUT_MULTIPLIER : 0;
 
           return {
             ...bet,

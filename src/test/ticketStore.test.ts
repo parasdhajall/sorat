@@ -48,8 +48,8 @@ describe("Thermal Printer Ticket POS Engine", () => {
 
     expect(settled.status).toBe("WON");
     expect(settled.winningCardIndex).toBe(4);
-    // Payout: 20 * 10 = 200
-    expect(settled.winningPayout).toBe(200);
+    // Payout: 20 * 9 = 180 (9x Payout)
+    expect(settled.winningPayout).toBe(180);
 
     // Claim the winning payout at counter
     const claimed = claimTicket(settled.ticketId)!;

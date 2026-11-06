@@ -64,7 +64,7 @@ describe("User Store & Financial Profit Engine", () => {
     expect(bet.status).toBe("PENDING");
     expect(bet.stake).toBe(100);
 
-    // Settle as WIN (card 0 wins => 10x = 1000 payout)
+    // Settle as WIN (card 0 wins => 9x = 900 payout)
     settleRoundBets("#9999", 0, "पतंग");
 
     const users = getUsers();
@@ -73,14 +73,14 @@ describe("User Store & Financial Profit Engine", () => {
 
     expect(settledBet.status).toBe("SETTLED");
     expect(settledBet.isWin).toBe(true);
-    expect(settledBet.payout).toBe(1000);
+    expect(settledBet.payout).toBe(900);
     // In Prepaid Burn model, user's wagering balance is consumed from 1000 down to 900 (not re-inflated)
     expect(updated.balance).toBe(900);
 
     const stats = getUserProfitStats(updated);
-    // Net profit from bets: 1000 won - 100 staked = +900
-    expect(stats.netBetProfit).toBe(900);
-    expect(stats.totalWonAmount).toBe(1000);
+    // Net profit from bets: 900 won - 100 staked = +800
+    expect(stats.netBetProfit).toBe(800);
+    expect(stats.totalWonAmount).toBe(900);
     expect(stats.totalBetAmount).toBe(100);
     expect(stats.winCount).toBe(1);
     expect(stats.lossCount).toBe(0);

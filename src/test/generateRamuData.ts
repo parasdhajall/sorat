@@ -99,7 +99,7 @@ export function generateSimulationFile() {
 
     roundPlayerBets.forEach((pb, bIdx) => {
       const isWin = pb.cardIndex === winningCardIndex;
-      const betPayout = isWin ? pb.stake * 10 : 0;
+      const betPayout = isWin ? pb.stake * 9 : 0;
       ramuBets.push({
         id: `bet_ramu_${roundNumber}_${bIdx + 1}`,
         roundId,

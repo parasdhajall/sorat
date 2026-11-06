@@ -1,5 +1,6 @@
 import { getTodayDateStr, formatTime } from "./userStore";
 import { CARDS } from "./cards";
+import { PAYOUT_MULTIPLIER } from "./realtime";
 
 export interface BetItem {
   cardIndex: number;
@@ -209,7 +210,7 @@ export function settleTicketsForRound(
       changed = true;
       const winningItem = t.items.find((item) => item.cardIndex === winningCardIndex);
       const isWin = Boolean(winningItem && winningItem.amount > 0);
-      const winningPayout = isWin ? winningItem!.amount * 10 : 0;
+      const winningPayout = isWin ? winningItem!.amount * PAYOUT_MULTIPLIER : 0;
 
       tickets[i] = {
         ...t,

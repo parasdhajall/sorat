@@ -219,19 +219,19 @@ BEGIN
     LOOP
         tot_turnover := tot_turnover + b.amount;
         IF b.card_index = _winning_card THEN
-            -- 10X PAYOUT FOR WINNERS
+            -- 9X PAYOUT FOR WINNERS (1 ka 9)
             UPDATE public.sorat_bets
             SET status = 'won',
-                payout = b.amount * 10
+                payout = b.amount * 9
             WHERE id = b.id;
 
             -- Credit winner wallet
             UPDATE public.players
-            SET balance = balance + (b.amount * 10),
+            SET balance = balance + (b.amount * 9),
                 updated_at = NOW()
             WHERE id = b.user_id;
 
-            tot_payout := tot_payout + (b.amount * 10);
+            tot_payout := tot_payout + (b.amount * 9);
             won_count := won_count + 1;
         ELSE
             -- LOST

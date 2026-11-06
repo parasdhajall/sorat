@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { UserAccount, UserBetRecord, getTodayDateStr } from "@/lib/userStore";
 import { CARDS } from "@/lib/cards";
+import { PAYOUT_MULTIPLIER } from "@/lib/realtime";
 import { executeDirectPrint, isDirectPrinterConnected } from "@/lib/thermalPrinter";
 import { ThermalTicket } from "@/lib/ticketStore";
 
@@ -118,7 +119,7 @@ export function LiveBetsRiskAudit({
     return CARDS.map((card, idx) => {
       const cardBets = filteredBets.filter((b) => b.cardIndex === idx);
       const totalStaked = cardBets.reduce((acc, b) => acc + (b.stake || 0), 0);
-      const liability = totalStaked * 10; // Sorat 10X Payout
+      const liability = totalStaked * PAYOUT_MULTIPLIER; // Sorat 9X Payout (1 ka 9)
       const houseNetIfWins = stats.turnover - liability;
       const marginIfWins = stats.turnover > 0 ? (houseNetIfWins / stats.turnover) * 100 : 100;
 
@@ -224,7 +225,7 @@ export function LiveBetsRiskAudit({
             ₹{stats.payouts.toLocaleString("en-IN")}
           </div>
           <span className="text-[10px] text-muted-foreground block">
-            10X winnings paid to users
+            9X winnings paid to users (1 ka 9)
           </span>
         </div>
 
@@ -331,22 +332,22 @@ export function LiveBetsRiskAudit({
         </div>
       </div>
 
-      {/* 3. CARD-BY-CARD 10X LIABILITY & RISK AUDIT MATRIX (DigitJodi High-Volume Pattern) */}
+      {/* 3. CARD-BY-CARD 9X LIABILITY & RISK AUDIT MATRIX (DigitJodi High-Volume Pattern) */}
       <div className="rounded-2xl border border-primary/30 bg-card p-3 space-y-2">
         <div className="flex items-center justify-between border-b border-border/60 pb-2">
           <div className="flex items-center gap-2">
             <span className="text-base">🔥</span>
             <div>
               <h3 className="font-display text-sm font-black text-foreground">
-                12 Cards 10X Risk & Exposure Audit Matrix
+                12 Cards 9X Risk & Exposure Audit Matrix
               </h3>
               <p className="text-[10px] text-muted-foreground">
-                Agla card kaun sa safe hai jisse house ko guaranteed 30%+ profit mile
+                Agla card kaun sa safe hai jisse house ko guaranteed 35%+ profit mile
               </p>
             </div>
           </div>
           <span className="text-[10px] font-mono font-bold bg-primary/10 border border-primary/30 text-primary px-2 py-0.5 rounded-full">
-            10X Multiplier
+            9X Multiplier (1 ka 9)
           </span>
         </div>
 
@@ -384,7 +385,7 @@ export function LiveBetsRiskAudit({
                   <span className="font-bold text-foreground">₹{item.totalStaked}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">10X Liability:</span>
+                  <span className="text-muted-foreground">9X Liability:</span>
                   <span className="font-bold text-amber-400">₹{item.liability}</span>
                 </div>
                 <div className="flex items-center justify-between">
@@ -449,7 +450,7 @@ export function LiveBetsRiskAudit({
                   <th className="py-2 px-2.5">Agent / Player</th>
                   <th className="py-2 px-2.5">Card Name</th>
                   <th className="py-2 px-2.5 text-right">Stake</th>
-                  <th className="py-2 px-2.5 text-right">10X Payout</th>
+                  <th className="py-2 px-2.5 text-right">9X Payout</th>
                   <th className="py-2 px-2.5 text-center">Result</th>
                   <th className="py-2 px-2.5 text-center">Action</th>
                 </tr>
@@ -482,7 +483,7 @@ export function LiveBetsRiskAudit({
                       ₹{b.stake}
                     </td>
                     <td className="py-2 px-2.5 text-right font-black text-purple-300 whitespace-nowrap">
-                      ₹{b.payout || b.stake * 10}
+                      ₹{b.payout || b.stake * PAYOUT_MULTIPLIER}
                     </td>
                     <td className="py-2 px-2.5 text-center whitespace-nowrap">
                       {b.status === "won" || b.isWin ? (

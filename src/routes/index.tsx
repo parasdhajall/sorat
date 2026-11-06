@@ -850,7 +850,7 @@ export default function AgentPage() {
                   <span className="text-3xl animate-bounce">🏆</span>
                 </div>
                 <div className="text-[11px] font-black text-emerald-400">
-                  🎉 WINNING CARD: {CARDS[declaredWinner]?.englishName} (10X PAYOUT)
+                  🎉 WINNING CARD: {CARDS[declaredWinner]?.englishName} (9X PAYOUT)
                 </div>
               </div>
             )}
@@ -974,7 +974,7 @@ export default function AgentPage() {
                     {/* Winner Badge on declared card */}
                     {phase === "result" && declaredWinner === i && (
                       <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-emerald-500 text-zinc-950 font-black text-[9px] px-2 py-0.5 rounded-full shadow-lg border border-emerald-300 uppercase tracking-wider whitespace-nowrap animate-bounce z-10">
-                        🏆 WINNER 10X
+                        🏆 WINNER 9X
                       </div>
                     )}
                     {/* Clear Cross */}
@@ -1272,7 +1272,7 @@ export default function AgentPage() {
                     {/* Right: 10X Payout Badge + Counter Ticket Indicator */}
                     <div className="text-right shrink-0">
                       <span className="inline-block px-2.5 py-1 rounded-lg bg-gradient-gold text-zinc-950 font-black text-[10px] uppercase shadow-sm">
-                        🏆 WINNER 10X
+                        🏆 WINNER 9X
                       </span>
 
                       {roundTickets.length > 0 && (
