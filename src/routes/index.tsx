@@ -9,9 +9,7 @@ import {
 } from "@/lib/realtime";
 import {
   CARDS,
-  getPastRoundsHistory,
   recordRoundWinnerHistory,
-  RoundHistoryItem,
 } from "@/lib/cards";
 import { resolveProfitGuaranteedWinnerForRound } from "@/lib/roundSettlement";
 import {
@@ -119,14 +117,11 @@ export default function AgentPage() {
     }
   };
 
-  // Period filter states for Shift, Tickets, and History tabs ("today" | "yesterday" | "all")
-  const [shiftPeriod, setShiftPeriod] = useState<"today" | "yesterday" | "all">("today");
-  const [ticketFilterPeriod, setTicketFilterPeriod] = useState<"today" | "yesterday" | "all">("today");
-  const [historyTabMode, setHistoryTabMode] = useState<"rounds" | "mybets">("rounds");
-  const [historyPeriod, setHistoryPeriod] = useState<"today" | "yesterday" | "all">("yesterday");
-
-  // Recent Round Winners History (35 past rounds)
-  const [recentWinners, setRecentWinners] = useState<RoundHistoryItem[]>(() => getPastRoundsHistory(35));
+  // Period filter states for Shift, Tickets, and History tabs ("today" | "yesterday" | "custom" | "all")
+  const [shiftPeriod, setShiftPeriod] = useState<"today" | "yesterday" | "custom" | "all">("today");
+  const [ticketFilterPeriod, setTicketFilterPeriod] = useState<"today" | "yesterday" | "custom" | "all">("today");
+  const [historyPeriod, setHistoryPeriod] = useState<"today" | "yesterday" | "custom" | "all">("today");
+  const [customDate, setCustomDate] = useState<string>(() => getTodayDateStr());
 
   const agentUserRef = useRef(agentUser);
   useEffect(() => {
@@ -195,10 +190,9 @@ export default function AgentPage() {
       setPhase(sync.phase);
       setTimer(sync.timeLeft);
 
-      // New round rollover: clear old winner and refresh history
+      // New round rollover: clear old winner
       if (sync.phase === "bet" && declaredWinner !== null) {
         setDeclaredWinner(null);
-        setRecentWinners(getPastRoundsHistory(35));
       }
 
       // If in result phase and winner has not been declared yet from TV:
@@ -214,7 +208,6 @@ export default function AgentPage() {
         settleRoundBets(sync.roundId, fallbackWinner, CARDS[fallbackWinner]?.name || "", false);
         autoSettleAllPendingBets(sync.roundNumber, sync.phase, fallbackWinner);
         refreshAgentTickets();
-        setRecentWinners(getPastRoundsHistory(35));
       }
     }, 250);
     return () => clearInterval(id);
@@ -235,9 +228,6 @@ export default function AgentPage() {
       }
       if (e.key === "sorat_thermal_tickets_v1") {
         refreshAgentTickets();
-      }
-      if (e.key === "sorat_round_winners_history") {
-        setRecentWinners(getPastRoundsHistory(35));
       }
     };
     window.addEventListener("storage", handleStorage);
@@ -283,7 +273,6 @@ export default function AgentPage() {
           settleRoundBets(msg.roundId, msg.winner, CARDS[msg.winner]?.name || "", false);
           autoSettleAllPendingBets(msg.roundNumber, msg.phase, msg.winner);
           refreshAgentTickets();
-          setRecentWinners(getPastRoundsHistory(35));
         }
       } else if (msg.type === "SET_AGENT_BALANCE") {
         setAgentBalance(msg.balance);
@@ -492,22 +481,18 @@ export default function AgentPage() {
   const todayStr = getTodayDateStr();
   const yesterdayStr = getYesterdayDateStr();
 
-  // Categorized user bets from user store (contains persistent history synced from Supabase/cloud)
-  const categorizedBets = useMemo(() => {
-    return agentUser ? getCategorizedUserBets(agentUser) : { today: [], yesterday: [], older: [], all: [] };
-  }, [agentUser]);
+  // Helper to get direct or synthesized tickets for ANY date string (YYYY-MM-DD)
+  const getTicketsForDate = (dateStr: string): ThermalTicket[] => {
+    if (!dateStr) return [];
+    const directTickets = ticketsList.filter((t) => t.dateStr === dateStr);
+    if (directTickets.length > 0) return directTickets;
 
-  // Tickets filtered by date
-  const todayTickets = useMemo(() => ticketsList.filter((t) => t.dateStr === todayStr), [ticketsList, todayStr]);
-  const yesterdayTickets = useMemo(() => ticketsList.filter((t) => t.dateStr === yesterdayStr), [ticketsList, yesterdayStr]);
+    // Fallback: Check agentUser.bets for that date and synthesize tickets
+    const dateBets = (agentUser?.bets || []).filter((b) => b.dateStr === dateStr);
+    if (dateBets.length === 0) return [];
 
-  // Fallback: If ticketsList in localStorage has 0 yesterday tickets, synthesize them from agentUser.bets!
-  const yesterdaySynthesizedTickets: ThermalTicket[] = useMemo(() => {
-    if (yesterdayTickets.length > 0) return yesterdayTickets;
-    if (!categorizedBets.yesterday || categorizedBets.yesterday.length === 0) return [];
-
-    const roundMap = new Map<string, typeof categorizedBets.yesterday>();
-    categorizedBets.yesterday.forEach((b) => {
+    const roundMap = new Map<string, typeof dateBets>();
+    dateBets.forEach((b) => {
       const arr = roundMap.get(b.roundId) || [];
       arr.push(b);
       roundMap.set(b.roundId, arr);
@@ -519,17 +504,17 @@ export default function AgentPage() {
       const isWin = bets.some((b) => b.isWin || (b.payout && b.payout > 0));
       const firstBet = bets[0];
       return {
-        ticketId: firstBet.ticketId || `TKT-YEST-${idx + 1}`,
-        barcode: `YEST${idx + 1}`,
+        ticketId: firstBet.ticketId || `TKT-${dateStr.replace(/-/g, "")}-${idx + 1}`,
+        barcode: `${dateStr.replace(/-/g, "").slice(-4)}${idx + 1}`,
         roundId: rId,
         roundNumber: firstBet.roundNumber || 0,
         timestamp: firstBet.timestamp,
-        dateStr: firstBet.dateStr || yesterdayStr,
+        dateStr: firstBet.dateStr || dateStr,
         timeStr: firstBet.timeStr || "12:00 PM",
         customerName: "Counter Customer",
-        agentName: agentUser.displayName,
-        agentId: agentUser.id,
-        username: agentUser.username,
+        agentName: agentUser?.displayName || "Kiosk Agent",
+        agentId: agentUser?.id,
+        username: agentUser?.username,
         items: bets.map((b) => ({
           cardIndex: b.cardIndex,
           cardName: b.cardName,
@@ -540,59 +525,77 @@ export default function AgentPage() {
         status: isWin ? "WON" : "LOST",
       } as ThermalTicket;
     });
-  }, [yesterdayTickets, categorizedBets.yesterday, yesterdayStr, agentUser]);
+  };
 
-  // All tickets combined (ticketsList plus synthesized yesterday tickets if ticketsList was missing them)
+  // Precomputed tickets per date
+  const todayTickets = useMemo(() => getTicketsForDate(todayStr), [ticketsList, agentUser?.bets, todayStr]);
+  const yesterdayTickets = useMemo(() => getTicketsForDate(yesterdayStr), [ticketsList, agentUser?.bets, yesterdayStr]);
+  const customDateTickets = useMemo(() => getTicketsForDate(customDate), [ticketsList, agentUser?.bets, customDate]);
+
+  // All tickets combined (ticketsList + any dates in agentUser.bets)
   const allTicketsCombined = useMemo(() => {
-    if (ticketsList.some((t) => t.dateStr === yesterdayStr)) return ticketsList;
-    return [...ticketsList, ...yesterdaySynthesizedTickets];
-  }, [ticketsList, yesterdayStr, yesterdaySynthesizedTickets]);
+    const map = new Map<string, ThermalTicket>();
+    ticketsList.forEach((t) => map.set(t.ticketId, t));
+    const allDateBets = agentUser?.bets || [];
+    const uniqueDates = Array.from(new Set(allDateBets.map((b) => b.dateStr).filter(Boolean)));
+    uniqueDates.forEach((d) => {
+      const dTickets = getTicketsForDate(d);
+      dTickets.forEach((t) => {
+        if (!map.has(t.ticketId)) {
+          map.set(t.ticketId, t);
+        }
+      });
+    });
+    return Array.from(map.values());
+  }, [ticketsList, agentUser?.bets]);
 
   // Filtered tickets for Tickets Tab
   const filteredTickets = useMemo(() => {
     if (ticketFilterPeriod === "today") return todayTickets;
-    if (ticketFilterPeriod === "yesterday") return yesterdaySynthesizedTickets;
+    if (ticketFilterPeriod === "yesterday") return yesterdayTickets;
+    if (ticketFilterPeriod === "custom") return customDateTickets;
     return allTicketsCombined;
-  }, [ticketFilterPeriod, todayTickets, yesterdaySynthesizedTickets, allTicketsCombined]);
+  }, [ticketFilterPeriod, todayTickets, yesterdayTickets, customDateTickets, allTicketsCombined]);
 
-  // Shift Stats for selected period ("today" | "yesterday" | "all")
+  // Shift Tickets for selected period ("today" | "yesterday" | "custom" | "all")
   const shiftTickets = useMemo(() => {
     if (shiftPeriod === "today") return todayTickets;
-    if (shiftPeriod === "yesterday") return yesterdaySynthesizedTickets;
+    if (shiftPeriod === "yesterday") return yesterdayTickets;
+    if (shiftPeriod === "custom") return customDateTickets;
     return allTicketsCombined;
-  }, [shiftPeriod, todayTickets, yesterdaySynthesizedTickets, allTicketsCombined]);
+  }, [shiftPeriod, todayTickets, yesterdayTickets, customDateTickets, allTicketsCombined]);
 
   const shiftSales = useMemo(() => {
-    if (shiftPeriod === "today") {
-      const tSales = todayTickets.reduce((sum, t) => sum + t.totalAmount, 0);
-      const bSales = categorizedBets.today.reduce((sum, b) => sum + b.stake, 0);
+    const calcDateSales = (dateStr: string) => {
+      const tkts = getTicketsForDate(dateStr);
+      const tSales = tkts.reduce((sum, t) => sum + t.totalAmount, 0);
+      const bSales = (agentUser?.bets || []).filter((b) => b.dateStr === dateStr).reduce((s, b) => s + b.stake, 0);
       return tSales > 0 ? tSales : bSales;
-    }
-    if (shiftPeriod === "yesterday") {
-      const tSales = yesterdayTickets.reduce((sum, t) => sum + t.totalAmount, 0);
-      const bSales = categorizedBets.yesterday.reduce((sum, b) => sum + b.stake, 0);
-      return tSales > 0 ? tSales : bSales;
-    }
+    };
+
+    if (shiftPeriod === "today") return calcDateSales(todayStr);
+    if (shiftPeriod === "yesterday") return calcDateSales(yesterdayStr);
+    if (shiftPeriod === "custom") return calcDateSales(customDate);
     const tSales = allTicketsCombined.reduce((sum, t) => sum + t.totalAmount, 0);
     const bSales = (agentUser?.bets || []).reduce((sum, b) => sum + b.stake, 0);
     return tSales > 0 ? tSales : bSales;
-  }, [shiftPeriod, todayTickets, yesterdayTickets, allTicketsCombined, categorizedBets, agentUser]);
+  }, [shiftPeriod, todayStr, yesterdayStr, customDate, allTicketsCombined, agentUser, ticketsList]);
 
   const shiftPayouts = useMemo(() => {
-    if (shiftPeriod === "today") {
-      const tPayouts = todayTickets.reduce((sum, t) => sum + (t.winningPayout || 0), 0);
-      const bPayouts = categorizedBets.today.reduce((sum, b) => sum + (b.payout || 0), 0);
+    const calcDatePayouts = (dateStr: string) => {
+      const tkts = getTicketsForDate(dateStr);
+      const tPayouts = tkts.reduce((sum, t) => sum + (t.winningPayout || 0), 0);
+      const bPayouts = (agentUser?.bets || []).filter((b) => b.dateStr === dateStr).reduce((s, b) => s + (b.payout || 0), 0);
       return tPayouts > 0 ? tPayouts : bPayouts;
-    }
-    if (shiftPeriod === "yesterday") {
-      const tPayouts = yesterdayTickets.reduce((sum, t) => sum + (t.winningPayout || 0), 0);
-      const bPayouts = categorizedBets.yesterday.reduce((sum, b) => sum + (b.payout || 0), 0);
-      return tPayouts > 0 ? tPayouts : bPayouts;
-    }
+    };
+
+    if (shiftPeriod === "today") return calcDatePayouts(todayStr);
+    if (shiftPeriod === "yesterday") return calcDatePayouts(yesterdayStr);
+    if (shiftPeriod === "custom") return calcDatePayouts(customDate);
     const tPayouts = allTicketsCombined.reduce((sum, t) => sum + (t.winningPayout || 0), 0);
     const bPayouts = (agentUser?.bets || []).reduce((sum, b) => sum + (b.payout || 0), 0);
     return tPayouts > 0 ? tPayouts : bPayouts;
-  }, [shiftPeriod, todayTickets, yesterdayTickets, allTicketsCombined, categorizedBets, agentUser]);
+  }, [shiftPeriod, todayStr, yesterdayStr, customDate, allTicketsCombined, agentUser, ticketsList]);
 
   const shiftCommission10 = Math.round(shiftSales * 0.10);
   const shiftCashSurplus = Math.max(0, shiftSales - shiftPayouts);
@@ -606,15 +609,20 @@ export default function AgentPage() {
     if (shiftPeriod === "yesterday") {
       return deps.filter((d) => d.dateStr === yesterdayStr).reduce((s, d) => s + d.amount, 0);
     }
+    if (shiftPeriod === "custom") {
+      return deps.filter((d) => d.dateStr === customDate).reduce((s, d) => s + d.amount, 0);
+    }
     return deps.reduce((s, d) => s + d.amount, 0);
-  }, [agentUser?.deposits, shiftPeriod, todayStr, yesterdayStr]);
+  }, [agentUser?.deposits, shiftPeriod, todayStr, yesterdayStr, customDate]);
 
   // History Tab Filtered Bets
   const historyBets = useMemo(() => {
-    if (historyPeriod === "today") return categorizedBets.today;
-    if (historyPeriod === "yesterday") return categorizedBets.yesterday;
-    return categorizedBets.all;
-  }, [historyPeriod, categorizedBets]);
+    const allBets = agentUser?.bets || [];
+    if (historyPeriod === "today") return allBets.filter((b) => b.dateStr === todayStr);
+    if (historyPeriod === "yesterday") return allBets.filter((b) => b.dateStr === yesterdayStr);
+    if (historyPeriod === "custom") return allBets.filter((b) => b.dateStr === customDate);
+    return allBets;
+  }, [historyPeriod, todayStr, yesterdayStr, customDate, agentUser?.bets]);
 
   const historyBetsTotalStake = useMemo(() => {
     return historyBets.reduce((s, b) => s + b.stake, 0);
@@ -937,10 +945,7 @@ export default function AgentPage() {
 
           <button
             type="button"
-            onClick={() => {
-              setRecentWinners(getPastRoundsHistory(35));
-              setActiveTab("history");
-            }}
+            onClick={() => setActiveTab("history")}
             className={`py-2 text-center rounded-lg font-bold transition flex flex-col items-center justify-center gap-0.5 ${
               activeTab === "history"
                 ? "bg-primary text-primary-foreground shadow-sm font-black"
@@ -948,7 +953,7 @@ export default function AgentPage() {
             }`}
           >
             <span className="text-sm">📜</span>
-            <span className="text-[9px] leading-tight font-bold">History</span>
+            <span className="text-[9px] leading-tight font-bold">Daav Log</span>
           </button>
 
           <button
@@ -1057,45 +1062,6 @@ export default function AgentPage() {
               </div>
             </div>
 
-            {/* Recent Winners Horizontal Preview Strip */}
-            {recentWinners.length > 0 && (
-              <div className="rounded-2xl border border-border/70 bg-card/70 p-2 space-y-1.5 shadow-sm">
-                <div className="flex items-center justify-between px-1">
-                  <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                    <span>🏆</span> Recent Winners (मागील निकाल)
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("history")}
-                    className="text-[10px] text-primary hover:underline font-bold cursor-pointer"
-                  >
-                    View All →
-                  </button>
-                </div>
-                <div className="flex items-center gap-2 overflow-x-auto pb-0.5 scrollbar-none">
-                  {recentWinners.slice(0, 10).map((r) => (
-                    <div
-                      key={r.roundNumber}
-                      onClick={() => setActiveTab("history")}
-                      className="flex flex-col items-center shrink-0 w-14 p-1 rounded-xl border border-border/80 bg-background/90 text-center shadow-xs cursor-pointer hover:border-primary/50 transition active:scale-95"
-                    >
-                      <span className="text-[9px] font-mono font-bold text-muted-foreground leading-none">
-                        {r.roundId}
-                      </span>
-                      <img
-                        src={r.card.img}
-                        alt={r.card.name}
-                        className="h-8 w-8 object-contain my-1 rounded-lg"
-                      />
-                      <span className="text-[10px] font-black text-foreground leading-tight truncate w-full">
-                        {r.card.name}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {/* 12-Card Fast Touch Grid */}
             <div className="grid grid-cols-3 gap-2">
               {CARDS.map((card, i) => {
@@ -1183,12 +1149,12 @@ export default function AgentPage() {
               </button>
             </div>
 
-            {/* Date Period Filter Selector (आज / काल / सर्व) */}
-            <div className="grid grid-cols-3 gap-1 bg-muted/60 p-1 rounded-xl border border-border text-xs">
+            {/* Date Period Filter Selector (आज / काल / तारीख / सर्व) */}
+            <div className="grid grid-cols-4 gap-1 bg-muted/60 p-1 rounded-xl border border-border text-xs">
               <button
                 type="button"
                 onClick={() => setTicketFilterPeriod("today")}
-                className={`py-1.5 px-2 rounded-lg font-bold text-center transition flex items-center justify-center gap-1 ${
+                className={`py-1.5 px-1.5 rounded-lg font-bold text-center transition flex items-center justify-center gap-1 ${
                   ticketFilterPeriod === "today"
                     ? "bg-primary text-primary-foreground font-black shadow-xs"
                     : "text-muted-foreground hover:text-foreground"
@@ -1199,18 +1165,29 @@ export default function AgentPage() {
               <button
                 type="button"
                 onClick={() => setTicketFilterPeriod("yesterday")}
-                className={`py-1.5 px-2 rounded-lg font-bold text-center transition flex items-center justify-center gap-1 ${
+                className={`py-1.5 px-1.5 rounded-lg font-bold text-center transition flex items-center justify-center gap-1 ${
                   ticketFilterPeriod === "yesterday"
                     ? "bg-primary text-primary-foreground font-black shadow-xs"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <span>⏪</span> काल ({yesterdaySynthesizedTickets.length})
+                <span>⏪</span> काल ({yesterdayTickets.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setTicketFilterPeriod("custom")}
+                className={`py-1.5 px-1.5 rounded-lg font-bold text-center transition flex items-center justify-center gap-1 ${
+                  ticketFilterPeriod === "custom"
+                    ? "bg-primary text-primary-foreground font-black shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span>📆</span> तारीख ({customDateTickets.length})
               </button>
               <button
                 type="button"
                 onClick={() => setTicketFilterPeriod("all")}
-                className={`py-1.5 px-2 rounded-lg font-bold text-center transition flex items-center justify-center gap-1 ${
+                className={`py-1.5 px-1.5 rounded-lg font-bold text-center transition flex items-center justify-center gap-1 ${
                   ticketFilterPeriod === "all"
                     ? "bg-primary text-primary-foreground font-black shadow-xs"
                     : "text-muted-foreground hover:text-foreground"
@@ -1220,13 +1197,41 @@ export default function AgentPage() {
               </button>
             </div>
 
+            {/* Date Picker Input when "custom" is active */}
+            {ticketFilterPeriod === "custom" && (
+              <div className="flex items-center justify-between gap-2 p-2 rounded-xl bg-card border-2 border-primary/50 shadow-xs animate-in fade-in duration-200">
+                <div className="flex items-center gap-2 flex-1">
+                  <span className="text-base">📅</span>
+                  <div className="flex-1">
+                    <label className="text-[10px] font-bold text-primary block leading-none mb-1">
+                      पावती तारीख निवडा (Select Ticket Date)
+                    </label>
+                    <input
+                      type="date"
+                      value={customDate}
+                      max={todayStr}
+                      onChange={(e) => {
+                        if (e.target.value) setCustomDate(e.target.value);
+                      }}
+                      className="w-full bg-background border border-border rounded-lg px-2 py-1 font-mono text-xs font-bold text-foreground outline-none focus:border-primary cursor-pointer"
+                    />
+                  </div>
+                </div>
+                <span className="text-[10px] font-mono font-bold px-2 py-1 rounded-lg bg-primary/15 text-primary border border-primary/30">
+                  {customDate}
+                </span>
+              </div>
+            )}
+
             {/* Period Status Badge */}
             <div className="flex items-center justify-between px-1">
               <span className="text-xs font-bold text-muted-foreground">
                 {ticketFilterPeriod === "today"
                   ? `आजच्या पावत्या (${todayTickets.length}) • ${todayStr}`
                   : ticketFilterPeriod === "yesterday"
-                  ? `कालच्या पावत्या (${yesterdaySynthesizedTickets.length}) • ${yesterdayStr}`
+                  ? `कालच्या पावत्या (${yesterdayTickets.length}) • ${yesterdayStr}`
+                  : ticketFilterPeriod === "custom"
+                  ? `तारीख ${customDate} च्या पावत्या (${customDateTickets.length})`
                   : `एकूण सर्व पावत्या (${allTicketsCombined.length})`}
               </span>
               <div className="flex items-center gap-2">
@@ -1255,13 +1260,15 @@ export default function AgentPage() {
                 <p className="font-bold">
                   {ticketFilterPeriod === "yesterday"
                     ? `कालच्या तारखेसाठी (${yesterdayStr}) कोणतीही पावती सापडली नाही.`
+                    : ticketFilterPeriod === "custom"
+                    ? `तारीख (${customDate}) साठी कोणतीही पावती सापडली नाही.`
                     : ticketFilterPeriod === "today"
                     ? "आज अद्याप कोणतीही पावती फाडली नाही. नवीन दाव लावा!"
                     : "कोणतीही पावती उपलब्ध नाही."}
                 </p>
                 <p className="text-[10px] text-muted-foreground/80">
-                  {ticketFilterPeriod === "yesterday"
-                    ? "काल या काऊंटरवरून कोणतेही दाव नोंदवले गेले नव्हते."
+                  {ticketFilterPeriod === "yesterday" || ticketFilterPeriod === "custom"
+                    ? "निवडलेल्या तारखेला या काऊंटरवरून कोणतेही दाव नोंदवले गेले नव्हते."
                     : "Thermal slip print karne ke liye card select karke daav lagayein."}
                 </p>
               </div>
@@ -1359,56 +1366,103 @@ export default function AgentPage() {
           </div>
         )}
 
-        {/* TAB 3: SHIFT REPORT & KAL KA HISAB */}
+        {/* TAB 3: SHIFT REPORT & DATE-WISE HISAB */}
         {activeTab === "shift" && (
           <div className="space-y-3">
-            {/* Period Switcher: आज (Today) / काल (Yesterday) / एकूण (All) */}
-            <div className="grid grid-cols-3 gap-1 bg-muted/70 p-1 rounded-2xl border border-border text-xs">
+            {/* Period Switcher: आज (Today) / काल (Yesterday) / तारीख (Date) / एकूण (All) */}
+            <div className="grid grid-cols-4 gap-1 bg-muted/70 p-1 rounded-2xl border border-border text-xs">
               <button
                 type="button"
                 onClick={() => setShiftPeriod("today")}
-                className={`py-2 px-3 rounded-xl font-bold transition flex items-center justify-center gap-1.5 ${
+                className={`py-2 px-1.5 rounded-xl font-bold transition flex items-center justify-center gap-1 ${
                   shiftPeriod === "today"
                     ? "bg-primary text-primary-foreground font-black shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <span>📅</span> आज (Today)
+                <span>📅</span> आज
               </button>
               <button
                 type="button"
                 onClick={() => setShiftPeriod("yesterday")}
-                className={`py-2 px-3 rounded-xl font-bold transition flex items-center justify-center gap-1.5 ${
+                className={`py-2 px-1.5 rounded-xl font-bold transition flex items-center justify-center gap-1 ${
                   shiftPeriod === "yesterday"
                     ? "bg-primary text-primary-foreground font-black shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <span>⏪</span> काल (Yesterday)
+                <span>⏪</span> काल
+              </button>
+              <button
+                type="button"
+                onClick={() => setShiftPeriod("custom")}
+                className={`py-2 px-1.5 rounded-xl font-bold transition flex items-center justify-center gap-1 ${
+                  shiftPeriod === "custom"
+                    ? "bg-primary text-primary-foreground font-black shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span>📆</span> तारीख
               </button>
               <button
                 type="button"
                 onClick={() => setShiftPeriod("all")}
-                className={`py-2 px-3 rounded-xl font-bold transition flex items-center justify-center gap-1.5 ${
+                className={`py-2 px-1.5 rounded-xl font-bold transition flex items-center justify-center gap-1 ${
                   shiftPeriod === "all"
                     ? "bg-primary text-primary-foreground font-black shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <span>📊</span> एकूण (All)
+                <span>📊</span> एकूण
               </button>
             </div>
+
+            {/* Date Picker Input when "custom" is active */}
+            {shiftPeriod === "custom" && (
+              <div className="flex items-center justify-between gap-2 p-2.5 rounded-2xl bg-card border-2 border-primary/50 shadow-sm animate-in fade-in duration-200">
+                <div className="flex items-center gap-2 flex-1">
+                  <span className="text-lg">📆</span>
+                  <div className="flex-1">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-primary block leading-none mb-1">
+                      हिशोबाची तारीख निवडा (Select Date)
+                    </label>
+                    <input
+                      type="date"
+                      value={customDate}
+                      max={todayStr}
+                      onChange={(e) => {
+                        if (e.target.value) setCustomDate(e.target.value);
+                      }}
+                      className="w-full bg-background border border-border rounded-lg px-2.5 py-1 font-mono text-xs font-black text-foreground outline-none focus:border-primary cursor-pointer"
+                    />
+                  </div>
+                </div>
+                <span className="text-[11px] font-mono font-black px-2.5 py-1.5 rounded-xl bg-primary/15 text-primary border border-primary/30">
+                  {customDate}
+                </span>
+              </div>
+            )}
 
             {/* Shift Summary Box */}
             <div className="rounded-2xl border border-border bg-card p-4 space-y-3 shadow-sm">
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="font-display text-sm font-black text-foreground flex items-center gap-1.5">
-                    <span>{shiftPeriod === "today" ? "🟢" : shiftPeriod === "yesterday" ? "🟡" : "🔵"}</span>
+                    <span>
+                      {shiftPeriod === "today"
+                        ? "🟢"
+                        : shiftPeriod === "yesterday"
+                        ? "🟡"
+                        : shiftPeriod === "custom"
+                        ? "📆"
+                        : "🔵"}
+                    </span>
                     {shiftPeriod === "today"
                       ? "आजचा हिशोब (Today's Shift)"
                       : shiftPeriod === "yesterday"
                       ? "कालचा हिशोब (Yesterday's Ledger)"
+                      : shiftPeriod === "custom"
+                      ? `तारीख ${customDate} चा हिशोब (Date Ledger)`
                       : "एकूण हिशोब (All Time Summary)"}
                   </h3>
                   <span className="text-[10px] font-mono text-muted-foreground">
@@ -1416,6 +1470,8 @@ export default function AgentPage() {
                       ? `तारीख: ${todayStr}`
                       : shiftPeriod === "yesterday"
                       ? `तारीख: ${yesterdayStr}`
+                      : shiftPeriod === "custom"
+                      ? `निवडलेली तारीख: ${customDate}`
                       : "सर्व रेकॉर्ड केलेला कालावधी"}
                   </span>
                 </div>
@@ -1476,10 +1532,16 @@ export default function AgentPage() {
                     ? `आजच्या पावत्या व नोंदी (${shiftTickets.length})`
                     : shiftPeriod === "yesterday"
                     ? `कालच्या पावत्या व नोंदी (${shiftTickets.length})`
+                    : shiftPeriod === "custom"
+                    ? `तारीख ${customDate} च्या पावत्या व नोंदी (${shiftTickets.length})`
                     : `सर्व पावत्या व नोंदी (${shiftTickets.length})`}
                 </span>
                 <span className="text-[10px] text-muted-foreground">
-                  {shiftPeriod === "yesterday" ? "कालचा संपूर्ण हिशोब" : "तपशीलवार पावती यादी"}
+                  {shiftPeriod === "custom"
+                    ? `तारीख ${customDate} चा तपशील`
+                    : shiftPeriod === "yesterday"
+                    ? "कालचा संपूर्ण हिशोब"
+                    : "तपशीलवार पावती यादी"}
                 </span>
               </div>
 
@@ -1488,11 +1550,13 @@ export default function AgentPage() {
                   <p className="font-bold">
                     {shiftPeriod === "yesterday"
                       ? `कालच्या तारखेसाठी (${yesterdayStr}) कोणतीही नोंद आढळली नाही.`
+                      : shiftPeriod === "custom"
+                      ? `तारीख (${customDate}) साठी कोणतीही नोंद आढळली नाही.`
                       : "या कालावधीत कोणतीही पावती आढळली नाही."}
                   </p>
                   <p className="text-[10px] text-muted-foreground/80">
-                    {shiftPeriod === "yesterday"
-                      ? "काल या काऊंटरवरून कोणतेही दाव लावले गेले नव्हते."
+                    {shiftPeriod === "yesterday" || shiftPeriod === "custom"
+                      ? "निवडलेल्या तारखेला या काऊंटरवरून कोणतेही दाव लावले गेले नव्हते."
                       : "दाव लावल्यानंतर येथे पावती तपशील दिसेल."}
                   </p>
                 </div>
@@ -1569,251 +1633,173 @@ export default function AgentPage() {
           </div>
         )}
 
-        {/* TAB 4: ROUND RESULTS & WINNERS HISTORY + MY BETS HISTORY */}
+        {/* TAB 4: AGENT MY BETS LOG (TODAY / YESTERDAY / PARTICULAR DATE / ALL) */}
         {activeTab === "history" && (
           <div className="space-y-3">
-            {/* Mode Switcher: Round Results vs Agent My Bets History */}
-            <div className="grid grid-cols-2 gap-1 bg-muted/70 p-1 rounded-2xl border border-border text-xs">
+            {/* Period Switcher: आज / काल / तारीख / सर्व */}
+            <div className="grid grid-cols-4 gap-1 bg-muted/70 p-1 rounded-2xl border border-border text-xs">
               <button
                 type="button"
-                onClick={() => setHistoryTabMode("rounds")}
-                className={`py-2 px-3 rounded-xl font-bold transition flex items-center justify-center gap-1.5 ${
-                  historyTabMode === "rounds"
+                onClick={() => setHistoryPeriod("today")}
+                className={`py-2 px-1.5 rounded-xl font-bold transition flex items-center justify-center gap-1 ${
+                  historyPeriod === "today"
                     ? "bg-primary text-primary-foreground font-black shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <span>🎰</span> फेऱ्यांचे निकाल (Rounds)
+                <span>📅</span> आज ({(agentUser?.bets || []).filter((b) => b.dateStr === todayStr).length})
               </button>
               <button
                 type="button"
-                onClick={() => setHistoryTabMode("mybets")}
-                className={`py-2 px-3 rounded-xl font-bold transition flex items-center justify-center gap-1.5 ${
-                  historyTabMode === "mybets"
+                onClick={() => setHistoryPeriod("yesterday")}
+                className={`py-2 px-1.5 rounded-xl font-bold transition flex items-center justify-center gap-1 ${
+                  historyPeriod === "yesterday"
                     ? "bg-primary text-primary-foreground font-black shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <span>📜</span> माझे दाव (My Bets)
+                <span>⏪</span> काल ({(agentUser?.bets || []).filter((b) => b.dateStr === yesterdayStr).length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setHistoryPeriod("custom")}
+                className={`py-2 px-1.5 rounded-xl font-bold transition flex items-center justify-center gap-1 ${
+                  historyPeriod === "custom"
+                    ? "bg-primary text-primary-foreground font-black shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span>📆</span> तारीख ({(agentUser?.bets || []).filter((b) => b.dateStr === customDate).length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setHistoryPeriod("all")}
+                className={`py-2 px-1.5 rounded-xl font-bold transition flex items-center justify-center gap-1 ${
+                  historyPeriod === "all"
+                    ? "bg-primary text-primary-foreground font-black shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span>📊</span> सर्व ({(agentUser?.bets || []).length})
               </button>
             </div>
 
-            {/* SUB-VIEW 1: ROUND RESULTS */}
-            {historyTabMode === "rounds" && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between px-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-base">📜</span>
-                    <h3 className="font-display text-sm font-black text-foreground">
-                      Round Results History (मागील निकाल)
-                    </h3>
+            {/* Date Picker Input when "custom" is active */}
+            {historyPeriod === "custom" && (
+              <div className="flex items-center justify-between gap-2 p-2.5 rounded-2xl bg-card border-2 border-primary/50 shadow-sm animate-in fade-in duration-200">
+                <div className="flex items-center gap-2 flex-1">
+                  <span className="text-lg">📆</span>
+                  <div className="flex-1">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-primary block leading-none mb-1">
+                      दाव तारीख निवडा (Select Bet Date)
+                    </label>
+                    <input
+                      type="date"
+                      value={customDate}
+                      max={todayStr}
+                      onChange={(e) => {
+                        if (e.target.value) setCustomDate(e.target.value);
+                      }}
+                      className="w-full bg-background border border-border rounded-lg px-2.5 py-1 font-mono text-xs font-black text-foreground outline-none focus:border-primary cursor-pointer"
+                    />
                   </div>
-                  <span className="text-[10px] font-mono text-muted-foreground font-bold">
-                    Last {recentWinners.length} Rounds
-                  </span>
                 </div>
-
-                <div className="grid grid-cols-1 gap-2">
-                  {recentWinners.map((r) => {
-                    const roundTickets = ticketsList.filter(
-                      (t) => t.roundNumber === r.roundNumber || t.roundId === r.roundId
-                    );
-                    const hasWonTicket = roundTickets.some((t) => t.status === "WON" || t.status === "CLAIMED");
-
-                    return (
-                      <div
-                        key={r.roundNumber}
-                        className={`rounded-2xl border p-2.5 flex items-center justify-between gap-3 transition shadow-xs ${
-                          hasWonTicket
-                            ? "border-emerald-500/50 bg-emerald-500/10"
-                            : "border-border bg-card/90"
-                        }`}
-                      >
-                        {/* Left: Winning Card Picture + Name + Symbol */}
-                        <div className="flex items-center gap-3">
-                          <div className="h-12 w-12 rounded-xl overflow-hidden border border-border/80 shrink-0 bg-background flex items-center justify-center p-1 shadow-inner">
-                            <img
-                              src={r.card.img}
-                              alt={r.card.name}
-                              className="w-full h-full object-contain filter drop-shadow"
-                            />
-                          </div>
-
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-display text-base font-black text-foreground leading-none">
-                                {r.card.name}
-                              </span>
-                              <span className="text-sm">{r.card.symbol}</span>
-                              <span className="text-[10px] font-mono text-muted-foreground font-bold">
-                                ({r.card.englishName})
-                              </span>
-                            </div>
-
-                            <div className="flex items-center gap-2 mt-1">
-                              <span className="px-2 py-0.5 rounded-md bg-primary/15 border border-primary/30 text-primary text-[10px] font-mono font-black">
-                                {r.roundId}
-                              </span>
-                              <span className="text-[10px] text-muted-foreground font-mono">
-                                {r.timeStr}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Right: 9X Payout Badge + Counter Ticket Indicator */}
-                        <div className="text-right shrink-0">
-                          <span className="inline-block px-2.5 py-1 rounded-lg bg-gradient-gold text-zinc-950 font-black text-[10px] uppercase shadow-sm">
-                            🏆 WINNER 9X
-                          </span>
-
-                          {roundTickets.length > 0 && (
-                            <span
-                              className={`block mt-1 text-[10px] font-bold font-mono ${
-                                hasWonTicket ? "text-emerald-400 font-black" : "text-muted-foreground"
-                              }`}
-                            >
-                              {hasWonTicket
-                                ? "🎉 Counter Won!"
-                                : `${roundTickets.length} Slip(s) Booked`}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                <span className="text-[11px] font-mono font-black px-2.5 py-1.5 rounded-xl bg-primary/15 text-primary border border-primary/30">
+                  {customDate}
+                </span>
               </div>
             )}
 
-            {/* SUB-VIEW 2: AGENT MY BETS HISTORY (TODAY / YESTERDAY / ALL) */}
-            {historyTabMode === "mybets" && (
-              <div className="space-y-3">
-                {/* Period Pills */}
-                <div className="grid grid-cols-3 gap-1 bg-muted/60 p-1 rounded-xl border border-border text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setHistoryPeriod("today")}
-                    className={`py-1.5 px-2 rounded-lg font-bold text-center transition flex items-center justify-center gap-1 ${
-                      historyPeriod === "today"
-                        ? "bg-primary text-primary-foreground font-black shadow-xs"
-                        : "text-muted-foreground hover:text-foreground"
+            {/* Bets Summary Header Banner */}
+            <div className="rounded-2xl border border-border bg-card p-3 shadow-sm flex items-center justify-between text-xs font-mono">
+              <div>
+                <span className="text-[10px] text-muted-foreground block">
+                  {historyPeriod === "today"
+                    ? `आजचे दाव • ${todayStr}`
+                    : historyPeriod === "yesterday"
+                    ? `कालचे दाव • ${yesterdayStr}`
+                    : historyPeriod === "custom"
+                    ? `तारीख ${customDate} चे दाव`
+                    : "सर्व दाव इतिहास"}
+                </span>
+                <span className="font-bold text-foreground">
+                  {historyBets.length} दाव लावले
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] text-muted-foreground block">
+                  एकूण दाव: ₹{historyBetsTotalStake}
+                </span>
+                <span className="font-bold text-emerald-400">
+                  बक्षीस: ₹{historyBetsTotalWon}
+                </span>
+              </div>
+            </div>
+
+            {/* Bets List */}
+            {historyBets.length === 0 ? (
+              <div className="p-8 text-center text-muted-foreground border border-dashed border-border rounded-2xl text-xs space-y-1">
+                <p className="font-bold">
+                  {historyPeriod === "yesterday"
+                    ? `कालच्या तारखेसाठी (${yesterdayStr}) कोणतेही दाव आढळले नाहीत.`
+                    : historyPeriod === "custom"
+                    ? `तारीख (${customDate}) साठी कोणतेही दाव आढळले नाहीत.`
+                    : "या कालावधीत कोणतेही दाव नाहीत."}
+                </p>
+                <p className="text-[10px] text-muted-foreground/80">
+                  काऊंटरवरून दाव लावल्यानंतर येथे नोंद दिसेल.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {historyBets.map((b) => (
+                  <div
+                    key={b.id}
+                    className={`p-3 rounded-2xl border transition flex items-center justify-between gap-3 ${
+                      b.isWin || (b.payout && b.payout > 0)
+                        ? "border-emerald-500/50 bg-emerald-500/10 shadow-xs"
+                        : "border-border bg-card/80"
                     }`}
                   >
-                    <span>📅</span> आज ({categorizedBets.today.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setHistoryPeriod("yesterday")}
-                    className={`py-1.5 px-2 rounded-lg font-bold text-center transition flex items-center justify-center gap-1 ${
-                      historyPeriod === "yesterday"
-                        ? "bg-primary text-primary-foreground font-black shadow-xs"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    <span>⏪</span> काल ({categorizedBets.yesterday.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setHistoryPeriod("all")}
-                    className={`py-1.5 px-2 rounded-lg font-bold text-center transition flex items-center justify-center gap-1 ${
-                      historyPeriod === "all"
-                        ? "bg-primary text-primary-foreground font-black shadow-xs"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    <span>📊</span> सर्व ({categorizedBets.all.length})
-                  </button>
-                </div>
-
-                {/* Bets Summary Header Banner */}
-                <div className="rounded-2xl border border-border bg-card p-3 shadow-sm flex items-center justify-between text-xs font-mono">
-                  <div>
-                    <span className="text-[10px] text-muted-foreground block">
-                      {historyPeriod === "today"
-                        ? `आजचे दाव • ${todayStr}`
-                        : historyPeriod === "yesterday"
-                        ? `कालचे दाव • ${yesterdayStr}`
-                        : "सर्व दाव इतिहास"}
-                    </span>
-                    <span className="font-bold text-foreground">
-                      {historyBets.length} दाव लावले
-                    </span>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-[10px] text-muted-foreground block">
-                      एकूण दाव: ₹{historyBetsTotalStake}
-                    </span>
-                    <span className="font-bold text-emerald-400">
-                      बक्षीस: ₹{historyBetsTotalWon}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Bets List */}
-                {historyBets.length === 0 ? (
-                  <div className="p-8 text-center text-muted-foreground border border-dashed border-border rounded-2xl text-xs space-y-1">
-                    <p className="font-bold">
-                      {historyPeriod === "yesterday"
-                        ? `कालच्या तारखेसाठी (${yesterdayStr}) कोणतेही दाव आढळले नाहीत.`
-                        : "या कालावधीत कोणतेही दाव नाहीत."}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground/80">
-                      काऊंटरवरून दाव लावल्यानंतर येथे नोंद दिसेल.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {historyBets.map((b) => (
-                      <div
-                        key={b.id}
-                        className={`p-3 rounded-2xl border transition flex items-center justify-between gap-3 ${
-                          b.isWin || (b.payout && b.payout > 0)
-                            ? "border-emerald-500/50 bg-emerald-500/10 shadow-xs"
-                            : "border-border bg-card/80"
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-xl bg-background border border-border flex items-center justify-center font-display font-black text-sm">
-                            {CARDS[b.cardIndex]?.symbol || "🃏"}
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-display text-sm font-black text-foreground">
-                                {b.cardName}
-                              </span>
-                              <span className="text-[10px] font-mono font-bold text-primary px-1.5 py-0.2 rounded bg-primary/10 border border-primary/20">
-                                {b.roundId}
-                              </span>
-                            </div>
-                            <span className="text-[10px] font-mono text-muted-foreground block mt-0.5">
-                              🕒 {b.timeStr} • {b.dateStr}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="text-right shrink-0">
-                          <span className="text-xs font-mono font-black text-foreground block">
-                            दाव: ₹{b.stake}
-                          </span>
-                          {b.isWin || (b.payout && b.payout > 0) ? (
-                            <span className="inline-block px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px] font-black uppercase">
-                              🏆 जिंकले ₹{b.payout}
-                            </span>
-                          ) : b.status === "SETTLED" ? (
-                            <span className="text-[10px] text-muted-foreground font-mono">
-                              Settled
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-amber-400 font-mono">
-                              In Play
-                            </span>
-                          )}
-                        </div>
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-xl bg-background border border-border flex items-center justify-center font-display font-black text-sm">
+                        {CARDS[b.cardIndex]?.symbol || "🃏"}
                       </div>
-                    ))}
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-display text-sm font-black text-foreground">
+                            {b.cardName}
+                          </span>
+                          <span className="text-[10px] font-mono font-bold text-primary px-1.5 py-0.2 rounded bg-primary/10 border border-primary/20">
+                            {b.roundId}
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-mono text-muted-foreground block mt-0.5">
+                          🕒 {b.timeStr} • {b.dateStr}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      <span className="text-xs font-mono font-black text-foreground block">
+                        दाव: ₹{b.stake}
+                      </span>
+                      {b.isWin || (b.payout && b.payout > 0) ? (
+                        <span className="inline-block px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px] font-black uppercase">
+                          🏆 जिंकले ₹{b.payout}
+                        </span>
+                      ) : b.status === "SETTLED" ? (
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          Settled
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-amber-400 font-mono">
+                          In Play
+                        </span>
+                      )}
+                    </div>
                   </div>
-                )}
+                ))}
               </div>
             )}
           </div>
