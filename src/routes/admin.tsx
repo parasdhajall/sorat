@@ -9,6 +9,7 @@ import {
   analyzeCardProfitability,
 } from "@/lib/realtime";
 import { CARDS } from "@/lib/cards";
+import { resolveProfitGuaranteedWinnerForRound } from "@/lib/roundSettlement";
 import {
   getUsers,
   getActiveUserId,
@@ -163,7 +164,14 @@ export default function AdminPage() {
 
       // Auto-settle any pending bets whose round has ended or reached result phase
       if (curRound > 0) {
-        const effWinner = lastWinner ?? getDeterministicRoundWinner(curRound);
+        const effWinner =
+          lastWinner ??
+          resolveProfitGuaranteedWinnerForRound(
+            curRound,
+            `#${String(curRound).padStart(4, "0")}`,
+            forcedWinner,
+            bets
+          );
         const didSettle = autoSettleAllPendingBets(curRound, curPhase, effWinner);
         if (didSettle) {
           reloadUsers();
@@ -174,7 +182,7 @@ export default function AdminPage() {
     updateTick();
     const id = setInterval(updateTick, 250);
     return () => clearInterval(id);
-  }, [lastWinner, reloadUsers]);
+  }, [lastWinner, reloadUsers, forcedWinner, bets]);
 
   const handlePinSubmit = (e: React.FormEvent) => {
     e.preventDefault();

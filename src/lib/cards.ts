@@ -162,6 +162,20 @@ export function getPastRoundsHistory(count: number = 40): RoundHistoryItem[] {
   return history;
 }
 
+export function getRecordedRoundWinner(roundNumber: number): number | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem("sorat_round_winners_history");
+    if (raw) {
+      const map = JSON.parse(raw);
+      if (typeof map[roundNumber] === "number") {
+        return map[roundNumber];
+      }
+    }
+  } catch {}
+  return null;
+}
+
 export function recordRoundWinnerHistory(roundNumber: number, winnerCardIndex: number): void {
   if (typeof window === "undefined") return;
   try {

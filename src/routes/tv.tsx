@@ -20,6 +20,7 @@ import {
 } from "@/lib/userStore";
 import { recordRoundWinnerHistory } from "@/lib/cards";
 import { settleTicketsForRound } from "@/lib/ticketStore";
+import { declareSoratRoundRpc } from "@/lib/supabase";
 import kite from "@/assets/kite.jpg";
 import umbrella from "@/assets/umbrella.jpg";
 import ball from "@/assets/ball.jpg";
@@ -324,6 +325,16 @@ export default function TvArenaPage() {
       settleRoundBets(roundId, w, CARDS[w].name, false);
       autoSettleAllPendingBets(roundNumber, "select", w);
       recordRoundWinnerHistory(roundNumber, w);
+
+      // Persist round declaration in Supabase
+      try {
+        declareSoratRoundRpc({
+          roundId,
+          winningCard: w,
+          winningCardName: CARDS[w].name,
+          selectionReason: decision.reason,
+        }).catch(() => {});
+      } catch {}
 
       // Record to recent history
       const nowStr = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });

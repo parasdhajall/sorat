@@ -1,7 +1,7 @@
 import { getSupabaseClient, placeSoratBetsRpc, depositToPlayerRpc } from "./supabase";
 import { RAMU_SIMULATED_BETS } from "./ramuSimulationData";
 import { getDeterministicRoundWinner } from "./realtime";
-import { CARDS } from "./cards";
+import { CARDS, getRecordedRoundWinner } from "./cards";
 
 export interface UserDeposit {
   id: string;
@@ -91,6 +91,11 @@ export function getTodayDateStr(date = new Date()): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+export function formatDate(date: number | Date = new Date()): string {
+  const d = typeof date === "number" ? new Date(date) : date;
+  return getTodayDateStr(d);
 }
 
 export function getYesterdayDateStr(): string {
@@ -824,6 +829,71 @@ export function broadcastUserDeposit(
  */
 export async function pullUsersFromCloud(): Promise<UserAccount[]> {
   if (typeof window === "undefined") return getUsers();
+
+  // 1. Direct Supabase Query (Primary Cloud Source of Truth - DigitJodi Pattern)
+  try {
+    const client = getSupabaseClient();
+    if (client) {
+      const { data: dbPlayers, error } = await client.from("players").select("*");
+      if (!error && Array.isArray(dbPlayers) && dbPlayers.length > 0) {
+        const local = getUsers();
+        const merged = local.map((u) => {
+          const remote = dbPlayers.find(
+            (p) =>
+              p.id === u.id ||
+              (p.username && p.username.toLowerCase() === u.username.toLowerCase()) ||
+              (p.phone && u.phone && p.phone.replace(/\D/g, "") === u.phone.replace(/\D/g, ""))
+          );
+          if (remote) {
+            return {
+              ...u,
+              id: remote.id || u.id,
+              balance: Number(remote.balance ?? u.balance),
+              totalDeposited: Number(remote.total_deposited ?? u.totalDeposited),
+              pin: remote.pin || u.pin,
+              phone: remote.phone || u.phone,
+              displayName: remote.display_name || u.displayName,
+              status: (remote.status as any) || u.status,
+            };
+          }
+          return u;
+        });
+
+        // Add any players in Supabase that aren't yet in local store
+        for (const p of dbPlayers) {
+          const exists = merged.some(
+            (u) =>
+              u.id === p.id ||
+              (p.username && u.username.toLowerCase() === p.username.toLowerCase()) ||
+              (p.phone && u.phone && p.phone.replace(/\D/g, "") === u.phone.replace(/\D/g, ""))
+          );
+          if (!exists) {
+            merged.push({
+              id: p.id,
+              username: p.username || p.display_name || "user",
+              displayName: p.display_name || p.username || "User",
+              phone: p.phone || "",
+              balance: Number(p.balance || 0),
+              totalDeposited: Number(p.total_deposited || 0),
+              totalWithdrawn: Number(p.total_withdrawn || 0),
+              deposits: [],
+              bets: [],
+              createdAt: p.created_at ? new Date(p.created_at).getTime() : Date.now(),
+              status: (p.status as any) || "ACTIVE",
+              pin: p.pin || "1234",
+            });
+          }
+        }
+
+        saveUsers(merged);
+        return merged;
+      }
+    }
+  } catch (err) {
+    console.warn("Supabase pull error, falling back to ntfy:", err);
+  }
+
+  // 2. ntfy.sh fallback (if offline or Supabase connection unreachable)
   try {
     const res = await fetch(`https://ntfy.sh/${CLOUD_ACCOUNTS_SYNC_TOPIC}/json?poll=1&since=all`);
     if (res.ok) {
@@ -1298,8 +1368,20 @@ export function deductAgentBalance(
     betRecords
   );
 
-  // Background Supabase Sync if configured (DigitJodi pattern)
+  // Direct Supabase Update & Stored Procedure Sync (DigitJodi pattern)
   try {
+    const client = getSupabaseClient();
+    if (client) {
+      // 1. Direct balance deduction in players table so cloud is immediately authoritative
+      client
+        .from("players")
+        .update({ balance: newBalance, updated_at: new Date().toISOString() })
+        .eq("id", users[idx].id)
+        .then(() => {})
+        .catch(() => {});
+    }
+
+    // 2. Atomically insert bet tickets & update round turnover via RPC
     placeSoratBetsRpc({
       userId: users[idx].id,
       roundId,
@@ -1309,8 +1391,12 @@ export function deductAgentBalance(
       dateStr: formatDate(now),
       timeStr: formatTime(now),
       bets: items,
-    }).catch(() => {});
-  } catch {}
+    }).catch((err) => {
+      console.warn("placeSoratBetsRpc notice:", err);
+    });
+  } catch (err) {
+    console.warn("Supabase sync notice in deductAgentBalance:", err);
+  }
 
   return { success: true, newBalance };
 }
@@ -1419,26 +1505,14 @@ export function withdrawFromUser(
     const supabase = getSupabaseClient();
     if (supabase) {
       supabase
-        .from("deposits")
-        .insert({
-          id: depositRecord.id,
-          user_id: target.id,
-          amount: depositRecord.amount,
-          date_str: depositRecord.dateStr,
-          time_str: depositRecord.timeStr,
-          note: depositRecord.note || null,
-          balance_after: depositRecord.balanceAfter,
+        .from("players")
+        .update({
+          balance: target.balance,
+          total_withdrawn: target.totalWithdrawn,
+          updated_at: new Date().toISOString(),
         })
-        .then(() => {
-          supabase
-            .from("players")
-            .update({
-              balance: target.balance,
-              total_deposited: target.totalDeposited,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", target.id);
-        })
+        .eq("id", target.id)
+        .then(() => {})
         .catch(() => {});
     }
   } catch {}
@@ -1465,26 +1539,13 @@ export function setUserBalance(userId: string, balance: number): UserAccount {
     const supabase = getSupabaseClient();
     if (supabase) {
       supabase
-        .from("deposits")
-        .insert({
-          id: depositRecord.id,
-          user_id: target.id,
-          amount: depositRecord.amount,
-          date_str: depositRecord.dateStr,
-          time_str: depositRecord.timeStr,
-          note: depositRecord.note || null,
-          balance_after: depositRecord.balanceAfter,
+        .from("players")
+        .update({
+          balance: target.balance,
+          updated_at: new Date().toISOString(),
         })
-        .then(() => {
-          supabase
-            .from("players")
-            .update({
-              balance: target.balance,
-              total_deposited: target.totalDeposited,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", target.id);
-        })
+        .eq("id", target.id)
+        .then(() => {})
         .catch(() => {});
     }
   } catch {}
@@ -1725,7 +1786,7 @@ export function autoSettleAllPendingBets(
           userChanged = true;
           const winIdx = isCurrentRoundSettled
             ? currentWinner!
-            : getDeterministicRoundWinner(betRoundNum);
+            : (getRecordedRoundWinner(betRoundNum) ?? getDeterministicRoundWinner(betRoundNum));
 
           const winCard = CARDS[winIdx];
           const isWin = bet.cardIndex === winIdx;

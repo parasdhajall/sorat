@@ -13,6 +13,7 @@ import {
   recordRoundWinnerHistory,
   RoundHistoryItem,
 } from "@/lib/cards";
+import { resolveProfitGuaranteedWinnerForRound } from "@/lib/roundSettlement";
 import {
   createTicket,
   getTickets,
@@ -193,7 +194,8 @@ export default function AgentPage() {
       // If in result phase and winner has not been declared yet from TV:
       if (sync.phase === "result" && lastSettledRoundRef.current !== sync.roundNumber) {
         lastSettledRoundRef.current = sync.roundNumber;
-        const fallbackWinner = declaredWinner ?? getDeterministicRoundWinner(sync.roundNumber);
+        const fallbackWinner =
+          declaredWinner ?? resolveProfitGuaranteedWinnerForRound(sync.roundNumber, sync.roundId);
         if (declaredWinner === null) {
           setDeclaredWinner(fallbackWinner);
         }
