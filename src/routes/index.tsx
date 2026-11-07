@@ -1119,14 +1119,30 @@ export default function AgentPage() {
             <span className="text-muted-foreground uppercase font-bold">Room:</span>
             <span className="text-primary font-black uppercase tracking-wider">{activeRoomId}</span>
           </div>
-          <a
-            href={`/tv?room=${activeRoomId}`}
-            target="_blank"
-            rel="noreferrer"
-            className="text-[10px] text-primary hover:underline font-bold flex items-center gap-1"
-          >
-            <span>📺 Open Room TV ↗</span>
-          </a>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                const tvUrl = `${window.location.origin}/tv?room=${activeRoomId}`;
+                if (navigator?.clipboard?.writeText) {
+                  navigator.clipboard.writeText(tvUrl);
+                }
+                alert(`TV Screen Link Copied!\n\n${tvUrl}\n\nIs link ko TV browser me open karein.`);
+              }}
+              className="text-[10px] text-muted-foreground hover:text-foreground font-bold flex items-center gap-0.5 cursor-pointer"
+              title="Copy link to open on TV"
+            >
+              📋 Copy TV Link
+            </button>
+            <a
+              href={`/tv?room=${activeRoomId}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-[10px] text-primary hover:underline font-bold flex items-center gap-1"
+            >
+              <span>📺 Open Room TV ↗</span>
+            </a>
+          </div>
         </div>
 
         {/* Counter Balance Status Card */}

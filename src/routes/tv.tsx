@@ -79,12 +79,14 @@ export default function TvArenaPage() {
   const [phase, setPhase] = useState<Phase>(initialSync.phase);
   const [t, setT] = useState(initialSync.timeLeft);
 
-  // Room / Counter ID (Accepts ?room=agent_kalyan_01 or ?counter=agent_kalyan_01 or defaults to logged in agent)
+  // Room / Counter ID (Accepts ?room=... or localStorage override or defaults to logged in agent)
   const [activeRoomId, setActiveRoomId] = useState<string>(() => {
     if (typeof window !== "undefined") {
       const sp = new URLSearchParams(window.location.search);
       const r = sp.get("room") || sp.get("counter") || sp.get("agent");
       if (r) return sanitizeRoomId(r);
+      const savedTvRoom = localStorage.getItem("sorat_tv_room");
+      if (savedTvRoom) return sanitizeRoomId(savedTvRoom);
     }
     const agent = getLoggedInAgent();
     if (agent?.agentCode || agent?.username || agent?.id) {
@@ -92,6 +94,28 @@ export default function TvArenaPage() {
     }
     return DEFAULT_ROOM_ID;
   });
+
+  const [showRoomSelector, setShowRoomSelector] = useState(false);
+  const [allUsersList, setAllUsersList] = useState<UserAccount[]>(() => getUsers());
+  useEffect(() => {
+    setAllUsersList(getUsers());
+  }, []);
+
+  const handleSelectTvRoom = (roomId: string, user?: UserAccount) => {
+    const clean = sanitizeRoomId(roomId);
+    setActiveRoomId(clean);
+    if (user) {
+      setTvAgent(user);
+      setLoggedInAgent(user.id);
+    }
+    if (typeof window !== "undefined") {
+      localStorage.setItem("sorat_tv_room", clean);
+      const url = new URL(window.location.href);
+      url.searchParams.set("room", clean);
+      window.history.replaceState({}, "", url.toString());
+    }
+    setShowRoomSelector(false);
+  };
 
   const hasUrlRoom = typeof window !== "undefined" && Boolean(
     new URLSearchParams(window.location.search).get("room") ||
@@ -239,7 +263,15 @@ export default function TvArenaPage() {
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
       if (e.key === "sorat_logged_in_agent_id_v1") {
-        setTvAgent(getLoggedInAgent());
+        const u = getLoggedInAgent();
+        setTvAgent(u);
+        if (u) {
+          const newRoom = sanitizeRoomId(u.agentCode || u.username || u.id);
+          setActiveRoomId(newRoom);
+        }
+      }
+      if (e.key === "sorat_tv_room" && e.newValue) {
+        setActiveRoomId(sanitizeRoomId(e.newValue));
       }
     };
     window.addEventListener("storage", handleStorage);
@@ -252,7 +284,16 @@ export default function TvArenaPage() {
     hostSyncRef.current = host;
 
     host.onMessage = (msg: GameMessage) => {
-      if (msg.type === "ADD_TICKET_BETS") {
+      if (msg.type === "SWITCH_ACTIVE_USER") {
+        if (msg.roomId) {
+          setActiveRoomId(sanitizeRoomId(msg.roomId));
+        } else if (msg.userId) {
+          const u = getUsers().find((x) => x.id === msg.userId || x.username === msg.userId);
+          if (u) {
+            setActiveRoomId(sanitizeRoomId(u.agentCode || u.username || u.id));
+          }
+        }
+      } else if (msg.type === "ADD_TICKET_BETS") {
         setBets((prev) => {
           const next = { ...prev };
           Object.entries(msg.bets).forEach(([c, amt]) => {
@@ -480,6 +521,14 @@ export default function TvArenaPage() {
     if (res.success && res.user) {
       setTvAgent(res.user);
       setActiveUserId(res.user.id);
+      const newRoom = sanitizeRoomId(res.user.agentCode || res.user.username || res.user.id);
+      setActiveRoomId(newRoom);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("sorat_tv_room", newRoom);
+        const url = new URL(window.location.href);
+        url.searchParams.set("room", newRoom);
+        window.history.replaceState({}, "", url.toString());
+      }
     } else {
       setLoginError(res.error || "Login fail! Sahi Agent ID aur 4-digit PIN daalein.");
     }
@@ -490,6 +539,7 @@ export default function TvArenaPage() {
       setLoggedInAgent(null);
       setTvAgent(null);
       if (typeof window !== "undefined") {
+        localStorage.removeItem("sorat_tv_room");
         window.location.href = "/tv";
       }
     }
@@ -676,16 +726,24 @@ export default function TvArenaPage() {
 
         {/* Right Info & Display Controls */}
         <div className="flex items-center gap-3">
-          {/* Active Counter Badge */}
-          <div className="hidden sm:flex flex-col text-right">
+          {/* Active Counter Badge with 1-Tap Switcher */}
+          <button
+            type="button"
+            onClick={() => {
+              setAllUsersList(getUsers());
+              setShowRoomSelector(true);
+            }}
+            title="Click to Switch Counter Room / Agent TV Display"
+            className="hidden sm:flex flex-col text-right p-1.5 rounded-xl hover:bg-muted/80 border border-border/40 hover:border-primary/50 transition cursor-pointer"
+          >
             <span className="text-[9px] uppercase font-bold text-muted-foreground flex items-center justify-end gap-1">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Counter Room
+              Counter Room ⇄
             </span>
             <span className="text-xs font-black text-primary font-mono truncate max-w-[160px]">
               📡 {activeRoomId.toUpperCase()}
             </span>
-          </div>
+          </button>
 
           {/* Action Total Pool */}
           <div className="px-3 py-1 rounded-xl bg-background/80 border border-border text-xs font-mono font-black text-primary flex items-center gap-1">
@@ -869,6 +927,98 @@ export default function TvArenaPage() {
               </span>
               <span className="px-3.5 py-1.5 rounded-xl bg-emerald-500/25 border border-emerald-500/50 text-emerald-400 font-black tracking-wide">
                 WIN PAYS 9X
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* 5. COUNTER ROOM SWITCHER MODAL                                 */}
+      {/* ============================================================== */}
+      {showRoomSelector && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-border/60 pb-3">
+              <div>
+                <h3 className="font-display text-base font-black text-foreground flex items-center gap-2">
+                  <span>📺</span>
+                  <span>Select Counter Room Display</span>
+                </h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Kis counter/agent ka live TV display screen open karna hai?
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRoomSelector(false)}
+                className="text-muted-foreground hover:text-foreground text-sm p-1.5 rounded-lg hover:bg-muted cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+              {/* Main Arena / All Counters */}
+              <button
+                type="button"
+                onClick={() => handleSelectTvRoom("sorat_main")}
+                className={`w-full p-3 rounded-xl border text-left transition flex items-center justify-between cursor-pointer ${
+                  activeRoomId === "sorat_main"
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border/60 bg-muted/40 hover:bg-muted text-foreground"
+                }`}
+              >
+                <div>
+                  <div className="font-black text-sm flex items-center gap-1.5">
+                    <span>🌐</span>
+                    <span>Main Global Arena</span>
+                  </div>
+                  <span className="text-[11px] text-muted-foreground">Default universal live room (sorat_main)</span>
+                </div>
+                {activeRoomId === "sorat_main" && (
+                  <span className="text-xs font-bold bg-primary text-primary-foreground px-2 py-0.5 rounded-full">ACTIVE</span>
+                )}
+              </button>
+
+              {/* Individual Agents List */}
+              {allUsersList.map((user) => {
+                const userRoom = sanitizeRoomId(user.agentCode || user.username || user.id);
+                const isSelected = activeRoomId === userRoom;
+                return (
+                  <button
+                    key={user.id}
+                    type="button"
+                    onClick={() => handleSelectTvRoom(userRoom, user)}
+                    className={`w-full p-3 rounded-xl border text-left transition flex items-center justify-between cursor-pointer ${
+                      isSelected
+                        ? "border-amber-400 bg-amber-400/10 text-amber-300"
+                        : "border-border/60 bg-muted/40 hover:bg-muted text-foreground"
+                    }`}
+                  >
+                    <div>
+                      <div className="font-black text-sm flex items-center gap-1.5">
+                        <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                        <span>{user.displayName}</span>
+                        <span className="text-xs font-mono font-normal text-muted-foreground">(@{user.username})</span>
+                      </div>
+                      <div className="text-[11px] font-mono text-muted-foreground mt-0.5">
+                        Room: <span className="font-bold text-foreground">{userRoom.toUpperCase()}</span> • Code: {user.agentCode || "—"}
+                      </div>
+                    </div>
+                    {isSelected && (
+                      <span className="text-xs font-black bg-amber-400 text-zinc-950 px-2 py-0.5 rounded-full">
+                        ACTIVE TV
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="pt-2 border-t border-border/60 text-center">
+              <span className="text-[11px] text-muted-foreground">
+                Direct link bhi use kar sakte hain: <code className="text-primary font-mono font-bold">/tv?room=kira</code>
               </span>
             </div>
           </div>

@@ -16,7 +16,7 @@ import {
   broadcastUsersToCloud,
   autoSettleAllPendingBets,
 } from "@/lib/userStore";
-import { getSynchronizedRoundState } from "@/lib/realtime";
+import { getSynchronizedRoundState, sanitizeRoomId } from "@/lib/realtime";
 import { CARDS, getCardByIndex } from "@/lib/cards";
 import { getTickets, saveTickets, ThermalTicket } from "@/lib/ticketStore";
 import { executeDirectPrint, isDirectPrinterConnected } from "@/lib/thermalPrinter";
@@ -224,7 +224,11 @@ export function UserAccountsView({
     const u = users.find((x) => x.id === userId);
     if (u) {
       onActiveUserSync?.(userId, u.balance);
-      showNotification(`${u.displayName} is now active on the Game Board / TV!`);
+      const room = sanitizeRoomId(u.agentCode || u.username || u.id);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("sorat_tv_room", room);
+      }
+      showNotification(`${u.displayName} is now active on the Game Board / TV (Room: ${room.toUpperCase()})!`);
     }
     onUsersChange();
   };
@@ -714,11 +718,29 @@ export function UserAccountsView({
                         ₹{selectedUser.balance.toLocaleString("en-IN")}
                       </span>
                     </div>
+                    <div className="h-5 w-px bg-border hidden sm:block" />
+                    <div>
+                      <span className="text-muted-foreground text-[10px] uppercase font-bold block">Counter Room</span>
+                      <span className="font-mono font-black text-amber-400 text-sm">
+                        {(selectedUser.agentCode || selectedUser.username).toUpperCase()}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 self-stretch sm:self-auto">
+              <div className="flex flex-wrap items-center gap-2 self-stretch sm:self-auto">
+                <a
+                  href={`/tv?room=${selectedUser.agentCode || selectedUser.username || selectedUser.id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-black shadow transition flex items-center gap-1.5"
+                  title="Open live TV Screen display for this counter"
+                >
+                  <span>📺</span>
+                  <span>Open {selectedUser.displayName.split(" ")[0]}'s TV</span>
+                </a>
+
                 <button
                   type="button"
                   onClick={() => {

@@ -384,7 +384,7 @@ export default function AdminPage() {
 
           <div className="flex items-center gap-2">
             <a
-              href="/"
+              href="/tv"
               target="_blank"
               rel="noreferrer"
               className="hidden sm:flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-md border border-border bg-muted/80 text-foreground hover:bg-accent transition"

@@ -508,33 +508,11 @@ export async function printDirectBluetooth(ticket: ThermalTicket, paperWidth: "5
 }
 
 export function printViaRawBT(ticket: ThermalTicket, paperWidth: "58mm" | "80mm" = "58mm"): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    const rawBytes = buildEscPosBytes(ticket, paperWidth);
-    let binary = "";
-    const len = rawBytes.byteLength;
-    for (let i = 0; i < len; i++) {
-      binary += String.fromCharCode(rawBytes[i]);
-    }
-    const base64 = window.btoa(binary);
-    const rawbtUrl = `rawbt:data:application/octet-stream;base64,${base64}`;
-
-    // CRITICAL: NEVER navigate window.location.href to custom schemes in mobile web / WebView!
-    // If the RawBT app is not installed, window.location.href crashes the WebView with net::ERR_UNKNOWN_URL_SCHEME.
-    // Use an invisible iframe which safely attempts to trigger the app without breaking the current web page.
-    const iframe = document.createElement("iframe");
-    iframe.style.display = "none";
-    iframe.src = rawbtUrl;
-    document.body.appendChild(iframe);
-    setTimeout(() => {
-      try {
-        document.body.removeChild(iframe);
-      } catch {}
-    }, 2000);
-    return true;
-  } catch {
-    return false;
-  }
+  // Prevent Android WebView net::ERR_UNKNOWN_URL_SCHEME crashes.
+  // Custom URI schemes like rawbt:... crash Android WebView when RawBT is not installed.
+  // We use Direct Web Bluetooth or Native Android Printer bridge instead.
+  console.warn("RawBT custom scheme is disabled to prevent WebView crashes. Use Direct Bluetooth or Native Android Bridge.");
+  return false;
 }
 
 export async function executeDirectPrint(
@@ -547,28 +525,30 @@ export async function executeDirectPrint(
     if (res.success) {
       return { method: "direct_bluetooth", success: true, message: "Receipt printed via Bluetooth!" };
     }
-    // If Bluetooth print failed, return failure gracefully without crashing to rawbt
     return { method: "direct_bluetooth", success: false, message: res.message || "Bluetooth print failed." };
   }
 
-  // 2. ONLY if user explicitly enabled RawBT driver in settings
-  const useRawBt = typeof window !== "undefined" && localStorage.getItem("sorat_use_rawbt") === "true";
-  if (useRawBt && typeof navigator !== "undefined" && /android/i.test(navigator.userAgent || "")) {
-    const rawOk = printViaRawBT(ticket, paperWidth);
-    if (rawOk) return { method: "rawbt", success: true, message: "Sent to RawBT printer." };
+  // 2. Clear any legacy rawbt flags to prevent ERR_UNKNOWN_URL_SCHEME crashes on Android WebView
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.removeItem("sorat_use_rawbt");
+    } catch {}
   }
 
-  // 3. System Print Dialog (Standard browser print preview)
+  // 3. System Print Dialog (Standard browser print preview - desktop only)
   if (!isAndroidNativeApp() && typeof window !== "undefined" && typeof window.print === "function") {
-    try {
-      window.print();
-      return { method: "system_print", success: true, message: "Opening System Print..." };
-    } catch {}
+    const isMobile = typeof navigator !== "undefined" && /android|iphone|ipad|ipod/i.test(navigator.userAgent || "");
+    if (!isMobile) {
+      try {
+        window.print();
+        return { method: "system_print", success: true, message: "Opening System Print..." };
+      } catch {}
+    }
   }
 
   return {
     method: "system_print",
     success: false,
-    message: "Printer not connected. Tap 'Connect Printer' in header to connect 58mm Bluetooth printer.",
+    message: "Printer connect nahi hai. Kripya upar 'Connect Printer' se Bluetooth printer pair karein.",
   };
 }
