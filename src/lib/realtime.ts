@@ -181,12 +181,14 @@ export function calculateProfitGuaranteedWinner(
     };
   }
 
-  // 5. Extreme edge case: All cards violate 30% budget (very high bets in early rounds)
-  // Pick card with lowest potential payout to defend capital
-  const lowestLossCard = analysis.reduce((prev, curr) => (curr.bet < prev.bet ? curr : prev));
+  // 5. Extreme edge case: All cards violate budget (e.g. equal bets on all 12 cards or high bets)
+  // Pick randomly among cards with lowest potential payout to defend capital and ensure natural variation
+  const minBet = Math.min(...analysis.map((c) => c.bet));
+  const candidateCards = analysis.filter((c) => c.bet === minBet);
+  const pick = candidateCards[Math.floor(Math.random() * candidateCards.length)] ?? candidateCards[0] ?? analysis[0]!;
   return {
-    winner: lowestLossCard.card,
-    netPayout: lowestLossCard.potentialPayout,
+    winner: pick.card,
+    netPayout: pick.potentialPayout,
     reason: "MINIMAL_LOSS_PROTECTION",
   };
 }
