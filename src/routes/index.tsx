@@ -161,6 +161,7 @@ export default function AgentPage() {
   // Dedicated Ticket Claiming & Verification State
   const [claimSearchInput, setClaimSearchInput] = useState("");
   const [claimVerifiedTicket, setClaimVerifiedTicket] = useState<ThermalTicket | null>(null);
+  const [claimJustPaidTicket, setClaimJustPaidTicket] = useState<ThermalTicket | null>(null);
   const [claimHasSearched, setClaimHasSearched] = useState(false);
   const [claimNotice, setClaimNotice] = useState<string | null>(null);
 
@@ -199,12 +200,16 @@ export default function AgentPage() {
               for (const cloudTkt of res.data.tickets as ThermalTicket[]) {
                 if (currentMap.has(cloudTkt.ticketId)) {
                   const existing = currentMap.get(cloudTkt.ticketId)!;
+                  const finalStatus =
+                    existing.status === "CLAIMED" || cloudTkt.status === "CLAIMED"
+                      ? "CLAIMED"
+                      : cloudTkt.status;
                   currentMap.set(cloudTkt.ticketId, {
                     ...existing,
-                    status: cloudTkt.status,
+                    status: finalStatus,
                     winningPayout: cloudTkt.winningPayout ?? existing.winningPayout ?? 0,
-                    ...(cloudTkt.claimedAt ? { claimedAt: cloudTkt.claimedAt } : {}),
-                    ...(cloudTkt.claimedBy ? { claimedBy: cloudTkt.claimedBy } : {}),
+                    claimedAt: existing.claimedAt ?? cloudTkt.claimedAt,
+                    claimedBy: existing.claimedBy ?? cloudTkt.claimedBy,
                   });
                 } else {
                   currentMap.set(cloudTkt.ticketId, cloudTkt);
@@ -607,13 +612,33 @@ export default function AgentPage() {
     const query = (q ?? claimSearchInput).trim();
     if (!query) {
       setClaimVerifiedTicket(null);
+      setClaimJustPaidTicket(null);
       setClaimHasSearched(false);
       setClaimNotice("Kripya Ticket ID ya 4-digit code daalein.");
       return;
     }
+    setClaimJustPaidTicket(null);
     setClaimHasSearched(true);
     setClaimNotice(null);
-    const found = findTicketByIdOrBarcode(query);
+
+    let found = findTicketByIdOrBarcode(query);
+    if (!found) {
+      const cleanQ = query.toLowerCase().replace(/^#/, "");
+      const allPool = [
+        ...(ticketsList || []),
+        ...((cloudDailySummary?.tickets as ThermalTicket[]) || []),
+      ];
+      found =
+        allPool.find(
+          (t) =>
+            t.ticketId.toLowerCase() === cleanQ ||
+            t.ticketId.toLowerCase().replace(/^#/, "") === cleanQ ||
+            t.barcode.toLowerCase() === cleanQ ||
+            t.ticketId.toLowerCase().endsWith(cleanQ) ||
+            t.barcode.endsWith(cleanQ)
+        ) || null;
+    }
+
     setClaimVerifiedTicket(found);
     if (!found) {
       setClaimNotice(`Slip #${query} system me nahi mili. Kripya barcode ya ticket number check karein.`);
@@ -623,9 +648,13 @@ export default function AgentPage() {
   const handleDisburseClaimCash = (ticketId: string) => {
     const updated = claimTicket(ticketId, agentUser.displayName || agentUser.username);
     if (updated) {
-      setClaimVerifiedTicket(updated);
+      setClaimJustPaidTicket(updated);
+      setClaimVerifiedTicket(null);
+      setClaimSearchInput("");
+      setClaimHasSearched(false);
+      setClaimNotice(null);
       setTicketsList(getTickets(agentUser?.id || agentUser?.username));
-      setClaimNotice(`✅ Cash ₹${updated.winningPayout} grahak ko de diya gaya! Ticket CLAIMED mark ho gaya.`);
+      refreshAgentTickets();
     }
   };
 
@@ -633,7 +662,7 @@ export default function AgentPage() {
     const updated = claimTicket(ticketId, agentUser.displayName || agentUser.username);
     if (updated) {
       setTicketsList(getTickets(agentUser?.id || agentUser?.username));
-      setClaimVerifiedTicket(updated);
+      refreshAgentTickets();
       alert(`Ticket #${ticketId} prize of ₹${updated.winningPayout} marked as PAID! Customer ko cash de dijiye.`);
     }
   };
@@ -1243,6 +1272,9 @@ export default function AgentPage() {
             onClick={() => {
               setActiveTab("claim");
               setClaimSearchInput("");
+              setClaimJustPaidTicket(null);
+              setClaimVerifiedTicket(null);
+              setClaimHasSearched(false);
             }}
             className={`py-2 text-center rounded-lg font-bold transition flex flex-col items-center justify-center gap-0.5 border ${
               activeTab === "claim"
@@ -1535,9 +1567,60 @@ export default function AgentPage() {
               </div>
             )}
 
+            {/* JUST PAID SUCCESS CONFIRMATION BANNER */}
+            {claimJustPaidTicket && (
+              <div className="rounded-2xl border-2 border-emerald-500 bg-emerald-500/20 p-4 shadow-xl text-center space-y-3 animate-in fade-in zoom-in-95">
+                <span className="text-4xl block animate-bounce">🎉</span>
+                <div>
+                  <h3 className="font-display text-base font-black text-emerald-300">
+                    CASH DISBURSED SUCCESSFULLY! (रक्कम दिली गेली)
+                  </h3>
+                  <p className="text-xs text-foreground font-medium mt-1">
+                    Slip <strong className="text-primary font-mono">#{claimJustPaidTicket.ticketId}</strong> prize of{" "}
+                    <strong className="text-emerald-300 font-mono text-sm font-black">
+                      ₹{claimJustPaidTicket.winningPayout?.toLocaleString("en-IN")}
+                    </strong>{" "}
+                    has been paid to customer.
+                  </p>
+                  <span className="inline-block mt-1 px-2.5 py-0.5 rounded-full bg-emerald-500 text-black text-[10px] font-black uppercase">
+                    CLAIMED & CLOSED
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setClaimJustPaidTicket(null);
+                    setClaimVerifiedTicket(null);
+                    setClaimSearchInput("");
+                  }}
+                  className="w-full py-3 rounded-xl bg-gradient-gold text-primary-foreground font-display text-xs font-black shadow-gold hover:brightness-110 active:scale-95 transition flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <span>🔍</span>
+                  <span>VERIFY NEXT TICKET (पुढील तिकीट तपासा)</span>
+                </button>
+              </div>
+            )}
+
             {/* VERIFICATION CARD */}
             {claimVerifiedTicket ? (
               <div className="space-y-3 animate-in fade-in zoom-in-95">
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-[11px] font-mono font-bold text-muted-foreground">
+                    Slip #{claimVerifiedTicket.ticketId} • Round {claimVerifiedTicket.roundId}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClaimVerifiedTicket(null);
+                      setClaimSearchInput("");
+                      setClaimHasSearched(false);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>✕</span>
+                    <span>Clear (रद्द करा)</span>
+                  </button>
+                </div>
                 {/* CASE 1: WON & UNCLAIMED (BIG GREEN BANNER) */}
                 {claimVerifiedTicket.status === "WON" && (
                   <div className="rounded-2xl border-2 border-emerald-500 bg-emerald-500/15 p-4 shadow-xl space-y-3.5">
@@ -1614,6 +1697,19 @@ export default function AgentPage() {
                         </strong>
                       </div>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setClaimVerifiedTicket(null);
+                        setClaimSearchInput("");
+                        setClaimHasSearched(false);
+                      }}
+                      className="w-full py-2.5 rounded-xl bg-destructive/30 hover:bg-destructive/40 text-destructive-foreground font-display text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      <span>🔍</span>
+                      <span>VERIFY ANOTHER TICKET (दुसरे तिकीट तपासा)</span>
+                    </button>
                   </div>
                 )}
 
@@ -1704,6 +1800,7 @@ export default function AgentPage() {
                         <div
                           key={t.ticketId}
                           onClick={() => {
+                            setClaimJustPaidTicket(null);
                             setClaimSearchInput(t.ticketId);
                             setClaimVerifiedTicket(t);
                             setClaimHasSearched(true);

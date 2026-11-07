@@ -687,31 +687,22 @@ export async function claimTicketInSupabase(
   if (!client) return { success: false, error: "Supabase not configured" };
 
   try {
-    const cleanId = ticketId.trim();
+    const cleanId = ticketId.trim().replace(/^#/, "");
     const nowIso = new Date().toISOString();
+    const claimTag = `[CLAIMED:${nowIso}:${claimedBy || "Counter Agent"}]`;
 
+    // Persist claim in customer_name with claimTag (reliably persists timestamp and agent name)
     const { data, error } = await client
       .from("sorat_bets")
       .update({
-        status: "claimed",
-        claimed_at: nowIso,
-        claimed_by: claimedBy || "Counter Agent",
+        customer_name: claimTag,
       })
-      .or(`ticket_id.eq.${cleanId},id.eq.${cleanId}`)
+      .or(`ticket_id.eq.${cleanId},ticket_id.eq.#${cleanId},ticket_id.ilike.%${cleanId}%,id.eq.${cleanId}`)
       .select();
 
     if (error) {
-      // In case claimed_at or claimed_by columns don't exist yet, fallback to status = 'claimed'
-      const fallback = await client
-        .from("sorat_bets")
-        .update({ status: "claimed" })
-        .or(`ticket_id.eq.${cleanId},id.eq.${cleanId}`)
-        .select();
-
-      if (fallback.error) {
-        return { success: false, error: fallback.error.message };
-      }
-      return { success: true, updatedCount: fallback.data?.length || 0 };
+      console.warn("claimTicketInSupabase warning:", error.message);
+      return { success: false, error: error.message };
     }
 
     return { success: true, updatedCount: data?.length || 0 };
@@ -981,7 +972,30 @@ export async function fetchAgentDailyTicketsAndBets(
 
       totalSales += totalAmount;
 
-      const hasClaimed = tBets.some((b) => b.status === "claimed" || b.claimed_at);
+      // Detect claimed status from status, claimed_at, or [CLAIMED:ISO:AGENT] in customer_name
+      const claimedBet = tBets.find(
+        (b) =>
+          b.status === "claimed" ||
+          b.claimed_at ||
+          (typeof b.customer_name === "string" && b.customer_name.includes("[CLAIMED"))
+      );
+      const hasClaimed = Boolean(claimedBet);
+
+      let claimedTimestamp: number | undefined;
+      let claimedByAgent: string | undefined;
+      if (claimedBet) {
+        if (claimedBet.claimed_at) {
+          claimedTimestamp = new Date(claimedBet.claimed_at).getTime();
+          claimedByAgent = claimedBet.claimed_by;
+        } else if (typeof claimedBet.customer_name === "string" && claimedBet.customer_name.includes("[CLAIMED:")) {
+          const match = claimedBet.customer_name.match(/\[CLAIMED:([^:]+):([^\]]+)\]/);
+          if (match && match[1]) {
+            claimedTimestamp = new Date(match[1]).getTime();
+            claimedByAgent = match[2];
+          }
+        }
+      }
+
       const hasWon = totalPayout > 0 || tBets.some((b) => b.status === "won" || (b.payout && Number(b.payout) > 0));
 
       let ticketStatus: "ACTIVE" | "WON" | "LOST" | "CLAIMED" = "LOST";
@@ -995,6 +1009,9 @@ export async function fetchAgentDailyTicketsAndBets(
         ticketStatus = "ACTIVE";
       }
 
+      const rawCustomerName = first.customer_name || "Counter Customer";
+      const cleanCustomerName = rawCustomerName.replace(/\[CLAIMED:[^\]]+\]\s*/g, "").trim() || "Counter Customer";
+
       reconstructedTickets.push({
         ticketId: tId,
         barcode: tId.replace(/\D/g, "").slice(-8) || "00000000",
@@ -1003,7 +1020,7 @@ export async function fetchAgentDailyTicketsAndBets(
         timestamp: first.created_at ? new Date(first.created_at).getTime() : Date.now(),
         dateStr: first.date_str || today,
         timeStr: first.time_str || "12:00 PM",
-        customerName: first.customer_name || "Counter Customer",
+        customerName: cleanCustomerName,
         agentName: clean,
         agentId: first.user_id,
         username: clean,
@@ -1011,8 +1028,8 @@ export async function fetchAgentDailyTicketsAndBets(
         totalAmount,
         winningPayout: totalPayout,
         status: ticketStatus,
-        claimedAt: first.claimed_at ? new Date(first.claimed_at).getTime() : undefined,
-        claimedBy: first.claimed_by,
+        claimedAt: claimedTimestamp || (first.claimed_at ? new Date(first.claimed_at).getTime() : undefined),
+        claimedBy: claimedByAgent || first.claimed_by,
       });
     }
 

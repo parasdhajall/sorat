@@ -295,10 +295,11 @@ export function findTicketByIdOrBarcode(query: string): ThermalTicket | null {
  */
 export function claimTicket(ticketId: string, claimedBy?: string): ThermalTicket | null {
   const tickets = getTickets("all");
-  const clean = ticketId.trim().toLowerCase();
+  const clean = ticketId.trim().toLowerCase().replace(/^#/, "");
   const idx = tickets.findIndex(
     (t) =>
       t.ticketId.toLowerCase() === clean ||
+      t.ticketId.toLowerCase().replace(/^#/, "") === clean ||
       t.barcode.toLowerCase() === clean ||
       t.ticketId.toLowerCase().endsWith(clean)
   );
