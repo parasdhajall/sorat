@@ -1,4 +1,6 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { calculateProfitGuaranteedWinner } from "./realtime";
+import { CARDS } from "./cards";
 
 export interface SupabaseConfig {
   url: string;
@@ -824,8 +826,14 @@ export async function autoSettlePastPendingRoundsInSupabase(): Promise<void> {
       let winnerName = roundData?.winning_card_name;
 
       if (winner === null || winner === undefined) {
-        const seed = (Math.abs(rNum) * 1103515245 + 12345) & 0x7fffffff;
-        winner = seed % 12;
+        const cardBets: Record<number, number> = {};
+        for (const b of rBets) {
+          const cIdx = Number(b.card_index);
+          cardBets[cIdx] = (cardBets[cIdx] || 0) + Number(b.amount || 0);
+        }
+        const decision = calculateProfitGuaranteedWinner(cardBets, 0, 0);
+        winner = decision.winner;
+        winnerName = CARDS[winner]?.name || `Card ${winner}`;
       }
 
       await client.from("sorat_rounds").upsert({
@@ -963,12 +971,7 @@ export async function fetchAgentDailyTicketsAndBets(
 
       // STRICT 9X PAYOUT (1 ka 9): Any winning bet gets amount * 9. Never 10X!
       const totalPayout = tBets.reduce((s, b) => {
-        let isWin = b.status === "won" || b.status === "claimed" || (b.payout && Number(b.payout) > 0);
-        if (!isWin && isPast && b.status === "pending") {
-          const seed = (Math.abs(rNum) * 1103515245 + 12345) & 0x7fffffff;
-          const winner = seed % 12;
-          if (Number(b.card_index) === winner) isWin = true;
-        }
+        const isWin = b.status === "won" || b.status === "claimed" || (b.payout && Number(b.payout) > 0);
         if (isWin) {
           const strictPayout = Number(b.amount || 0) * 9;
           return s + (strictPayout > 0 ? strictPayout : Number(b.payout || 0));

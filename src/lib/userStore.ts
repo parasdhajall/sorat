@@ -2,6 +2,7 @@ import { getSupabaseClient, placeSoratBetsRpc, depositToPlayerRpc, toggleCounter
 import { RAMU_SIMULATED_BETS } from "./ramuSimulationData";
 import { getDeterministicRoundWinner, PAYOUT_MULTIPLIER } from "./realtime";
 import { CARDS, getRecordedRoundWinner } from "./cards";
+import { resolveProfitGuaranteedWinnerForRound } from "./roundSettlement";
 
 export interface UserDeposit {
   id: string;
@@ -1919,9 +1920,17 @@ export function autoSettleAllPendingBets(
 
         if (isPastRound || isCurrentRoundSettled) {
           userChanged = true;
+          const userRoom = (user.agentCode || user.username || user.id).toLowerCase().replace(/^@/, "");
           const winIdx = isCurrentRoundSettled
             ? currentWinner!
-            : (getRecordedRoundWinner(betRoundNum) ?? getDeterministicRoundWinner(betRoundNum));
+            : (getRecordedRoundWinner(betRoundNum) ??
+               resolveProfitGuaranteedWinnerForRound(
+                 betRoundNum,
+                 bet.roundId,
+                 null,
+                 undefined,
+                 userRoom
+               ));
 
           const winCard = CARDS[winIdx];
           const isWin = bet.cardIndex === winIdx;

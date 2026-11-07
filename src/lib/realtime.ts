@@ -83,14 +83,28 @@ export function analyzeCardProfitability(
   const roundTurnover = Object.values(currentBets).reduce((a, b) => a + b, 0);
   const newTurnover = totalTurnover + roundTurnover;
 
-  // Maximum cumulative payouts allowed to guarantee >= 30% house profit
+  // 1. Cumulative maximum payout allowed to guarantee >= 35% house profit
   const maxAllowedCumulativePayout = newTurnover * MAX_PAYOUT_RATIO;
-  const currentMaxRoundPayout = Math.max(0, maxAllowedCumulativePayout - totalPayouts);
+  const currentMaxCumulativePayout = Math.max(0, maxAllowedCumulativePayout - totalPayouts);
+
+  // 2. STRICT PER-ROUND PROFIT CEILING:
+  // In ANY round where bets are placed, payout MUST NOT exceed 65% of round turnover!
+  // This guarantees that every single round locks in AT LEAST 35% House Margin (10% agent commission + 25% house profit),
+  // and NO round can EVER result in a negative house profit (deficit)!
+  const maxPerRoundPayout = roundTurnover > 0 ? roundTurnover * MAX_PAYOUT_RATIO : 0;
+  const currentMaxRoundPayout = roundTurnover > 0
+    ? Math.min(currentMaxCumulativePayout, maxPerRoundPayout)
+    : currentMaxCumulativePayout;
 
   return Array.from({ length: 12 }, (_, i) => {
     const bet = currentBets[i] ?? 0;
     const potentialPayout = bet * PAYOUT_MULTIPLIER;
-    const isSafeForProfit = potentialPayout <= currentMaxRoundPayout || roundTurnover === 0;
+    // Card is only safe if:
+    // a) Round had 0 bets, OR
+    // b) Payout respects the budget AND strictly stays below round turnover (potentialPayout < roundTurnover)
+    const isSafeForProfit =
+      roundTurnover === 0 ||
+      (potentialPayout <= currentMaxRoundPayout && potentialPayout < roundTurnover);
 
     let status: "ZERO_BET" | "SAFE" | "BLOCKED";
     if (bet === 0) {

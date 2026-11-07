@@ -36,7 +36,6 @@ export function getRecordedRoundWinner(roundNumber: number, roomId?: string): nu
           return map[roundNumber];
         }
       }
-      return null;
     }
     const raw = localStorage.getItem(ROUND_WINNERS_STORAGE_KEY);
     if (raw) {
@@ -130,42 +129,41 @@ export function resolveProfitGuaranteedWinnerForRound(
     }
   } catch {}
 
-  // Aggregate from user store bets (if scoped to this room/agent)
-  try {
-    const users = getUsers();
-    const cleanRoundId = (roundId || "").replace(/^#/, "").trim();
-    for (const u of users) {
-      const isUserMatch =
-        u.id.toLowerCase() === cleanRoom ||
-        u.username.toLowerCase().replace(/^@/, "") === cleanRoom ||
-        cleanRoom === "sorat_main";
-      if (isUserMatch && Array.isArray(u.bets)) {
-        for (const b of u.bets) {
-          const bRoundNum = b.roundNumber || parseInt((b.roundId || "").replace(/\D/g, ""), 10);
-          const bRoundClean = (b.roundId || "").replace(/^#/, "").trim();
-          if (bRoundNum === roundNumber || bRoundClean === cleanRoundId) {
-            if (cardBets[b.cardIndex] === undefined) {
+  // Aggregate from user store bets (if no thermal tickets were found for this room)
+  if (totalTurnover === 0) {
+    try {
+      const users = getUsers();
+      const cleanRoundId = (roundId || "").replace(/^#/, "").trim();
+      for (const u of users) {
+        const isUserMatch =
+          u.id.toLowerCase() === cleanRoom ||
+          u.username.toLowerCase().replace(/^@/, "") === cleanRoom ||
+          (u.agentCode && u.agentCode.toLowerCase().replace(/^@/, "") === cleanRoom) ||
+          cleanRoom === "sorat_main";
+        if (isUserMatch && Array.isArray(u.bets)) {
+          for (const b of u.bets) {
+            const bRoundNum = b.roundNumber || parseInt((b.roundId || "").replace(/\D/g, ""), 10);
+            const bRoundClean = (b.roundId || "").replace(/^#/, "").trim();
+            if (bRoundNum === roundNumber || bRoundClean === cleanRoundId) {
               cardBets[b.cardIndex] = (cardBets[b.cardIndex] || 0) + b.stake;
               totalTurnover += b.stake;
             }
           }
         }
       }
-    }
-  } catch {}
+    } catch {}
+  }
 
   let winner: number;
   let reason = "ZERO_BET_ROUTER";
 
-  // Cumulative room turnover and payouts from localStorage for 30%-35% margin lock
-  let cumulativeTurnover = totalTurnover;
-  let cumulativePayouts = 0;
+  // Past cumulative room turnover and payouts from localStorage for 30%-35% margin lock
+  let previousTurnover = 0;
+  let previousPayouts = 0;
   if (typeof window !== "undefined") {
     try {
-      const savedTurnover = Number(localStorage.getItem(`sorat_total_turnover_${cleanRoom}`) || 0);
-      const savedPayouts = Number(localStorage.getItem(`sorat_total_payouts_${cleanRoom}`) || 0);
-      cumulativeTurnover = savedTurnover + totalTurnover;
-      cumulativePayouts = savedPayouts;
+      previousTurnover = Number(localStorage.getItem(`sorat_total_turnover_${cleanRoom}`) || 0);
+      previousPayouts = Number(localStorage.getItem(`sorat_total_payouts_${cleanRoom}`) || 0);
     } catch {}
   }
 
@@ -173,8 +171,8 @@ export function resolveProfitGuaranteedWinnerForRound(
   if (totalTurnover > 0 || (forcedWinner !== null && forcedWinner >= 0)) {
     const decision = calculateProfitGuaranteedWinner(
       cardBets,
-      cumulativeTurnover,
-      cumulativePayouts,
+      previousTurnover,
+      previousPayouts,
       forcedWinner
     );
     winner = decision.winner;
