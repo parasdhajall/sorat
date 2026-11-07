@@ -202,8 +202,9 @@ export function LiveBetsRiskAudit({
   // 6. Handle Reprint Thermal Slip
   const handleReprintSlip = (bet: any) => {
     const tkt: ThermalTicket = {
-      id: bet.ticketId || bet.id,
       ticketId: bet.ticketId || bet.id,
+      barcode: (bet.ticketId || bet.id).replace(/\D/g, "").slice(-8) || "00000000",
+      timestamp: bet.timestamp || Date.now(),
       dateStr: bet.dateStr || todayStr,
       timeStr: bet.timeStr || "",
       roundId: bet.roundId || "#001",
@@ -216,16 +217,10 @@ export function LiveBetsRiskAudit({
           cardIndex: bet.cardIndex,
           cardName: bet.cardName,
           amount: bet.stake,
-          stake: bet.stake,
-          potentialPayout: bet.stake * PAYOUT_MULTIPLIER,
         },
       ],
-      totalStake: bet.stake,
       totalAmount: bet.stake,
-      maxPotentialPayout: bet.stake * PAYOUT_MULTIPLIER,
-      isWinner: bet.isWin || false,
-      isClaimed: false,
-      status: bet.isWin ? "WON" : "SETTLED",
+      status: bet.isWin ? "WON" : "LOST",
       winningPayout: bet.payout || 0,
     };
 
@@ -722,11 +717,11 @@ export function LiveBetsRiskAudit({
                       ₹{b.payout || b.stake * PAYOUT_MULTIPLIER}
                     </td>
                     <td className="py-2 px-2.5 text-center whitespace-nowrap">
-                      {b.status === "won" || b.isWin ? (
+                      {b.isWin ? (
                         <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
                           🏆 WON
                         </span>
-                      ) : b.status === "lost" ? (
+                      ) : b.status === "SETTLED" ? (
                         <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-muted text-muted-foreground">
                           LOST
                         </span>

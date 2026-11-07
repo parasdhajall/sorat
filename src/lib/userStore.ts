@@ -15,6 +15,8 @@ export interface UserDeposit {
 
 export interface UserBetRecord {
   id: string;
+  ticketId?: string;
+  userId?: string;
   roundId: string;
   roundNumber: number;
   timestamp: number;

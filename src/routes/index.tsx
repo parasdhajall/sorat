@@ -202,9 +202,9 @@ export default function AgentPage() {
                   currentMap.set(cloudTkt.ticketId, {
                     ...existing,
                     status: cloudTkt.status,
-                    winningPayout: cloudTkt.winningPayout,
-                    claimedAt: cloudTkt.claimedAt || existing.claimedAt,
-                    claimedBy: cloudTkt.claimedBy || existing.claimedBy,
+                    winningPayout: cloudTkt.winningPayout ?? existing.winningPayout ?? 0,
+                    ...(cloudTkt.claimedAt ? { claimedAt: cloudTkt.claimedAt } : {}),
+                    ...(cloudTkt.claimedBy ? { claimedBy: cloudTkt.claimedBy } : {}),
                   });
                 } else {
                   currentMap.set(cloudTkt.ticketId, cloudTkt);

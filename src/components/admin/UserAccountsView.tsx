@@ -260,9 +260,9 @@ export function UserAccountsView({
                 currentMap.set(cloudTkt.ticketId, {
                   ...existing,
                   status: cloudTkt.status,
-                  winningPayout: cloudTkt.winningPayout,
-                  claimedAt: cloudTkt.claimedAt || existing.claimedAt,
-                  claimedBy: cloudTkt.claimedBy || existing.claimedBy,
+                  winningPayout: cloudTkt.winningPayout ?? existing.winningPayout ?? 0,
+                  ...(cloudTkt.claimedAt ? { claimedAt: cloudTkt.claimedAt } : {}),
+                  ...(cloudTkt.claimedBy ? { claimedBy: cloudTkt.claimedBy } : {}),
                 });
               } else {
                 currentMap.set(cloudTkt.ticketId, cloudTkt);
@@ -406,7 +406,7 @@ export function UserAccountsView({
       deleteUser(id);
       onUsersChange();
       const remaining = users.filter((u) => u.id !== id);
-      if (remaining.length > 0) {
+      if (remaining.length > 0 && remaining[0]) {
         setSelectedUserId(remaining[0].id);
       }
       showNotification(`Account ${name} removed.`);
