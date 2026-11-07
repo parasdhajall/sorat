@@ -25,8 +25,8 @@ export interface UserBetRecord {
   cardIndex: number;
   cardName: string;
   stake: number;
-  winningCardIndex?: number;
-  winningCardName?: string;
+  winningCardIndex?: number | undefined;
+  winningCardName?: string | undefined;
   payout: number;
   isWin: boolean;
   status: "PENDING" | "SETTLED";
@@ -44,10 +44,10 @@ export interface UserAccount {
   bets: UserBetRecord[];
   createdAt: number;
   status: "ACTIVE" | "INACTIVE" | "PAUSED";
-  notes?: string;
-  pin?: string; // 4-digit PIN for Agent app login (default: "1234")
-  agentCode?: string; // e.g. "AGENT-101"
-  balanceUpdatedAt?: number; // timestamp to prevent stale balance overwrites
+  notes?: string | undefined;
+  pin?: string | undefined; // 4-digit PIN for Agent app login (default: "1234")
+  agentCode?: string | undefined; // e.g. "AGENT-101"
+  balanceUpdatedAt?: number | undefined; // timestamp to prevent stale balance overwrites
 }
 
 export interface UserProfitStats {
@@ -86,7 +86,7 @@ export const CARD_NAMES = [
   "भोवरा",
   "बादली",
   "गाय",
-];
+] as const;
 
 export function getTodayDateStr(date = new Date()): string {
   try {
@@ -979,7 +979,9 @@ export async function pullUsersFromCloud(): Promise<UserAccount[]> {
       const lines = text.trim().split("\n");
       for (let i = lines.length - 1; i >= 0; i--) {
         try {
-          const item = JSON.parse(lines[i]);
+          const lineStr = lines[i];
+          if (!lineStr) continue;
+          const item = JSON.parse(lineStr);
           if (item.event === "message") {
             let rawContent = item.message;
             if (item.attachment && item.attachment.url) {
@@ -1202,7 +1204,9 @@ export function getActiveUser(): UserAccount {
   const u = getUser(id);
   if (u) return u;
   const all = getUsers();
-  return all[0] || createInitialSeedUsers()[0];
+  const first = all[0] ?? createInitialSeedUsers()[0];
+  if (!first) throw new Error("No user accounts found");
+  return first;
 }
 
 const LOGGED_IN_AGENT_KEY = "sorat_logged_in_agent_id_v1";
@@ -1351,7 +1355,9 @@ export function updateUserPin(userId: string, newPin: string): UserAccount {
   const users = getUsers();
   const idx = users.findIndex((u) => u.id === userId);
   if (idx === -1) throw new Error("User not found");
-  const target = { ...users[idx], pin: newPin.trim() };
+  const existing = users[idx];
+  if (!existing) throw new Error("User not found");
+  const target: UserAccount = { ...existing, pin: newPin.trim() };
   users[idx] = target;
   saveUsers(users);
   broadcastPinChange(userId, newPin.trim());
@@ -1367,6 +1373,7 @@ export function toggleCounterKillSwitch(userId: string, isPaused?: boolean): Use
   if (idx === -1) throw new Error("User account not found");
 
   const current = users[idx];
+  if (!current) throw new Error("User account not found");
   const nextPaused = typeof isPaused === "boolean" ? isPaused : (current.status !== "PAUSED");
   const target: UserAccount = {
     ...current,
@@ -1427,27 +1434,35 @@ export function deductAgentBalance(
     return { success: false, newBalance: 0, error: `Agent "${agentIdentifier}" not found` };
   }
 
+  const currentUser = users[idx];
+  if (!currentUser) {
+    return { success: false, newBalance: 0, error: `Agent "${agentIdentifier}" not found` };
+  }
+
   // Emergency Counter Kill-Switch Enforcement
-  if (users[idx].status === "PAUSED" || users[idx].status === "INACTIVE") {
+  if (currentUser.status === "PAUSED" || currentUser.status === "INACTIVE") {
     return {
       success: false,
-      newBalance: users[idx].balance,
+      newBalance: currentUser.balance,
       error: "🛑 Counter Betting Paused by Admin! Betting is currently suspended.",
     };
   }
 
-  if (users[idx].balance < totalStake) {
+  if (currentUser.balance < totalStake) {
     return {
       success: false,
-      newBalance: users[idx].balance,
-      error: `Balance kam hai: Needed ₹${totalStake}, Available ₹${users[idx].balance}`,
+      newBalance: currentUser.balance,
+      error: `Balance kam hai: Needed ₹${totalStake}, Available ₹${currentUser.balance}`,
     };
   }
 
   const now = Date.now();
-  const newBalance = Math.max(0, users[idx].balance - totalStake);
-  users[idx].balance = newBalance;
-  users[idx].balanceUpdatedAt = now;
+  const newBalance = Math.max(0, currentUser.balance - totalStake);
+  const updatedUser: UserAccount = {
+    ...currentUser,
+    balance: newBalance,
+    balanceUpdatedAt: now,
+  };
 
   const betRecords: UserBetRecord[] = items.map((it) => ({
     id: `bet_${now}_${Math.random().toString(36).slice(2, 6)}`,
@@ -1464,14 +1479,15 @@ export function deductAgentBalance(
     status: "PENDING",
   }));
 
-  users[idx].bets = [...betRecords, ...(users[idx].bets || [])];
+  updatedUser.bets = [...betRecords, ...(updatedUser.bets || [])];
+  users[idx] = updatedUser;
   saveUsers(users);
 
   // Broadcast dedicated atomic balance deduction event to Admin & all devices
   broadcastBalanceDeductionToCloud(
-    users[idx].id,
-    users[idx].username,
-    users[idx].displayName,
+    updatedUser.id,
+    updatedUser.username,
+    updatedUser.displayName,
     totalStake,
     newBalance,
     roundId,
@@ -1486,12 +1502,12 @@ export function deductAgentBalance(
     const client = getSupabaseClient();
     if (client) {
       // 1. Direct balance deduction in players table so cloud is immediately authoritative
-      client
-        .from("players")
-        .update({ balance: newBalance, updated_at: new Date().toISOString() })
-        .eq("id", users[idx].id)
-        .then(() => {})
-        .catch(() => {});
+      Promise.resolve(
+        client
+          .from("players")
+          .update({ balance: newBalance, updated_at: new Date().toISOString() })
+          .eq("id", updatedUser.id)
+      ).catch(() => {});
     }
   } catch (err) {
     console.warn("Supabase balance update notice in deductAgentBalance:", err);
@@ -1513,8 +1529,10 @@ export function depositToUser(
   const users = getUsers();
   const idx = users.findIndex((u) => u.id === userId);
   if (idx === -1) throw new Error("User not found");
+  const existing = users[idx];
+  if (!existing) throw new Error("User not found");
 
-  const target = { ...users[idx] };
+  const target: UserAccount = { ...existing };
   const now = Date.now();
   const newBalance = target.balance + amount;
 
@@ -1548,26 +1566,30 @@ export function depositToUser(
   try {
     const supabase = getSupabaseClient();
     if (supabase) {
-      supabase
-        .from("deposits")
-        .insert({
-          id: depositRecord.id,
-          user_id: target.id,
-          amount: depositRecord.amount,
-          date_str: depositRecord.dateStr,
-          time_str: depositRecord.timeStr,
-          note: depositRecord.note || null,
-          balance_after: depositRecord.balanceAfter,
-        })
+      Promise.resolve(
+        supabase
+          .from("deposits")
+          .insert({
+            id: depositRecord.id,
+            user_id: target.id,
+            amount: depositRecord.amount,
+            date_str: depositRecord.dateStr,
+            time_str: depositRecord.timeStr,
+            note: depositRecord.note || null,
+            balance_after: depositRecord.balanceAfter,
+          })
+      )
         .then(() => {
-          supabase
-            .from("players")
-            .update({
-              balance: target.balance,
-              total_deposited: target.totalDeposited,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", target.id);
+          Promise.resolve(
+            supabase
+              .from("players")
+              .update({
+                balance: target.balance,
+                total_deposited: target.totalDeposited,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", target.id)
+          ).catch(() => {});
         })
         .catch(() => {});
     }
@@ -1588,8 +1610,10 @@ export function withdrawFromUser(
   const users = getUsers();
   const idx = users.findIndex((u) => u.id === userId);
   if (idx === -1) throw new Error("User not found");
+  const existing = users[idx];
+  if (!existing) throw new Error("User not found");
 
-  const target = { ...users[idx] };
+  const target: UserAccount = { ...existing };
   if (target.balance < amount) throw new Error("Insufficient user balance");
 
   target.balance = target.balance - amount;
@@ -1603,16 +1627,16 @@ export function withdrawFromUser(
   try {
     const supabase = getSupabaseClient();
     if (supabase) {
-      supabase
-        .from("players")
-        .update({
-          balance: target.balance,
-          total_withdrawn: target.totalWithdrawn,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", target.id)
-        .then(() => {})
-        .catch(() => {});
+      Promise.resolve(
+        supabase
+          .from("players")
+          .update({
+            balance: target.balance,
+            total_withdrawn: target.totalWithdrawn,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", target.id)
+      ).catch(() => {});
     }
   } catch {}
 
@@ -1626,8 +1650,10 @@ export function setUserBalance(userId: string, balance: number): UserAccount {
   const users = getUsers();
   const idx = users.findIndex((u) => u.id === userId);
   if (idx === -1) throw new Error("User not found");
+  const existing = users[idx];
+  if (!existing) throw new Error("User not found");
 
-  const target = { ...users[idx] };
+  const target: UserAccount = { ...existing };
   target.balance = Math.max(0, balance);
   target.balanceUpdatedAt = Date.now();
   users[idx] = target;
@@ -1637,15 +1663,15 @@ export function setUserBalance(userId: string, balance: number): UserAccount {
   try {
     const supabase = getSupabaseClient();
     if (supabase) {
-      supabase
-        .from("players")
-        .update({
-          balance: target.balance,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", target.id)
-        .then(() => {})
-        .catch(() => {});
+      Promise.resolve(
+        supabase
+          .from("players")
+          .update({
+            balance: target.balance,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", target.id)
+      ).catch(() => {});
     }
   } catch {}
 
@@ -1705,8 +1731,8 @@ export function createUser(data: {
   // Directly persist newly created agent/player to Supabase
   const sb = getSupabaseClient();
   if (sb) {
-    sb.from("players")
-      .upsert({
+    Promise.resolve(
+      sb.from("players").upsert({
         id: newUser.id,
         username: newUser.username,
         display_name: newUser.displayName,
@@ -1719,17 +1745,20 @@ export function createUser(data: {
         status: "ACTIVE",
         notes: newUser.notes,
       })
-      .then(({ error }) => {
+    )
+      .then(({ error }: any) => {
         if (error) console.warn("Supabase player upsert notice:", error.message);
         if (initialDep > 0) {
-          sb.from("deposits").insert({
-            user_id: newUser.id,
-            amount: initialDep,
-            date_str: getTodayDateStr(new Date(now)),
-            time_str: formatTime(now),
-            note: "Initial Account Deposit",
-            balance_after: initialDep,
-          }).catch(() => {});
+          Promise.resolve(
+            sb.from("deposits").insert({
+              user_id: newUser.id,
+              amount: initialDep,
+              date_str: getTodayDateStr(new Date(now)),
+              time_str: formatTime(now),
+              note: "Initial Account Deposit",
+              balance_after: initialDep,
+            })
+          ).catch(() => {});
         }
       })
       .catch(() => {});
@@ -1764,8 +1793,10 @@ export function recordUserBet(
   const users = getUsers();
   const idx = users.findIndex((u) => u.id === userId);
   if (idx === -1) throw new Error("User not found");
+  const existing = users[idx];
+  if (!existing) throw new Error("User not found");
 
-  const target = { ...users[idx] };
+  const target: UserAccount = { ...existing };
   if (target.balance < bet.stake) {
     throw new Error("Insufficient user balance to place bet");
   }
@@ -1811,7 +1842,9 @@ export function settleRoundBets(
   const cleanTarget = (roundId || "").replace(/^#/, "").trim();
 
   for (let i = 0; i < users.length; i++) {
-    const user = { ...users[i] };
+    const rawUser = users[i];
+    if (!rawUser) continue;
+    const user: UserAccount = { ...rawUser };
     let userChanged = false;
 
     if (user.bets) {
@@ -1867,7 +1900,9 @@ export function autoSettleAllPendingBets(
   let changed = false;
 
   for (let i = 0; i < users.length; i++) {
-    const user = { ...users[i] };
+    const rawUser = users[i];
+    if (!rawUser) continue;
+    const user: UserAccount = { ...rawUser };
     let userChanged = false;
 
     if (user.bets && user.bets.length > 0) {

@@ -19,17 +19,17 @@ export interface ThermalTicket {
   timeStr: string;
   customerName: string;
   agentName: string;
-  agentId?: string;
-  username?: string;
-  roomId?: string; // Room / Counter Isolation
+  agentId?: string | undefined;
+  username?: string | undefined;
+  roomId?: string | undefined; // Room / Counter Isolation
   items: BetItem[];
   totalAmount: number;
-  status: "ACTIVE" | "WON" | "LOST" | "CLAIMED";
-  winningCardIndex?: number;
-  winningCardName?: string;
-  winningPayout?: number;
-  claimedAt?: number;
-  claimedBy?: string;
+  status: "ACTIVE" | "WON" | "LOST" | "CLAIMED" | "SETTLED";
+  winningCardIndex?: number | undefined;
+  winningCardName?: string | undefined;
+  winningPayout?: number | undefined;
+  claimedAt?: number | undefined;
+  claimedBy?: string | undefined;
 }
 
 const STORAGE_KEY = "sorat_thermal_tickets_v1";
@@ -147,11 +147,11 @@ export function clearTickets(agentId?: string): void {
 export function createTicket(data: {
   roundId: string;
   roundNumber: number;
-  customerName?: string;
-  agentName?: string;
-  agentId?: string;
-  username?: string;
-  roomId?: string;
+  customerName?: string | undefined;
+  agentName?: string | undefined;
+  agentId?: string | undefined;
+  username?: string | undefined;
+  roomId?: string | undefined;
   items: BetItem[];
 }): ThermalTicket {
   const now = Date.now();
@@ -220,6 +220,7 @@ export function settleTicketsForRound(
 
   for (let i = 0; i < tickets.length; i++) {
     const t = tickets[i];
+    if (!t) continue;
     const isMatchingRound = t.roundId === roundId;
     const isMatchingRoom =
       !cleanRoom ||
@@ -233,13 +234,14 @@ export function settleTicketsForRound(
       const isWin = Boolean(winningItem && winningItem.amount > 0);
       const winningPayout = isWin ? winningItem!.amount * PAYOUT_MULTIPLIER : 0;
 
-      tickets[i] = {
+      const updatedTicket: ThermalTicket = {
         ...t,
         status: isWin ? "WON" : "LOST",
         winningCardIndex,
         winningCardName,
         winningPayout,
       };
+      tickets[i] = updatedTicket;
     }
   }
 
@@ -302,7 +304,10 @@ export function claimTicket(ticketId: string, claimedBy?: string): ThermalTicket
   );
   if (idx === -1) return null;
 
-  const target = { ...tickets[idx] };
+  const existing = tickets[idx];
+  if (!existing) return null;
+
+  const target: ThermalTicket = { ...existing };
   if (target.status !== "WON") return target;
 
   target.status = "CLAIMED";

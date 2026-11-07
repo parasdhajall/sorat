@@ -164,7 +164,8 @@ describe("Sorat 6-User Live Arena Simulation Test & 30% Profit Audit", () => {
       console.log("-".repeat(78));
 
       analysis.forEach((c) => {
-        const cardName = CARDS[c.card].name + ` (${CARDS[c.card].englishName})`;
+        const cardDef = CARDS[c.card] ?? CARDS[0]!;
+        const cardName = cardDef.name + ` (${cardDef.englishName})`;
         const potentialProfit = roundTotalTurnover - c.potentialPayout;
         const marginPct = ((potentialProfit / roundTotalTurnover) * 100).toFixed(1) + "%";
         console.log(
@@ -184,7 +185,7 @@ describe("Sorat 6-User Live Arena Simulation Test & 30% Profit Audit", () => {
         cumulativePayouts
       );
 
-      const winningCard = CARDS[engineResult.winner];
+      const winningCard = CARDS[engineResult.winner] ?? CARDS[0]!;
       const winPayout = engineResult.netPayout;
       const roundProfit = roundTotalTurnover - winPayout;
       const roundProfitPct = ((roundProfit / roundTotalTurnover) * 100).toFixed(2);

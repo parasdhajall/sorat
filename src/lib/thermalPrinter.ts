@@ -23,7 +23,10 @@ function uint8ArrayToBase64(bytes: Uint8Array): string {
   let binary = "";
   const len = bytes.byteLength;
   for (let i = 0; i < len; i++) {
-    binary += String.fromCharCode(bytes[i]);
+    const b = bytes[i];
+    if (b !== undefined) {
+      binary += String.fromCharCode(b);
+    }
   }
   return btoa(binary);
 }
@@ -214,7 +217,14 @@ export class BluetoothPrinterManager {
 
         const target = devices.find((d) =>
           /print|pos|mtp|inner|rp|mpt|veer|seznik|bt|thermal/i.test(d.name)
-        ) || devices[0];
+        ) ?? devices[0];
+
+        if (!target) {
+          return {
+            success: false,
+            message: "Koi paired Bluetooth printer nahi mila. Phone settings me pehle printer pair karein.",
+          };
+        }
 
         this.deviceName = target.name;
         this.deviceAddress = target.address;
@@ -493,12 +503,12 @@ export function getActivePrinterName(): string {
   return printerManager.deviceName || "Bluetooth POS-58";
 }
 
-export async function connectBluetoothDirect(): Promise<{ success: boolean; deviceName: string; error?: string }> {
+export async function connectBluetoothDirect(): Promise<{ success: boolean; deviceName: string; error?: string | undefined }> {
   const res = await printerManager.connect();
   return {
     success: res.success,
     deviceName: printerManager.deviceName || "",
-    error: res.success ? undefined : res.message,
+    ...(res.success ? {} : { error: res.message }),
   };
 }
 

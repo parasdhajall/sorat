@@ -42,8 +42,8 @@ describe("User Store & Financial Profit Engine", () => {
     expect(updated.balance).toBe(1500);
     expect(updated.totalDeposited).toBe(1500);
     expect(updated.deposits.length).toBe(2);
-    expect(updated.deposits[0].amount).toBe(1000);
-    expect(updated.deposits[0].balanceAfter).toBe(1500);
+    expect(updated.deposits[0]!.amount).toBe(1000);
+    expect(updated.deposits[0]!.balanceAfter).toBe(1500);
   });
 
   it("records user bets and properly calculates profit and loss", () => {

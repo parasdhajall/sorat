@@ -57,9 +57,10 @@ export function runRamuSimulation() {
     while (remaining > 0) {
       for (const p of availablePlayers) {
         if (remaining <= 0) break;
-        const card = p.favCards[Math.floor(Math.random() * p.favCards.length)];
-        // Bet size: 20, 30, 40, or 50 (or whatever remains if <= 50)
-        let stake = [20, 30, 40, 50][Math.floor(Math.random() * 4)];
+        const favIdx = Math.floor(Math.random() * p.favCards.length);
+        const card = p.favCards[favIdx] ?? 0;
+        const stakeOptions = [20, 30, 40, 50];
+        let stake = stakeOptions[Math.floor(Math.random() * 4)] ?? 20;
         if (stake > remaining) stake = remaining;
         if (remaining - stake > 0 && remaining - stake < 20) {
           stake = remaining; // consume all to not leave awkward <20 remainder
@@ -70,7 +71,7 @@ export function runRamuSimulation() {
         roundPlayerBets.push({
           player: p.name,
           cardIndex: card,
-          cardName: CARD_NAMES[card],
+          cardName: CARD_NAMES[card] ?? "पतंग",
           stake,
         });
       }

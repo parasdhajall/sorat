@@ -726,7 +726,7 @@ export default function AdminPage() {
                 const isWinnerSelected = forcedWinner === i;
 
                 const cardInfo = analysisMap.get(i);
-                const isSafe = cardInfo?.isSafe ?? true;
+                const isSafe = cardInfo?.isSafeForProfit ?? true;
 
                 return (
                   <div

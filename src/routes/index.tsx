@@ -247,23 +247,22 @@ export default function AgentPage() {
 
   // Detect standalone PWA mode and native Android App
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const isStandaloneMode = window.matchMedia("(display-mode: standalone)").matches || (window.navigator as any).standalone;
-      setIsStandalone(Boolean(isStandaloneMode));
+    if (typeof window === "undefined") return;
+    const isStandaloneMode = window.matchMedia("(display-mode: standalone)").matches || (window.navigator as any).standalone;
+    setIsStandalone(Boolean(isStandaloneMode));
 
-      const isNative =
-        (typeof navigator !== "undefined" && navigator.userAgent.includes("SoratApp")) ||
-        Boolean((window as any).AndroidBridge) ||
-        Boolean((window as any).AndroidPrinter);
-      setIsNativeApp(isNative);
+    const isNative =
+      (typeof navigator !== "undefined" && navigator.userAgent.includes("SoratApp")) ||
+      Boolean((window as any).AndroidBridge) ||
+      Boolean((window as any).AndroidPrinter);
+    setIsNativeApp(isNative);
 
-      const handler = (e: any) => {
-        e.preventDefault();
-        setDeferredPrompt(e);
-      };
-      window.addEventListener("beforeinstallprompt", handler);
-      return () => window.removeEventListener("beforeinstallprompt", handler);
-    }
+    const handler = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
   }, []);
 
   // Sync Timer & Clock Rollover
@@ -640,9 +639,12 @@ export default function AgentPage() {
   };
 
   const handleTestPrint = () => {
+    const testId = "TEST-" + Math.random().toString(36).substring(2, 7).toUpperCase();
     const testTkt: ThermalTicket = {
-      id: "TEST-" + Math.random().toString(36).substring(2, 7).toUpperCase(),
-      dateStr: new Date().toISOString().split("T")[0],
+      ticketId: testId,
+      barcode: "9999111",
+      timestamp: Date.now(),
+      dateStr: new Date().toISOString().split("T")[0] || todayStr,
       timeStr: new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
       roundId,
       roundNumber,
@@ -650,14 +652,11 @@ export default function AgentPage() {
       agentName: agentUser.displayName,
       customerName: "PRINTER TEST SLIP",
       items: [
-        { cardIndex: 0, cardName: "पतंग (TEST OK)", stake: 10, potentialPayout: 100 },
-        { cardIndex: 11, cardName: "गाय (TEST OK)", stake: 10, potentialPayout: 100 },
+        { cardIndex: 0, cardName: "पतंग (TEST OK)", amount: 10 },
+        { cardIndex: 11, cardName: "गाय (TEST OK)", amount: 10 },
       ],
-      totalStake: 20,
       totalAmount: 20,
-      maxPotentialPayout: 100,
-      isWinner: false,
-      isClaimed: false,
+      winningPayout: 0,
       status: "SETTLED",
     };
     const paperWidth = ((typeof window !== "undefined" && localStorage.getItem("sorat_printer_width")) as any) || "58mm";
@@ -740,33 +739,35 @@ export default function AgentPage() {
       roundMap.set(b.roundId, arr);
     });
 
-    return Array.from(roundMap.entries()).map(([rId, bets], idx) => {
-      const totalAmount = bets.reduce((s, b) => s + b.stake, 0);
-      const winningPayout = bets.reduce((s, b) => s + (b.payout || 0), 0);
-      const isWin = bets.some((b) => b.isWin || (b.payout && b.payout > 0));
-      const firstBet = bets[0];
-      return {
-        ticketId: firstBet.ticketId || `TKT-${dateStr.replace(/-/g, "")}-${idx + 1}`,
-        barcode: `${dateStr.replace(/-/g, "").slice(-4)}${idx + 1}`,
-        roundId: rId,
-        roundNumber: firstBet.roundNumber || 0,
-        timestamp: firstBet.timestamp,
-        dateStr: firstBet.dateStr || dateStr,
-        timeStr: firstBet.timeStr || "12:00 PM",
-        customerName: "Counter Customer",
-        agentName: agentUser?.displayName || "Kiosk Agent",
-        agentId: agentUser?.id,
-        username: agentUser?.username,
-        items: bets.map((b) => ({
-          cardIndex: b.cardIndex,
-          cardName: b.cardName,
-          amount: b.stake,
-        })),
-        totalAmount,
-        winningPayout,
-        status: isWin ? "WON" : "LOST",
-      } as ThermalTicket;
-    });
+    return Array.from(roundMap.entries())
+      .filter(([_, bets]) => bets.length > 0 && bets[0] !== undefined)
+      .map(([rId, bets], idx) => {
+        const totalAmount = bets.reduce((s, b) => s + b.stake, 0);
+        const winningPayout = bets.reduce((s, b) => s + (b.payout || 0), 0);
+        const isWin = bets.some((b) => b.isWin || (b.payout && b.payout > 0));
+        const firstBet = bets[0]!;
+        return {
+          ticketId: firstBet.ticketId || `TKT-${dateStr.replace(/-/g, "")}-${idx + 1}`,
+          barcode: `${dateStr.replace(/-/g, "").slice(-4)}${idx + 1}`,
+          roundId: rId,
+          roundNumber: firstBet.roundNumber || 0,
+          timestamp: firstBet.timestamp,
+          dateStr: firstBet.dateStr || dateStr,
+          timeStr: firstBet.timeStr || "12:00 PM",
+          customerName: "Counter Customer",
+          agentName: agentUser?.displayName || "Kiosk Agent",
+          agentId: agentUser?.id,
+          username: agentUser?.username,
+          items: bets.map((b) => ({
+            cardIndex: b.cardIndex,
+            cardName: b.cardName,
+            amount: b.stake,
+          })),
+          totalAmount,
+          winningPayout,
+          status: isWin ? "WON" : "LOST",
+        } as ThermalTicket;
+      });
   };
 
   // Precomputed tickets per date

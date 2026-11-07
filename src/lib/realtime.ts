@@ -360,7 +360,9 @@ export class TVHostSync {
           const lines = text.trim().split("\n");
           for (let i = lines.length - 1; i >= Math.max(0, lines.length - 15); i--) {
             try {
-              const item = JSON.parse(lines[i]);
+              const lineStr = lines[i];
+              if (!lineStr) continue;
+              const item = JSON.parse(lineStr);
               if (item.event === "message" && item.message) {
                 const wire = JSON.parse(item.message);
                 if (wire && wire._from === "admin" && wire.payload) {
@@ -548,7 +550,9 @@ export class AdminClientSync {
           const lines = text.trim().split("\n");
           for (let i = lines.length - 1; i >= Math.max(0, lines.length - 15); i--) {
             try {
-              const item = JSON.parse(lines[i]);
+              const lineStr = lines[i];
+              if (!lineStr) continue;
+              const item = JSON.parse(lineStr);
               if (item.event === "message" && item.message) {
                 const wire = JSON.parse(item.message);
                 if (wire && (wire._from === "tv" || wire._from === "admin") && wire.payload) {

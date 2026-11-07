@@ -406,9 +406,12 @@ export default function TvArenaPage() {
         });
       }
 
+      const winnerCard = CARDS[w] ?? CARDS[0]!;
+      const winnerCardName = winnerCard.name;
+
       // Automatically settle tickets and bets placed on this round & room
-      settleTicketsForRound(roundId, w, CARDS[w].name, activeRoomId);
-      settleRoundBets(roundId, w, CARDS[w].name, false);
+      settleTicketsForRound(roundId, w, winnerCardName, activeRoomId);
+      settleRoundBets(roundId, w, winnerCardName, false);
       autoSettleAllPendingBets(roundNumber, "select", w);
       recordRoundWinnerHistory(roundNumber, w);
       saveRecordedRoundWinner(roundNumber, w, activeRoomId);
@@ -418,7 +421,7 @@ export default function TvArenaPage() {
         declareSoratRoundRpc({
           roundId,
           winningCard: w,
-          winningCardName: CARDS[w].name,
+          winningCardName: winnerCardName,
           selectionReason: `${decision.reason} [Counter: ${activeRoomId}]`,
         }).catch(() => {});
       } catch {}
@@ -428,7 +431,7 @@ export default function TvArenaPage() {
       const newHistItem: ResultHistoryItem = {
         roundId,
         cardIndex: w,
-        cardName: CARDS[w].name,
+        cardName: winnerCardName,
         timeStr: nowStr,
       };
       setResultsHistory((prev) => {
@@ -445,7 +448,7 @@ export default function TvArenaPage() {
         roundNumber,
         roundId,
         winner: w,
-        winnerName: CARDS[w].name,
+        winnerName: winnerCardName,
         netPayout: prize,
         reason: decision.reason,
         roomId: activeRoomId,
@@ -863,7 +866,7 @@ export default function TvArenaPage() {
           {/* Horizontal Recent Results Carousel */}
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
             {resultsHistory.slice(0, 10).map((hist, i) => {
-              const card = CARDS[hist.cardIndex] || CARDS[0];
+              const card = CARDS[hist.cardIndex] ?? CARDS[0]!;
               return (
                 <div
                   key={`${hist.roundId}-${i}`}

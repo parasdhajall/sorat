@@ -481,7 +481,7 @@ export async function placeSoratBetsRpc(params: {
   roundId: string;
   roundNumber: number;
   ticketId: string;
-  customerName?: string;
+  customerName?: string | undefined;
   dateStr: string;
   timeStr: string;
   bets: { cardIndex: number; cardName: string; amount: number }[];

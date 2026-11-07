@@ -109,7 +109,9 @@ export function getCardDisplayName(name: string): string {
 }
 
 export function getCardByIndex(idx: number): CardDef {
-  return CARDS[idx] || CARDS[0];
+  const c = CARDS[idx] ?? CARDS[0];
+  if (!c) throw new Error("CARDS array empty");
+  return c;
 }
 
 export interface RoundHistoryItem {
@@ -141,7 +143,7 @@ export function getPastRoundsHistory(count: number = 40): RoundHistoryItem[] {
     if (rNum <= 0) break;
 
     const winIdx = savedHistory[rNum] ?? getDeterministicRoundWinner(rNum);
-    const card = CARDS[winIdx] || CARDS[0];
+    const card = getCardByIndex(winIdx);
 
     const mins = Math.max(0, rNum - 1);
     const hours = Math.floor(mins / 60) % 24;
