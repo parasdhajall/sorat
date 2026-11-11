@@ -569,18 +569,13 @@ export function mergeRemoteUsers(remoteUsers: any[]): UserAccount[] {
 
   remoteUsers.forEach((remoteU: any) => {
     if (!remoteU || !remoteU.id) return;
-    const remotePhoneDigits = (remoteU.phone || "").replace(/\D/g, "");
     const remoteUserClean = (remoteU.username || "").toLowerCase().replace(/^@/, "");
 
     const existing =
       mergedMap.get(remoteU.id) ||
       current.find((c) => {
-        const cPhone = (c.phone || "").replace(/\D/g, "");
         const cUser = (c.username || "").toLowerCase().replace(/^@/, "");
-        return (
-          (remoteUserClean && cUser === remoteUserClean) ||
-          (remotePhoneDigits.length >= 6 && cPhone.includes(remotePhoneDigits))
-        );
+        return remoteUserClean && cUser === remoteUserClean;
       });
 
     if (existing) {
@@ -621,9 +616,11 @@ export function mergeRemoteUsers(remoteUsers: any[]): UserAccount[] {
           : [];
 
       mergedMap.set(existing.id, {
-        ...remoteU,
         ...existing,
+        ...remoteU,
         id: existing.id,
+        username: existing.username || remoteU.username,
+        displayName: existing.displayName || remoteU.displayName,
         pin: remoteU.pin || existing.pin || "1234",
         phone: remoteU.phone || existing.phone || "",
         balance: isRamu ? 0 : effBalance,
@@ -861,8 +858,7 @@ export async function pullUsersFromCloud(): Promise<UserAccount[]> {
           const remote = dbPlayers.find(
             (p) =>
               p.id === u.id ||
-              (p.username && p.username.toLowerCase() === u.username.toLowerCase()) ||
-              (p.phone && u.phone && p.phone.replace(/\D/g, "") === u.phone.replace(/\D/g, ""))
+              (p.username && p.username.toLowerCase() === u.username.toLowerCase())
           );
           if (remote) {
             const uBetsFromDb = dbBets
@@ -916,8 +912,7 @@ export async function pullUsersFromCloud(): Promise<UserAccount[]> {
           const exists = merged.some(
             (u) =>
               u.id === p.id ||
-              (p.username && u.username.toLowerCase() === p.username.toLowerCase()) ||
-              (p.phone && u.phone && p.phone.replace(/\D/g, "") === u.phone.replace(/\D/g, ""))
+              (p.username && u.username.toLowerCase() === p.username.toLowerCase())
           );
           if (!exists) {
             const pBetsFromDb = dbBets
@@ -1060,7 +1055,6 @@ export function subscribeToCloudUsers(
                 u.id.toLowerCase() === rawId ||
                 u.id.toLowerCase() === cleanId ||
                 u.username.toLowerCase().replace(/^@/, "") === cleanId ||
-                (cleanPhone.length >= 6 && (u.phone || "").replace(/\D/g, "").includes(cleanPhone)) ||
                 (isRamuUser(u) && (cleanId === "ram" || cleanId.includes("ramu")))
             );
 
@@ -1098,8 +1092,7 @@ export function subscribeToCloudUsers(
               (u) =>
                 u.id.toLowerCase() === rawId ||
                 u.id.toLowerCase() === cleanId ||
-                u.username.toLowerCase().replace(/^@/, "") === cleanId ||
-                (cleanPhone.length >= 6 && (u.phone || "").replace(/\D/g, "").includes(cleanPhone))
+                u.username.toLowerCase().replace(/^@/, "") === cleanId
             );
 
             if (target) {
@@ -1413,11 +1406,6 @@ export function deductAgentBalance(
     const uName = uRaw.replace(/^@/, "");
     const uCode = (u.agentCode || "").toLowerCase().replace(/^@/, "");
     const uDisplay = (u.displayName || "").toLowerCase();
-    const uPhone = (u.phone || "").replace(/\D/g, "");
-    const phoneMatches =
-      cleanPhone.length >= 4 &&
-      uPhone.length >= 4 &&
-      (uPhone.includes(cleanPhone) || cleanPhone.includes(uPhone));
 
     return (
       u.id.toLowerCase() === rawId ||
@@ -1426,7 +1414,6 @@ export function deductAgentBalance(
       uRaw === rawId ||
       uCode === cleanId ||
       uDisplay === cleanId ||
-      phoneMatches ||
       (isRamuUser(u) && (cleanId === "ram" || cleanId.includes("ramu")))
     );
   });

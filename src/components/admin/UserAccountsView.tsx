@@ -72,20 +72,19 @@ export function UserAccountsView({
     showNotification("☁️ All User Accounts Synced to Phone Apps & APK!");
   };
 
-  // Selected user resolution (matches by ID, username, or phone so UI selection never resets to Ramu)
+  // Selected user resolution (strictly matches by ID, username, agentCode or displayName)
   const selectedUser =
     users.find((u) => {
       if (!selectedUserId) return false;
       const cleanTarget = selectedUserId.toLowerCase().replace(/^@/, "");
-      const cleanPhone = selectedUserId.replace(/\D/g, "");
-      const uPhone = (u.phone || "").replace(/\D/g, "");
       const uUser = (u.username || "").toLowerCase().replace(/^@/, "");
+      const uCode = (u.agentCode || "").toLowerCase().replace(/^@/, "");
 
       return (
         u.id === selectedUserId ||
         uUser === cleanTarget ||
-        u.displayName.toLowerCase() === cleanTarget ||
-        (cleanPhone.length >= 6 && uPhone.includes(cleanPhone))
+        uCode === cleanTarget ||
+        u.displayName.toLowerCase() === cleanTarget
       );
     }) || users[0];
 
