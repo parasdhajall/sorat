@@ -729,33 +729,25 @@ export default function TvArenaPage() {
 
         {/* Right Info & Display Controls */}
         <div className="flex items-center gap-3">
-          {/* Active Counter Badge with 1-Tap Switcher */}
-          <button
-            type="button"
-            onClick={() => {
-              setAllUsersList(getUsers());
-              setShowRoomSelector(true);
-            }}
-            title="Click to Switch Counter Room / Agent TV Display"
-            className="hidden sm:flex flex-col text-right p-1.5 rounded-xl hover:bg-muted/80 border border-border/40 hover:border-primary/50 transition cursor-pointer"
-          >
-            <span className="text-[9px] uppercase font-bold text-muted-foreground flex items-center justify-end gap-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Counter Room ⇄
-            </span>
-            <span className="text-xs font-black text-primary font-mono truncate max-w-[160px]">
-              📡 {activeRoomId.toUpperCase()}
-            </span>
-          </button>
-
-          {/* Action Total Pool */}
-          <div className="px-3 py-1 rounded-xl bg-background/80 border border-border text-xs font-mono font-black text-primary flex items-center gap-1">
+          {/* Action Total Pool (in Points/PTS) */}
+          <div className="px-3 py-1 rounded-xl bg-background/80 border border-border text-xs font-mono font-black text-primary flex items-center gap-1.5">
             <span>🪙</span>
-            <span>POOL: ₹{totalBetsOnBoard.toLocaleString("en-IN")}</span>
+            <span>POOL: {totalBetsOnBoard.toLocaleString("en-IN")} PTS</span>
           </div>
 
           {/* Screen Controls */}
           <div className="flex items-center gap-1">
+            {/* Subtle Room Switcher Icon (without exposing Counter Number on TV) */}
+            <button
+              onClick={() => {
+                setAllUsersList(getUsers());
+                setShowRoomSelector(true);
+              }}
+              title="Display Settings"
+              className="p-1.5 sm:p-2 rounded-xl bg-muted/80 hover:bg-muted text-muted-foreground hover:text-foreground border border-border transition opacity-70 hover:opacity-100"
+            >
+              <span className="text-xs">⚙️</span>
+            </button>
             <button
               onClick={toggleSound}
               title={soundEnabled ? "Mute Sound" : "Enable Sound FX"}
@@ -816,7 +808,7 @@ export default function TvArenaPage() {
                 {cardBet > 0 && (
                   <div className="absolute top-2 right-2 z-30 flex items-center gap-1 rounded-full bg-gradient-gold text-primary-foreground font-black px-2.5 py-0.5 text-xs sm:text-sm shadow-gold animate-bounce">
                     <span>🪙</span>
-                    <span>₹{cardBet}</span>
+                    <span>{cardBet} PTS</span>
                   </div>
                 )}
 

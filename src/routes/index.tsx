@@ -524,7 +524,7 @@ export default function AgentPage() {
     }
 
     if (!isBalanceEnough) {
-      alert(`Balance kam hai! Needed: ₹${totalTicketStake}, Available: ₹${agentBalance}. Kripya counter recharge karein!`);
+      alert(`Balance kam hai! Needed: ${totalTicketStake} PTS, Available: ${agentBalance} PTS. Kripya counter recharge karein!`);
       return;
     }
 
@@ -663,7 +663,7 @@ export default function AgentPage() {
     if (updated) {
       setTicketsList(getTickets(agentUser?.id || agentUser?.username));
       refreshAgentTickets();
-      alert(`Ticket #${ticketId} prize of ₹${updated.winningPayout} marked as PAID! Customer ko cash de dijiye.`);
+      alert(`Ticket #${ticketId} prize of ${updated.winningPayout} PTS marked as PAID! Customer ko prize de dijiye.`);
     }
   };
 
@@ -1072,7 +1072,7 @@ export default function AgentPage() {
                 >
                   <div className="text-[11px] font-black text-foreground truncate flex items-center justify-between">
                     <span>{u.displayName}</span>
-                    <span className="text-[9px] text-emerald-400 font-mono">₹{u.balance}</span>
+                    <span className="text-[9px] text-emerald-400 font-mono">{u.balance} PTS</span>
                   </div>
                   <div className="text-[9px] text-primary font-mono font-bold truncate">
                     {u.phone ? `📱 ${u.phone}` : `@${u.username}`}
@@ -1179,10 +1179,10 @@ export default function AgentPage() {
         <div className="flex items-center justify-between rounded-xl bg-background/80 border border-border/80 px-3 py-2 shadow-inner">
           <div>
             <span className="text-[9px] uppercase font-bold text-muted-foreground block">
-              Counter Live Balance
+              Counter Points Balance
             </span>
             <div className="text-xl font-display font-black text-primary leading-none mt-0.5 flex items-center gap-1">
-              <span>🪙</span> ₹{agentBalance.toLocaleString("en-IN")}
+              <span>🪙</span> {agentBalance.toLocaleString("en-IN")} PTS
             </div>
           </div>
 
@@ -1442,7 +1442,7 @@ export default function AgentPage() {
                         : "bg-background border-border text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    ₹{chip}
+                    {chip} PTS
                   </button>
                 ))}
               </div>
@@ -1501,7 +1501,7 @@ export default function AgentPage() {
                           : "text-muted-foreground/60 bg-muted/40"
                       }`}
                     >
-                      {staked > 0 ? `₹${staked}` : "+ Add"}
+                      {staked > 0 ? `${staked} PTS` : "+ Add"}
                     </span>
                   </div>
                 );
@@ -1578,7 +1578,7 @@ export default function AgentPage() {
                   <p className="text-xs text-foreground font-medium mt-1">
                     Slip <strong className="text-primary font-mono">#{claimJustPaidTicket.ticketId}</strong> prize of{" "}
                     <strong className="text-emerald-300 font-mono text-sm font-black">
-                      ₹{claimJustPaidTicket.winningPayout?.toLocaleString("en-IN")}
+                      {claimJustPaidTicket.winningPayout?.toLocaleString("en-IN")} PTS
                     </strong>{" "}
                     has been paid to customer.
                   </p>
@@ -1629,7 +1629,7 @@ export default function AgentPage() {
                         <span className="text-2xl animate-bounce">🏆</span>
                         <div>
                           <span className="text-xs font-black uppercase text-emerald-400 tracking-wider block">
-                            WINNER: Card [{claimVerifiedTicket.winningCardName}] • Payout: ₹{claimVerifiedTicket.winningPayout?.toLocaleString("en-IN")}
+                            WINNER: Card [{claimVerifiedTicket.winningCardName}] • Payout: {claimVerifiedTicket.winningPayout?.toLocaleString("en-IN")} PTS
                           </span>
                           <span className="font-mono text-xs font-bold text-foreground">
                             Slip #{claimVerifiedTicket.ticketId} • Round {claimVerifiedTicket.roundId}
@@ -1644,10 +1644,10 @@ export default function AgentPage() {
                     {/* Big Payout Amount Callout */}
                     <div className="text-center py-2.5 bg-emerald-500/20 rounded-xl border border-emerald-500/40">
                       <span className="text-[10px] font-bold uppercase text-emerald-300 tracking-widest block">
-                        CASH PAYOUT TO CUSTOMER (द्यावयाची रोकड रक्कम)
+                        PRIZE PAYOUT TO CUSTOMER (द्यावयाची बक्षीस रक्कम)
                       </span>
                       <div className="text-3xl font-display font-black text-emerald-300 mt-0.5">
-                        ₹{claimVerifiedTicket.winningPayout?.toLocaleString("en-IN")}
+                        {claimVerifiedTicket.winningPayout?.toLocaleString("en-IN")} PTS
                       </div>
                       <span className="text-[10px] text-foreground font-medium block mt-0.5">
                         Winning Card: <strong className="text-primary">{claimVerifiedTicket.winningCardName}</strong> (9X Payout)
@@ -1661,7 +1661,7 @@ export default function AgentPage() {
                       className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-black font-display text-sm font-black shadow-lg hover:brightness-110 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer"
                     >
                       <span>💵</span>
-                      <span>PAY CASH & MARK CLAIMED</span>
+                      <span>PAY PRIZE & MARK CLAIMED</span>
                     </button>
                   </div>
                 )}
@@ -1684,7 +1684,7 @@ export default function AgentPage() {
                     <div className="p-3 rounded-xl bg-background/80 border border-border space-y-1 text-xs">
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">Amount Paid:</span>
-                        <strong className="text-destructive font-mono">₹{claimVerifiedTicket.winningPayout}</strong>
+                        <strong className="text-destructive font-mono">{claimVerifiedTicket.winningPayout} PTS</strong>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">Paid By Agent:</span>
@@ -1761,8 +1761,8 @@ export default function AgentPage() {
                               : "bg-muted text-foreground border-border"
                           }`}
                         >
-                          {it.cardName}: ₹{it.amount}
-                          {claimVerifiedTicket.winningCardIndex === it.cardIndex ? ` 🏆 (WON ₹${it.amount * 9})` : ""}
+                          {it.cardName}: {it.amount} PTS
+                          {claimVerifiedTicket.winningCardIndex === it.cardIndex ? ` 🏆 (WON ${it.amount * 9} PTS)` : ""}
                         </span>
                       ))}
                     </div>
@@ -1817,10 +1817,10 @@ export default function AgentPage() {
                           </div>
                           <div className="text-right">
                             <span className="text-sm font-mono font-black text-emerald-400 block">
-                              ₹{t.winningPayout}
+                              {t.winningPayout} PTS
                             </span>
                             <span className="text-[9px] px-2 py-0.5 rounded bg-emerald-500 text-black font-black uppercase">
-                              CLAIM CASH
+                              CLAIM PRIZE
                             </span>
                           </div>
                         </div>
@@ -2015,7 +2015,7 @@ export default function AgentPage() {
                       }`}
                     >
                       {t.status === "WON"
-                        ? `🏆 WON ₹${t.winningPayout}`
+                        ? `🏆 WON ${t.winningPayout} PTS`
                         : t.status === "CLAIMED"
                         ? "✓ PAID OUT"
                         : t.status === "LOST"
@@ -2034,11 +2034,11 @@ export default function AgentPage() {
                         key={idx}
                         className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-background border border-border"
                       >
-                        {item.cardName}: ₹{item.amount}
+                        {item.cardName}: {item.amount} PTS
                       </span>
                     ))}
                     <span className="text-[10px] font-mono font-black text-primary">
-                      Total: ₹{t.totalAmount}
+                      Total: {t.totalAmount} PTS
                     </span>
                   </div>
 
@@ -2053,7 +2053,7 @@ export default function AgentPage() {
                           onClick={() => handleClaimPrize(t.ticketId)}
                           className="py-1 px-3 rounded-lg bg-emerald-500 text-black font-display text-xs font-black shadow-gold"
                         >
-                          💵 Pay Out ₹{t.winningPayout}
+                          💵 Pay Out {t.winningPayout} PTS
                         </button>
                       )}
                       <button
@@ -2203,37 +2203,37 @@ export default function AgentPage() {
               <div className="space-y-2 text-xs font-mono">
                 <div className="flex justify-between py-1.5 border-b border-border/50">
                   <span className="text-muted-foreground">Total Bets Punched (विक्री):</span>
-                  <span className="font-bold text-foreground">₹{shiftSales.toLocaleString("en-IN")}</span>
+                  <span className="font-bold text-foreground">{shiftSales.toLocaleString("en-IN")} PTS</span>
                 </div>
                 <div className="flex justify-between py-1.5 border-b border-border/50">
                   <span className="text-muted-foreground">Payouts Given (वाटप):</span>
-                  <span className="font-bold text-emerald-400">₹{shiftPayouts.toLocaleString("en-IN")}</span>
+                  <span className="font-bold text-emerald-400">{shiftPayouts.toLocaleString("en-IN")} PTS</span>
                 </div>
                 <div className="flex justify-between py-1.5 border-b border-border/50">
                   <span className="text-muted-foreground">Cash Surplus in Drawer (गल्ल्यात शिल्लक):</span>
                   <span className="font-bold text-foreground">
-                    ₹{shiftCashSurplus.toLocaleString("en-IN")}
+                    {shiftCashSurplus.toLocaleString("en-IN")} PTS
                   </span>
                 </div>
 
                 {shiftDeposits > 0 && (
                   <div className="flex justify-between py-1.5 border-b border-border/50">
                     <span className="text-muted-foreground">Counter Recharge / Deposit (जमा):</span>
-                    <span className="font-bold text-foreground">₹{shiftDeposits.toLocaleString("en-IN")}</span>
+                    <span className="font-bold text-foreground">{shiftDeposits.toLocaleString("en-IN")} PTS</span>
                   </div>
                 )}
 
                 <div className="flex justify-between py-2 bg-primary/10 px-2 rounded-xl border border-primary/30">
                   <span className="font-sans font-bold text-primary">Your 10% Commission (१०% कमिशन):</span>
                   <span className="font-display font-black text-sm text-primary">
-                    +₹{shiftCommission10.toLocaleString("en-IN")}
+                    +{shiftCommission10.toLocaleString("en-IN")} PTS
                   </span>
                 </div>
 
                 <div className="flex justify-between py-2 bg-emerald-500/10 px-2.5 rounded-xl border border-emerald-500/30">
                   <span className="font-sans font-bold text-emerald-400">Net Cash to Collect (निव्वळ जमा रोकड):</span>
                   <span className="font-display font-black text-sm text-emerald-400">
-                    ₹{shiftNetCashToCollect.toLocaleString("en-IN")}
+                    {shiftNetCashToCollect.toLocaleString("en-IN")} PTS
                   </span>
                 </div>
 
@@ -2327,7 +2327,7 @@ export default function AgentPage() {
                         }`}
                       >
                         {t.status === "WON"
-                          ? `🏆 WON ₹${t.winningPayout}`
+                          ? `🏆 WON ${t.winningPayout} PTS`
                           : t.status === "CLAIMED"
                           ? "✓ PAID OUT"
                           : t.status === "LOST"
@@ -2342,11 +2342,11 @@ export default function AgentPage() {
                           key={idx}
                           className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-background border border-border"
                         >
-                          {item.cardName}: ₹{item.amount}
+                          {item.cardName}: {item.amount} PTS
                         </span>
                       ))}
                       <span className="text-[10px] font-mono font-black text-primary ml-auto">
-                        Total: ₹{t.totalAmount}
+                        Total: {t.totalAmount} PTS
                       </span>
                     </div>
 
@@ -2354,7 +2354,7 @@ export default function AgentPage() {
                       <span>🕒 {t.timeStr} • {t.dateStr}</span>
                       {t.winningPayout && t.winningPayout > 0 && (
                         <span className="text-emerald-400 font-bold">
-                          बक्षीस: ₹{t.winningPayout}
+                          बक्षीस: {t.winningPayout} PTS
                         </span>
                       )}
                     </div>
@@ -2460,10 +2460,10 @@ export default function AgentPage() {
               </div>
               <div className="text-right">
                 <span className="text-[10px] text-muted-foreground block">
-                  एकूण दाव: ₹{historyBetsTotalStake}
+                  एकूण दाव: {historyBetsTotalStake} PTS
                 </span>
                 <span className="font-bold text-emerald-400">
-                  बक्षीस: ₹{historyBetsTotalWon}
+                  बक्षीस: {historyBetsTotalWon} PTS
                 </span>
               </div>
             </div>
@@ -2514,11 +2514,11 @@ export default function AgentPage() {
 
                     <div className="text-right shrink-0">
                       <span className="text-xs font-mono font-black text-foreground block">
-                        दाव: ₹{b.stake}
+                        दाव: {b.stake} PTS
                       </span>
                       {b.isWin || (b.payout && b.payout > 0) ? (
                         <span className="inline-block px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px] font-black uppercase">
-                          🏆 जिंकले ₹{b.payout}
+                          🏆 जिंकले {b.payout} PTS
                         </span>
                       ) : b.status === "SETTLED" ? (
                         <span className="text-[10px] text-muted-foreground font-mono">
@@ -2653,7 +2653,7 @@ export default function AgentPage() {
             <div className="flex items-center gap-1 font-mono">
               <span className="text-muted-foreground">Total:</span>
               <span className="text-base font-display font-black text-primary">
-                ₹{totalTicketStake}
+                {totalTicketStake} PTS
               </span>
             </div>
           </div>
@@ -2686,7 +2686,7 @@ export default function AgentPage() {
                   ? "SELECT CARDS TO BET"
                   : !isBalanceEnough
                   ? "INSUFFICIENT BALANCE (RECHARGE)"
-                  : `PUNCH BET & PRINT SLIP (₹${totalTicketStake})`}
+                  : `PUNCH BET & PRINT SLIP (${totalTicketStake} PTS)`}
               </span>
             </button>
           </div>

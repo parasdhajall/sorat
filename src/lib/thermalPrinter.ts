@@ -109,7 +109,7 @@ export function buildEscPosBytes(ticket: ThermalTicket, paperWidth: "58mm" | "80
   ticket.items.forEach((item, idx) => {
     const cardTitle = getCardPureRoman(item.cardName);
     const left = `${idx + 1}. ${cardTitle}`;
-    const right = `Rs ${item.amount}`;
+    const right = `${item.amount} PTS`;
     const pad = maxCols - left.length - right.length;
     line(`${left}${" ".repeat(Math.max(1, pad))}${right}`);
   });
@@ -119,7 +119,7 @@ export function buildEscPosBytes(ticket: ThermalTicket, paperWidth: "58mm" | "80
   // 5. Total Stake
   push(0x1b, 0x45, 0x01); // Bold ON
   const totalLeft = "TOTAL STAKE:";
-  const totalRight = `Rs ${ticket.totalAmount}`;
+  const totalRight = `${ticket.totalAmount} PTS`;
   const totalPad = maxCols - totalLeft.length - totalRight.length;
   line(`${totalLeft}${" ".repeat(Math.max(1, totalPad))}${totalRight}`);
   push(0x1b, 0x45, 0x00); // Bold OFF
