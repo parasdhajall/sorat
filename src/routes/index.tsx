@@ -875,8 +875,9 @@ export default function AgentPage() {
     return tPayouts > 0 ? tPayouts : bPayouts;
   }, [shiftPeriod, todayStr, yesterdayStr, customDate, allTicketsCombined, agentUser, ticketsList, cloudDailySummary]);
 
-  const shiftCommission10 = Math.round(shiftSales * 0.10);
-  const shiftCashSurplus = Math.max(0, shiftSales - shiftPayouts);
+  const shiftGrossProfit = shiftSales - shiftPayouts;
+  const shiftCommission10 = shiftGrossProfit > 0 ? Math.round(shiftGrossProfit * 0.10) : 0;
+  const shiftCashSurplus = Math.max(0, shiftGrossProfit);
   const shiftNetCashToCollect = shiftSales - shiftPayouts - shiftCommission10;
 
   const handlePrintDailyHisabSlip = () => {
@@ -899,7 +900,7 @@ export default function AgentPage() {
       items: [
         { cardIndex: 0, cardName: "1. TOTAL SALES (विक्री)", amount: shiftSales },
         { cardIndex: 1, cardName: "2. CLAIMS PAID (वाटप)", amount: -shiftPayouts },
-        { cardIndex: 2, cardName: "3. 10% COMMISSION", amount: -shiftCommission10 },
+        { cardIndex: 2, cardName: "3. 10% COMM (PROFIT)", amount: -shiftCommission10 },
         { cardIndex: 3, cardName: "4. NET CASH TO COLLECT", amount: shiftNetCashToCollect },
       ],
       totalAmount: shiftSales,
@@ -951,7 +952,8 @@ export default function AgentPage() {
     return historyBets.reduce((s, b) => s + (b.payout || 0), 0);
   }, [historyBets]);
 
-  const historyCommission10 = Math.round(historyBetsTotalStake * 0.10);
+  const historyGrossProfit = historyBetsTotalStake - historyBetsTotalWon;
+  const historyCommission10 = historyGrossProfit > 0 ? Math.round(historyGrossProfit * 0.10) : 0;
 
   // =========================================================================
   // IF NOT LOGGED IN: DISPLAY AGENT ID & PIN LOGIN SCREEN
@@ -2224,7 +2226,10 @@ export default function AgentPage() {
                 )}
 
                 <div className="flex justify-between py-2 bg-primary/10 px-2 rounded-xl border border-primary/30">
-                  <span className="font-sans font-bold text-primary">Your 10% Commission (१०% कमिशन):</span>
+                  <div>
+                    <span className="font-sans font-bold text-primary block">Your 10% Commission (१०% कमिशन):</span>
+                    <span className="text-[9px] text-muted-foreground block font-sans font-medium">10% on Gross Profit (नफ्यावर १०%)</span>
+                  </div>
                   <span className="font-display font-black text-sm text-primary">
                     +{shiftCommission10.toLocaleString("en-IN")} PTS
                   </span>

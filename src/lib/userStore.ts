@@ -1485,21 +1485,9 @@ export function deductAgentBalance(
     betRecords
   );
 
-  // Direct Supabase Update (DigitJodi pattern)
-  try {
-    const client = getSupabaseClient();
-    if (client) {
-      // 1. Direct balance deduction in players table so cloud is immediately authoritative
-      Promise.resolve(
-        client
-          .from("players")
-          .update({ balance: newBalance, updated_at: new Date().toISOString() })
-          .eq("id", updatedUser.id)
-      ).catch(() => {});
-    }
-  } catch (err) {
-    console.warn("Supabase balance update notice in deductAgentBalance:", err);
-  }
+  // NOTE: Cloud balance deduction is handled atomically in Supabase by place_sorat_bets RPC
+  // inside placeSoratBetsRpc. We do NOT perform a direct balance update here to prevent
+  // double-deduction (which caused 5000 PTS deposits to run out after only 3270 PTS of bets).
 
   return { success: true, newBalance };
 }

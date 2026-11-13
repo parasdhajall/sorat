@@ -335,7 +335,8 @@ export function UserAccountsView({
       ? ticketClaimsToday
       : betsPayoutsToday;
 
-  const liveCommission10 = Math.round(liveSalesToday * 0.10);
+  const liveGrossProfit = liveSalesToday - liveClaimsToday;
+  const liveCommission10 = liveGrossProfit > 0 ? Math.round(liveGrossProfit * 0.10) : 0;
   const liveNetCashToCollect = liveSalesToday - liveClaimsToday - liveCommission10;
 
   const handlePrintDailyHisabSlip = () => {
@@ -355,7 +356,7 @@ export function UserAccountsView({
       items: [
         { cardIndex: 0, cardName: "Total Sales (विक्री)", amount: liveSalesToday },
         { cardIndex: 1, cardName: "Claims Paid (दावे वाटप)", amount: liveClaimsToday },
-        { cardIndex: 2, cardName: "10% Commission (कमिशन)", amount: liveCommission10 },
+        { cardIndex: 2, cardName: "10% Comm (नफ्यावर १०%)", amount: liveCommission10 },
         { cardIndex: 3, cardName: "Net Cash (जमा रोकड)", amount: liveNetCashToCollect },
       ],
       totalAmount: liveSalesToday,
@@ -367,7 +368,7 @@ export function UserAccountsView({
       executeDirectPrint(hisabTicket, "58mm");
       showNotification(`Daily Hisab Slip sent to 58mm printer for ${selectedUser.displayName}!`);
     } else {
-      const hisabText = `=== SORAT DAILY HISAB SLIP ===\nDate: ${todayStr}\nAgent: ${selectedUser.displayName} (@${selectedUser.username})\n-------------------------------\nTotal Sales (विक्री): Rs ${liveSalesToday}\nClaims Paid (दावे): Rs ${liveClaimsToday}\n10% Commission: Rs ${liveCommission10}\n-------------------------------\nNET CASH TO COLLECT: Rs ${liveNetCashToCollect}\n===============================\n(Connect Bluetooth thermal printer in POS App to print)`;
+      const hisabText = `=== SORAT DAILY HISAB SLIP ===\nDate: ${todayStr}\nAgent: ${selectedUser.displayName} (@${selectedUser.username})\n-------------------------------\nTotal Sales (विक्री): ${liveSalesToday} PTS\nClaims Paid (दावे): ${liveClaimsToday} PTS\nGross Profit (नफा): ${liveGrossProfit} PTS\n10% Commission (नफ्यावर): ${liveCommission10} PTS\n-------------------------------\nNET CASH TO COLLECT: ${liveNetCashToCollect} PTS\n===============================\n(Connect Bluetooth thermal printer in POS App to print)`;
       alert(hisabText);
     }
   };
@@ -805,7 +806,7 @@ export function UserAccountsView({
                   <button
                     type="button"
                     onClick={() => {
-                      const hisabMsg = `📊 *SORAT DAILY CASH SETTLEMENT* 📊\n\n📅 *Date:* ${todayStr}\n👤 *Agent:* ${selectedUser.displayName} (@${selectedUser.username})\n\n💰 *Total Bikri (विक्री):* ₹${liveSalesToday.toLocaleString("en-IN")}\n🏆 *Claims Paid (दावे वाटप):* ₹${liveClaimsToday.toLocaleString("en-IN")}\n🪙 *10% Commission (कमिशन):* ₹${liveCommission10.toLocaleString("en-IN")}\n\n━━━━━━━━━━━━━━━━━━━━\n💵 *NET CASH TO COLLECT (जमा रोकड):* ₹${liveNetCashToCollect.toLocaleString("en-IN")}\n━━━━━━━━━━━━━━━━━━━━\n\n_Sorat Physical Counter Network System_`;
+                      const hisabMsg = `📊 *SORAT DAILY CASH SETTLEMENT* 📊\n\n📅 *Date:* ${todayStr}\n👤 *Agent:* ${selectedUser.displayName} (@${selectedUser.username})\n\n💰 *Total Bikri (विक्री):* ${liveSalesToday.toLocaleString("en-IN")} PTS\n🏆 *Claims Paid (दावे वाटप):* ${liveClaimsToday.toLocaleString("en-IN")} PTS\n📈 *Gross Profit (नफा):* ${liveGrossProfit.toLocaleString("en-IN")} PTS\n🪙 *10% Commission (नफ्यावर १०%):* ${liveCommission10.toLocaleString("en-IN")} PTS\n\n━━━━━━━━━━━━━━━━━━━━\n💵 *NET CASH TO COLLECT (जमा रोकड):* ${liveNetCashToCollect.toLocaleString("en-IN")} PTS\n━━━━━━━━━━━━━━━━━━━━\n\n_Sorat Physical Counter Network System_`;
                       navigator.clipboard.writeText(hisabMsg);
                       showNotification("Daily Hisab copied to clipboard!");
                       window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(hisabMsg)}`, "_blank");
@@ -823,7 +824,7 @@ export function UserAccountsView({
                 <div className="rounded-xl bg-background/60 border border-border/80 p-2.5">
                   <span className="text-[9px] uppercase font-bold text-muted-foreground block">1. Total Sales (विक्री)</span>
                   <div className="text-base font-display font-black text-foreground mt-0.5">
-                    ₹{liveSalesToday.toLocaleString("en-IN")}
+                    {liveSalesToday.toLocaleString("en-IN")} PTS
                   </div>
                   <span className="text-[9px] text-muted-foreground block">{agentTicketsToday.length} ticket(s)</span>
                 </div>
@@ -831,7 +832,7 @@ export function UserAccountsView({
                 <div className="rounded-xl bg-background/60 border border-border/80 p-2.5">
                   <span className="text-[9px] uppercase font-bold text-muted-foreground block">2. Claims Paid (दावे)</span>
                   <div className="text-base font-display font-black text-destructive mt-0.5">
-                    -₹{liveClaimsToday.toLocaleString("en-IN")}
+                    -{liveClaimsToday.toLocaleString("en-IN")} PTS
                   </div>
                   <span className="text-[9px] text-muted-foreground block">
                     {agentTicketsToday.filter((t) => t.status === "CLAIMED" || t.status === "WON").length} winning claim(s)
@@ -841,15 +842,15 @@ export function UserAccountsView({
                 <div className="rounded-xl bg-background/60 border border-border/80 p-2.5">
                   <span className="text-[9px] uppercase font-bold text-muted-foreground block">3. 10% Agent Comm.</span>
                   <div className="text-base font-display font-black text-amber-400 mt-0.5">
-                    -₹{liveCommission10.toLocaleString("en-IN")}
+                    -{liveCommission10.toLocaleString("en-IN")} PTS
                   </div>
-                  <span className="text-[9px] text-muted-foreground block">10% of Sales</span>
+                  <span className="text-[9px] text-muted-foreground block">10% on Net Profit</span>
                 </div>
 
                 <div className="rounded-xl bg-emerald-500/25 border border-emerald-500/50 p-2.5 shadow-sm">
                   <span className="text-[9px] uppercase font-bold text-emerald-300 block">4. Net Cash to Collect</span>
                   <div className={`text-lg font-display font-black mt-0.5 ${liveNetCashToCollect >= 0 ? "text-emerald-300" : "text-destructive"}`}>
-                    ₹{liveNetCashToCollect.toLocaleString("en-IN")}
+                    {liveNetCashToCollect.toLocaleString("en-IN")} PTS
                   </div>
                   <span className="text-[9px] text-emerald-400 font-bold block">
                     {liveNetCashToCollect >= 0 ? "जमा करावयाची रोकड" : "Payable Deficit"}
