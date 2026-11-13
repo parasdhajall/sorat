@@ -436,13 +436,13 @@ export function UserAccountsView({
         <div className="rounded-xl border border-border bg-card p-2.5">
           <span className="text-[9px] uppercase font-bold text-muted-foreground block">Total Deposited</span>
           <span className="text-base font-display font-black text-foreground">
-            ₹{users.reduce((acc, u) => acc + (u.totalDeposited || 0), 0).toLocaleString("en-IN")}
+            {users.reduce((acc, u) => acc + (u.totalDeposited || 0), 0).toLocaleString("en-IN")} PTS
           </span>
         </div>
         <div className="rounded-xl border border-border bg-card p-2.5">
           <span className="text-[9px] uppercase font-bold text-muted-foreground block">Total In Balances</span>
           <span className="text-base font-display font-black text-primary">
-            ₹{users.reduce((acc, u) => acc + (u.balance || 0), 0).toLocaleString("en-IN")}
+            {users.reduce((acc, u) => acc + (u.balance || 0), 0).toLocaleString("en-IN")} PTS
           </span>
         </div>
         <div className="rounded-xl border border-border bg-card p-2.5">
@@ -550,32 +550,39 @@ export function UserAccountsView({
                           Balance
                         </span>
                         <span className="text-sm font-display font-black text-primary leading-tight">
-                          ₹{u.balance.toLocaleString("en-IN")}
+                          {u.balance.toLocaleString("en-IN")} PTS
                         </span>
                       </div>
                     </div>
 
-                    {/* Bottom Row: Deposited & Profit Badges */}
-                    <div className="mt-2.5 pt-2 border-t border-border/40 flex items-center justify-between text-[10px]">
+                    {/* Bottom Row: Deposited & Profit Badges & 10% Agent Commission */}
+                    <div className="mt-2.5 pt-2 border-t border-border/40 flex items-center justify-between text-[10px] gap-1 flex-wrap">
                       <div>
-                        <span className="text-muted-foreground">Deposited: </span>
+                        <span className="text-muted-foreground">Dep: </span>
                         <span className="font-mono font-bold text-foreground">
-                          ₹{(u.totalDeposited || 0).toLocaleString("en-IN")}
+                          {(u.totalDeposited || 0).toLocaleString("en-IN")} PTS
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-1">
-                        <span className="text-muted-foreground">House Profit:</span>
+                      <div className="flex items-center gap-1.5 ml-auto">
                         <span
-                          className={`font-mono font-black px-1.5 py-0.5 rounded ${
+                          className={`font-mono font-black px-1.5 py-0.5 rounded text-[9px] ${
                             (stats.totalBetAmount - stats.totalWonAmount) >= 0
                               ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
                               : "bg-destructive/20 text-destructive border border-destructive/30"
                           }`}
+                          title="House Net Profit"
                         >
                           {(stats.totalBetAmount - stats.totalWonAmount) >= 0
-                            ? `+₹${(stats.totalBetAmount - stats.totalWonAmount).toLocaleString("en-IN")}`
-                            : `-₹${Math.abs(stats.totalBetAmount - stats.totalWonAmount).toLocaleString("en-IN")}`}
+                            ? `+${(stats.totalBetAmount - stats.totalWonAmount).toLocaleString("en-IN")} PTS`
+                            : `-${Math.abs(stats.totalBetAmount - stats.totalWonAmount).toLocaleString("en-IN")} PTS`}
+                        </span>
+
+                        <span
+                          className="font-mono font-black px-1.5 py-0.5 rounded text-[9px] bg-amber-500/15 text-amber-300 border border-amber-500/35"
+                          title="10% Agent Commission on Net Profit"
+                        >
+                          Comm: +{Math.max(0, Math.round(((stats.totalBetAmount - stats.totalWonAmount) > 0 ? (stats.totalBetAmount - stats.totalWonAmount) * 0.10 : 0))).toLocaleString("en-IN")} PTS
                         </span>
                       </div>
                     </div>

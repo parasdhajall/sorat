@@ -1177,7 +1177,7 @@ export default function AgentPage() {
           </div>
         </div>
 
-        {/* Counter Balance Status Card */}
+        {/* Counter Balance & 10% Commission Status Card */}
         <div className="flex items-center justify-between rounded-xl bg-background/80 border border-border/80 px-3 py-2 shadow-inner">
           <div>
             <span className="text-[9px] uppercase font-bold text-muted-foreground block">
@@ -1185,6 +1185,16 @@ export default function AgentPage() {
             </span>
             <div className="text-xl font-display font-black text-primary leading-none mt-0.5 flex items-center gap-1">
               <span>🪙</span> {agentBalance.toLocaleString("en-IN")} PTS
+            </div>
+          </div>
+
+          {/* Live 10% Agent Commission Badge (Always visible on Agent POS screen) */}
+          <div className="text-center px-2.5 py-1 rounded-xl bg-amber-500/15 border border-amber-500/35 shadow-xs">
+            <span className="text-[8px] uppercase font-black text-amber-400 block tracking-wider">
+              10% Comm. (नफा)
+            </span>
+            <div className="text-sm font-display font-black text-amber-300 leading-none mt-0.5">
+              +{shiftCommission10.toLocaleString("en-IN")} PTS
             </div>
           </div>
 
