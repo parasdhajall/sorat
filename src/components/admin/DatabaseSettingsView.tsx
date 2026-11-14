@@ -5,7 +5,12 @@ import {
   testSupabaseConnection,
   SUPABASE_SQL_SCHEMA,
 } from "@/lib/supabase";
-import { pushAllToSupabase, syncFromSupabase } from "@/lib/userStore";
+import {
+  pushAllToSupabase,
+  syncFromSupabase,
+  purgeAllSupabaseData,
+  resetAllPlatformData,
+} from "@/lib/userStore";
 
 interface DatabaseSettingsViewProps {
   onSyncComplete?: () => void;
@@ -25,6 +30,29 @@ export function DatabaseSettingsView({ onSyncComplete }: DatabaseSettingsViewPro
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [copiedSchema, setCopiedSchema] = useState(false);
+
+  const [purging, setPurging] = useState(false);
+  const [purgeMsg, setPurgeMsg] = useState<string | null>(null);
+
+  const handleFactoryReset = async () => {
+    const ok = window.confirm(
+      "⚠️ DHYAN DEIN (FACTORY RESET):\n\nKya aap sabhi test bets, rounds, tickets aur user accounts ko permanently delete karna chahte hain?\n\nIske baad platform bilkul FRESH clean slate ho jayega aur aap REAL AGENTS add kar sakenge.\n\nProceed?"
+    );
+    if (!ok) return;
+
+    setPurging(true);
+    setPurgeMsg(null);
+    try {
+      const res = await purgeAllSupabaseData();
+      resetAllPlatformData();
+      setPurgeMsg(res.message);
+      onSyncComplete?.();
+    } catch (e: any) {
+      setPurgeMsg(`Error: ${e?.message || "Purge failed"}`);
+    } finally {
+      setPurging(false);
+    }
+  };
 
   useEffect(() => {
     if (config.isConfigured) {
@@ -322,6 +350,42 @@ export function DatabaseSettingsView({ onSyncComplete }: DatabaseSettingsViewPro
         <pre className="p-3 rounded-xl bg-background border border-border/60 text-[11px] font-mono text-muted-foreground overflow-x-auto max-h-64 leading-relaxed select-all">
           {SUPABASE_SQL_SCHEMA}
         </pre>
+      </div>
+
+      {/* Danger Zone: Factory Reset for Real Agents */}
+      <div className="rounded-2xl border-2 border-destructive/40 bg-destructive/5 p-4 space-y-3 shadow-sm">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-destructive/20 pb-2.5">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl">🔴</span>
+            <div>
+              <h4 className="font-display text-sm font-black text-destructive">
+                Danger Zone: Factory Reset & Purge All Test Data
+              </h4>
+              <span className="text-[11px] text-muted-foreground block">
+                Permanently wipes all test bets, rounds, deposit histories, and accounts from Supabase and local storage.
+              </span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleFactoryReset}
+            disabled={purging}
+            className="py-2 px-4 rounded-xl bg-destructive text-destructive-foreground font-display text-xs font-black shadow-md hover:opacity-90 transition active:scale-95 disabled:opacity-50 shrink-0"
+          >
+            {purging ? "Purging All Data..." : "🔴 PURGE ALL DATA & START FRESH"}
+          </button>
+        </div>
+
+        {purgeMsg && (
+          <div className="rounded-xl bg-destructive/15 border border-destructive/30 p-2.5 text-xs font-bold text-destructive">
+            {purgeMsg}
+          </div>
+        )}
+
+        <p className="text-[11px] text-muted-foreground">
+          ⚠️ Use this before handing over the app to real agents so all turnover, payouts, tickets, and user accounts start from a 100% clean slate (0 bets, 0 rounds, 0 test accounts).
+        </p>
       </div>
     </div>
   );

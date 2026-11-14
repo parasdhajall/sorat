@@ -15,6 +15,8 @@ import {
   getActiveUserId,
   broadcastUsersToCloud,
   autoSettleAllPendingBets,
+  resetAllPlatformData,
+  purgeAllSupabaseData,
 } from "@/lib/userStore";
 import { getSynchronizedRoundState, sanitizeRoomId } from "@/lib/realtime";
 import { CARDS, getCardByIndex } from "@/lib/cards";
@@ -65,6 +67,28 @@ export function UserAccountsView({
   const showNotification = (msg: string) => {
     setActionSuccessMsg(msg);
     setTimeout(() => setActionSuccessMsg(null), 3500);
+  };
+
+  const [isResetting, setIsResetting] = useState(false);
+
+  const handleFactoryReset = async () => {
+    const confirmed = window.confirm(
+      "⚠️ DHYAN DEIN (FACTORY RESET):\n\nKya aap sabhi test bets, rounds, tickets aur user accounts ko permanently delete karna chahte hain?\n\nIske baad platform bilkul FRESH clean slate ho jayega aur aap REAL AGENTS add kar sakenge.\n\nProceed?"
+    );
+    if (!confirmed) return;
+
+    setIsResetting(true);
+    try {
+      await purgeAllSupabaseData();
+      resetAllPlatformData();
+      onUsersChange();
+      setSelectedUserId(null);
+      showNotification("✅ Platform 100% reset: Ready for real agents!");
+    } catch (e: any) {
+      alert(e?.message || "Failed to reset");
+    } finally {
+      setIsResetting(false);
+    }
   };
 
   const handleManualCloudSync = () => {
@@ -469,6 +493,17 @@ export function UserAccountsView({
         <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
+            onClick={handleFactoryReset}
+            disabled={isResetting}
+            className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border border-destructive/40 bg-destructive/15 text-destructive font-display text-xs font-bold hover:bg-destructive/25 transition active:scale-95 disabled:opacity-50"
+            title="Factory Reset: Purge all test data from Supabase & local storage"
+          >
+            <span>🔴</span>
+            <span>{isResetting ? "Resetting..." : "Factory Reset / Clean Slate"}</span>
+          </button>
+
+          <button
+            type="button"
             onClick={handleManualCloudSync}
             className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border border-emerald-500/40 bg-emerald-500/15 text-emerald-400 font-display text-xs font-bold hover:bg-emerald-500/25 transition active:scale-95"
             title="Force push accounts to all phone POS terminals"
@@ -502,7 +537,26 @@ export function UserAccountsView({
           </div>
 
           <div className="space-y-2 max-h-[720px] overflow-y-auto pr-1">
-            {filteredUsers.length === 0 ? (
+            {users.length === 0 ? (
+              <div className="rounded-2xl border-2 border-dashed border-primary/30 bg-primary/5 p-6 text-center space-y-3">
+                <div className="text-3xl">👥</div>
+                <div className="space-y-1">
+                  <h4 className="font-display text-sm font-black text-foreground">
+                    Clean Slate: No Agent Accounts Yet
+                  </h4>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    All test data has been cleared. Click below to register your first real counter / agent.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsAddUserOpen(true)}
+                  className="inline-flex items-center gap-1.5 py-2 px-3.5 rounded-xl bg-primary text-primary-foreground font-display text-xs font-black shadow-gold hover:opacity-90 transition active:scale-95"
+                >
+                  <span>➕ ADD FIRST AGENT</span>
+                </button>
+              </div>
+            ) : filteredUsers.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border p-6 text-center text-muted-foreground text-xs">
                 No users found matching "{searchQuery}"
               </div>
@@ -1369,8 +1423,16 @@ export function UserAccountsView({
             </div>
           </div>
         ) : (
-          <div className="lg:col-span-8 rounded-2xl border border-dashed border-border p-12 text-center text-muted-foreground">
-            Please select a user account to manage details.
+          <div className="lg:col-span-8 rounded-2xl border border-dashed border-border p-12 text-center text-muted-foreground space-y-2">
+            <div className="text-3xl">👥</div>
+            <div className="text-sm font-bold text-foreground">
+              {users.length === 0 ? "Production Clean Slate" : "Select an Account"}
+            </div>
+            <div className="text-xs text-muted-foreground max-w-sm mx-auto">
+              {users.length === 0
+                ? "No agent accounts are registered yet. Click \"+ ADD NEW USER ACCOUNT\" above to onboard your first counter agent."
+                : "Please select a user account from the left directory to view full dossier, manage deposits, and view bet history."}
+            </div>
           </div>
         )}
       </div>

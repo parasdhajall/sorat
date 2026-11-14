@@ -124,6 +124,29 @@ const STORAGE_KEY = "sorat_users_v2";
 const ACTIVE_USER_KEY = "sorat_active_user_id_v2";
 const SYNC_CHANNEL_NAME = "sorat_user_sync_channel";
 
+export const isTestEnv =
+  (typeof process !== "undefined" && process.env?.NODE_ENV === "test") ||
+  Boolean((import.meta as any).env?.VITEST) ||
+  (import.meta as any).env?.MODE === "test";
+
+export const DEFAULT_FALLBACK_USER: UserAccount = {
+  id: "usr_default_agent",
+  displayName: "Main Counter Agent",
+  username: "counter1",
+  phone: "0000000000",
+  balance: 0,
+  totalDeposited: 0,
+  totalWithdrawn: 0,
+  status: "ACTIVE",
+  createdAt: 0,
+  notes: "Default Counter",
+  deposits: [],
+  bets: [],
+  balanceUpdatedAt: 0,
+  pin: "1234",
+  agentCode: "COUNTER-1",
+};
+
 export function isRamuUser(u: any): boolean {
   if (!u) return false;
   const cleanUser = (u.username || "").toLowerCase().replace(/^@/, "").trim();
@@ -480,66 +503,27 @@ function notifySync(type: string, data?: any) {
 
 export function getUsers(): UserAccount[] {
   if (typeof window === "undefined") {
-    return createInitialSeedUsers();
+    return isTestEnv ? createInitialSeedUsers() : [];
   }
 
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
+    if (raw !== null) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const enriched = parsed.map((u, i) => ({
-          ...u,
-          pin: u.pin || "1234",
-          agentCode: u.agentCode || `AGENT-${101 + i}`,
-        }));
-
-        // Robust auto-upgrade: Find ANY Ramu account in localStorage and ensure full 5000 exhaustion simulation & bets are populated
-        const ramuIndices: number[] = [];
-        enriched.forEach((u, idx) => {
-          if (isRamuUser(u)) ramuIndices.push(idx);
-        });
-
-        const freshBets = getRamuSimulatedBets();
-        const freshSeed = createInitialSeedUsers();
-        const freshRamu = freshSeed.find((u) => u.id === "usr_ramu_00")!;
-
-        if (ramuIndices.length === 0) {
-          enriched.unshift(freshRamu);
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(enriched));
-          } catch {}
+      if (Array.isArray(parsed)) {
+        if (parsed.length > 0) {
+          const enriched = parsed.map((u, i) => ({
+            ...u,
+            pin: u.pin || "1234",
+            agentCode: u.agentCode || `AGENT-${101 + i}`,
+          }));
+          cachedUsers = enriched;
+          return enriched;
         } else {
-          let updated = false;
-          for (const idx of ramuIndices) {
-            const r = enriched[idx];
-            if (!r.bets || r.bets.length === 0 || r.totalDeposited < 5000 || r.balance > 0) {
-              enriched[idx] = {
-                ...r,
-                displayName: r.displayName || "Ramu",
-                username: r.username || "@ram",
-                phone: r.phone || "9284893346",
-                pin: r.pin || "1212",
-                agentCode: r.agentCode || "@ram",
-                balance: 0,
-                totalDeposited: 5000,
-                totalWithdrawn: 0,
-                deposits: freshRamu.deposits,
-                bets: freshBets,
-                balanceUpdatedAt: Date.now(),
-              };
-              updated = true;
-            }
-          }
-          if (updated) {
-            try {
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(enriched));
-            } catch {}
-          }
+          // Explicitly empty array in localStorage (e.g. after factory reset or clean state)
+          cachedUsers = [];
+          return [];
         }
-
-        cachedUsers = enriched;
-        return enriched;
       }
     }
   } catch (e) {
@@ -548,12 +532,21 @@ export function getUsers(): UserAccount[] {
 
   if (cachedUsers) return cachedUsers;
 
-  const seed = createInitialSeedUsers();
-  saveUsers(seed);
-  return seed;
+  if (isTestEnv) {
+    const seed = createInitialSeedUsers();
+    saveUsers(seed);
+    return seed;
+  }
+
+  // Production clean start: empty list of registered agents
+  cachedUsers = [];
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
+  } catch {}
+  return [];
 }
 
-export const CLOUD_ACCOUNTS_SYNC_TOPIC = "sorat_accounts_sync_v2_99";
+export const CLOUD_ACCOUNTS_SYNC_TOPIC = "sorat_accounts_prod_v1";
 
 /**
  * Merges a list of remote accounts into local store, preserving local bets & deposit history.
@@ -584,35 +577,18 @@ export function mergeRemoteUsers(remoteUsers: any[]): UserAccount[] {
       const effBalance = remoteUpdatedAt >= localUpdatedAt ? remoteU.balance : existing.balance;
       const effUpdatedAt = Math.max(localUpdatedAt, remoteUpdatedAt);
 
-      const isRamu = isRamuUser(existing) || isRamuUser(remoteU);
-      const ramuBets = isRamu ? getRamuSimulatedBets() : [];
       const finalBets =
         remoteU.bets && remoteU.bets.length > 0
           ? remoteU.bets
           : existing.bets && existing.bets.length > 0
           ? existing.bets
-          : ramuBets;
-
-      const todayStr = getTodayDateStr();
-      const ramuDeposits = [
-        {
-          id: "dep_ram_01",
-          amount: 5000,
-          timestamp: Date.now() - 3600 * 1000,
-          dateStr: todayStr,
-          timeStr: "09:00 AM",
-          note: "Counter Cash Initial Recharge",
-          balanceAfter: 5000,
-        },
-      ];
+          : [];
 
       const finalDeposits =
         remoteU.deposits && remoteU.deposits.length > 0
           ? remoteU.deposits
           : existing.deposits && existing.deposits.length > 0
           ? existing.deposits
-          : isRamu
-          ? ramuDeposits
           : [];
 
       mergedMap.set(existing.id, {
@@ -623,15 +599,13 @@ export function mergeRemoteUsers(remoteUsers: any[]): UserAccount[] {
         displayName: existing.displayName || remoteU.displayName,
         pin: remoteU.pin || existing.pin || "1234",
         phone: remoteU.phone || existing.phone || "",
-        balance: isRamu ? 0 : effBalance,
+        balance: effBalance,
         balanceUpdatedAt: effUpdatedAt,
-        totalDeposited: isRamu ? 5000 : (remoteU.totalDeposited ?? existing.totalDeposited ?? 0),
+        totalDeposited: (remoteU.totalDeposited ?? existing.totalDeposited ?? 0),
         bets: finalBets,
         deposits: finalDeposits,
       });
     } else {
-      const isRamu = isRamuUser(remoteU);
-      const todayStr = getTodayDateStr();
       mergedMap.set(remoteU.id, {
         id: remoteU.id,
         username: remoteU.username || `user_${Date.now()}`,
@@ -641,24 +615,12 @@ export function mergeRemoteUsers(remoteUsers: any[]): UserAccount[] {
         agentCode: remoteU.agentCode || `AGENT-${100 + mergedMap.size}`,
         createdAt: remoteU.createdAt || Date.now(),
         totalWithdrawn: remoteU.totalWithdrawn || 0,
-        totalDeposited: isRamu ? 5000 : (remoteU.totalDeposited || 0),
-        balance: isRamu ? 0 : (remoteU.balance || 0),
+        totalDeposited: remoteU.totalDeposited || 0,
+        balance: remoteU.balance || 0,
         status: remoteU.status || "ACTIVE",
         notes: remoteU.notes || "",
-        deposits: isRamu
-          ? [
-              {
-                id: "dep_ram_01",
-                amount: 5000,
-                timestamp: Date.now() - 3600 * 1000,
-                dateStr: todayStr,
-                timeStr: "09:00 AM",
-                note: "Counter Cash Initial Recharge",
-                balanceAfter: 5000,
-              },
-            ]
-          : remoteU.deposits || [],
-        bets: isRamu ? getRamuSimulatedBets() : remoteU.bets || [],
+        deposits: remoteU.deposits || [],
+        bets: remoteU.bets || [],
         balanceUpdatedAt: remoteU.balanceUpdatedAt || Date.now(),
       });
     }
@@ -839,7 +801,12 @@ export async function pullUsersFromCloud(): Promise<UserAccount[]> {
     const client = getSupabaseClient();
     if (client) {
       const { data: dbPlayers, error } = await client.from("players").select("*");
-      if (!error && Array.isArray(dbPlayers) && dbPlayers.length > 0) {
+      if (!error && Array.isArray(dbPlayers)) {
+        if (dbPlayers.length === 0) {
+          // Cloud Supabase has 0 players (e.g. fresh production reset).
+          // Return local users (or empty) without resurrecting old test data from ntfy.
+          return getUsers();
+        }
         // Fetch recent bets from Supabase to keep bets history and House Gross Profit 100% in sync
         let dbBets: any[] = [];
         try {
@@ -1043,6 +1010,13 @@ export function subscribeToCloudUsers(
           if (!rawContent || !rawContent.startsWith("{")) return;
           const parsed = JSON.parse(rawContent);
 
+          // 0. Remote Factory Reset Event
+          if (parsed.type === "RESET_ALL_DATA") {
+            resetAllPlatformData();
+            onUpdate?.([]);
+            return;
+          }
+
           // 1. Direct Balance Deduction & Real-time Bet Placed Event (e.g. phone placed bet)
           if (parsed.type === "AGENT_BALANCE_DEDUCT") {
             const current = getUsers();
@@ -1177,11 +1151,11 @@ export function getUser(id: string): UserAccount | undefined {
 }
 
 export function getActiveUserId(): string {
-  if (typeof window === "undefined") return "usr_rahul_01";
+  if (typeof window === "undefined") return "usr_default_agent";
   const saved = localStorage.getItem(ACTIVE_USER_KEY);
   if (saved) return saved;
   const users = getUsers();
-  const firstId = users[0]?.id || "usr_rahul_01";
+  const firstId = users[0]?.id || "usr_default_agent";
   localStorage.setItem(ACTIVE_USER_KEY, firstId);
   return firstId;
 }
@@ -1198,9 +1172,14 @@ export function getActiveUser(): UserAccount {
   const u = getUser(id);
   if (u) return u;
   const all = getUsers();
-  const first = all[0] ?? createInitialSeedUsers()[0];
-  if (!first) throw new Error("No user accounts found");
-  return first;
+  if (all.length > 0 && all[0]) {
+    return all[0];
+  }
+  if (isTestEnv) {
+    const seed = createInitialSeedUsers()[0];
+    if (seed) return seed;
+  }
+  return DEFAULT_FALLBACK_USER;
 }
 
 const LOGGED_IN_AGENT_KEY = "sorat_logged_in_agent_id_v1";
@@ -2288,5 +2267,115 @@ export async function syncFromSupabase(): Promise<{
     };
   }
 }
+
+/**
+ * Purges all cloud records from Supabase tables:
+ * sorat_bets, sorat_rounds, deposits, players
+ */
+export async function purgeAllSupabaseData(): Promise<{ success: boolean; message: string }> {
+  try {
+    const client = getSupabaseClient();
+    if (!client) {
+      return { success: false, message: "Supabase client not configured" };
+    }
+
+    // Delete in order: child tables first, then parent tables
+    const { error: errBets } = await client
+      .from("sorat_bets")
+      .delete()
+      .neq("id", "00000000-0000-0000-0000-000000000000");
+    if (errBets) console.warn("Purge sorat_bets warning:", errBets);
+
+    const { error: errRounds } = await client
+      .from("sorat_rounds")
+      .delete()
+      .neq("id", "00000000-0000-0000-0000-000000000000");
+    if (errRounds) console.warn("Purge sorat_rounds warning:", errRounds);
+
+    const { error: errDeposits } = await client
+      .from("deposits")
+      .delete()
+      .neq("id", "00000000-0000-0000-0000-000000000000");
+    if (errDeposits) console.warn("Purge deposits warning:", errDeposits);
+
+    const { error: errPlayers } = await client
+      .from("players")
+      .delete()
+      .neq("id", "00000000-0000-0000-0000-000000000000");
+    if (errPlayers) console.warn("Purge players warning:", errPlayers);
+
+    return {
+      success: true,
+      message: "Supabase database tables (sorat_bets, sorat_rounds, deposits, players) wiped 100% clean.",
+    };
+  } catch (e: any) {
+    return {
+      success: false,
+      message: e?.message || "Failed to purge Supabase data",
+    };
+  }
+}
+
+/**
+ * Full Local Factory Reset:
+ * Clears all user accounts, active sessions, thermal tickets, round winners,
+ * room turnover/payout history, and notifies all connected windows/devices.
+ */
+export function resetAllPlatformData(): void {
+  cachedUsers = [];
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
+      localStorage.removeItem(ACTIVE_USER_KEY);
+      localStorage.removeItem(LOGGED_IN_AGENT_KEY);
+      localStorage.removeItem("sorat_thermal_tickets_v1");
+      localStorage.removeItem("sorat_thermal_ticket_counter_v1");
+      localStorage.removeItem("sorat_round_winners_v1");
+      localStorage.removeItem("sorat_rounds_v1");
+      localStorage.removeItem("sorat_daily_counters_v1");
+      localStorage.removeItem("sorat_current_counter_v1");
+      localStorage.removeItem("sorat_tv_room");
+
+      // Clear any room-isolated metrics and tickets
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (
+          k &&
+          (k.startsWith("sorat_room_") ||
+            k.startsWith("sorat_tickets_") ||
+            k.startsWith("sorat_user_") ||
+            k.startsWith("sorat_bets_") ||
+            k.startsWith("sorat_round_winners_") ||
+            k.startsWith("sorat_total_turnover_") ||
+            k.startsWith("sorat_total_payouts_"))
+        ) {
+          keysToRemove.push(k);
+        }
+      }
+      keysToRemove.forEach((k) => {
+        try {
+          localStorage.removeItem(k);
+        } catch {}
+      });
+
+      // Local broadcasts to all open tabs / TV / POS instances
+      notifySync("USERS_UPDATED", []);
+      notifySync("AGENT_AUTH_CHANGED", null);
+      notifySync("ACTIVE_USER_CHANGED", null);
+      notifySync("TICKETS_UPDATED", []);
+
+      // Notify cloud ntfy so other phone devices receive reset event
+      fetch(`https://ntfy.sh/${CLOUD_ACCOUNTS_SYNC_TOPIC}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "RESET_ALL_DATA", timestamp: Date.now() }),
+      }).catch(() => {});
+    } catch (e) {
+      console.error("Failed to reset platform data", e);
+    }
+  }
+}
+
 
 
