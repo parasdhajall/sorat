@@ -876,7 +876,8 @@ export default function AgentPage() {
   }, [shiftPeriod, todayStr, yesterdayStr, customDate, allTicketsCombined, agentUser, ticketsList, cloudDailySummary]);
 
   const shiftGrossProfit = shiftSales - shiftPayouts;
-  const shiftCommission10 = shiftGrossProfit > 0 ? Math.round(shiftGrossProfit * 0.10) : 0;
+  // 10% Agent Commission calculated directly on Turnover (Total Sales)
+  const shiftCommission10 = shiftSales > 0 ? Math.round(shiftSales * 0.10) : 0;
   const shiftCashSurplus = Math.max(0, shiftGrossProfit);
   const shiftNetCashToCollect = shiftSales - shiftPayouts - shiftCommission10;
 
@@ -900,7 +901,7 @@ export default function AgentPage() {
       items: [
         { cardIndex: 0, cardName: "1. TOTAL SALES (विक्री)", amount: shiftSales },
         { cardIndex: 1, cardName: "2. CLAIMS PAID (वाटप)", amount: -shiftPayouts },
-        { cardIndex: 2, cardName: "3. 10% COMM (PROFIT)", amount: -shiftCommission10 },
+        { cardIndex: 2, cardName: "3. 10% COMM (TURNOVER)", amount: -shiftCommission10 },
         { cardIndex: 3, cardName: "4. NET CASH TO COLLECT", amount: shiftNetCashToCollect },
       ],
       totalAmount: shiftSales,
@@ -953,7 +954,7 @@ export default function AgentPage() {
   }, [historyBets]);
 
   const historyGrossProfit = historyBetsTotalStake - historyBetsTotalWon;
-  const historyCommission10 = historyGrossProfit > 0 ? Math.round(historyGrossProfit * 0.10) : 0;
+  const historyCommission10 = historyBetsTotalStake > 0 ? Math.round(historyBetsTotalStake * 0.10) : 0;
 
   // =========================================================================
   // IF NOT LOGGED IN: DISPLAY AGENT ID & PIN LOGIN SCREEN
@@ -1191,7 +1192,7 @@ export default function AgentPage() {
           {/* Live 10% Agent Commission Badge (Always visible on Agent POS screen) */}
           <div className="text-center px-2.5 py-1 rounded-xl bg-amber-500/15 border border-amber-500/35 shadow-xs">
             <span className="text-[8px] uppercase font-black text-amber-400 block tracking-wider">
-              10% Comm. (नफा)
+              10% Comm. (विक्री)
             </span>
             <div className="text-sm font-display font-black text-amber-300 leading-none mt-0.5">
               +{shiftCommission10.toLocaleString("en-IN")} PTS
@@ -2238,7 +2239,7 @@ export default function AgentPage() {
                 <div className="flex justify-between py-2 bg-primary/10 px-2 rounded-xl border border-primary/30">
                   <div>
                     <span className="font-sans font-bold text-primary block">Your 10% Commission (१०% कमिशन):</span>
-                    <span className="text-[9px] text-muted-foreground block font-sans font-medium">10% on Gross Profit (नफ्यावर १०%)</span>
+                    <span className="text-[9px] text-muted-foreground block font-sans font-medium">10% on Turnover (विक्रीवर १०%)</span>
                   </div>
                   <span className="font-display font-black text-sm text-primary">
                     +{shiftCommission10.toLocaleString("en-IN")} PTS

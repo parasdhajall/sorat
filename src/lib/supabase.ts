@@ -1035,7 +1035,8 @@ export async function fetchAgentDailyTicketsAndBets(
 
     const totalWonPayouts = totalClaimsPaid + totalUnclaimedWon;
     const grossProfit = totalSales - totalWonPayouts;
-    const commission10 = grossProfit > 0 ? Math.round(grossProfit * 0.10) : 0;
+    // 10% Agent Commission calculated directly on Total Sales (Turnover)
+    const commission10 = totalSales > 0 ? Math.round(totalSales * 0.10) : 0;
     const netCashToCollect = totalSales - totalWonPayouts - commission10;
 
     return {

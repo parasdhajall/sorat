@@ -125,7 +125,7 @@ describe("Independent Counter Rooms & Realtime Isolation Tests", () => {
     const nandanStaked = 850;
     const nandanPayout = 0; // because a zero-bet card won
     const nandanNetProfit = nandanStaked - nandanPayout;
-    const nandanCommission10 = Math.round(nandanNetProfit * 0.10);
+    const nandanCommission10 = Math.round(nandanStaked * 0.10);
 
     // Guaranteed >= 35% margin (here 100% profit!)
     expect(nandanNetProfit).toBeGreaterThanOrEqual(850 * 0.35);

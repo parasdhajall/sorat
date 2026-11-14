@@ -130,10 +130,10 @@ describe("Live Multi-Agent Automated Round & 10% Commission Verification (Room I
 
     // 4. AGENT COMMISSION & OWNER SETTLEMENT SHEET
     console.log("\n================================================================================");
-    console.log("       ROOM ISOLATED SETTLEMENT: AGENT COMMISSION (10%) & OWNER SHARE (90%)     ");
+    console.log("    ROOM ISOLATED SETTLEMENT: AGENT COMMISSION (10% ON TURNOVER) & OWNER SHARE  ");
     console.log("================================================================================\n");
 
-    console.log("Agent Name            Staked (PTS)  Won (PTS)   Net Profit   10% Agent Comm   Owner Share (90%)");
+    console.log("Agent Name            Staked (PTS)  Won (PTS)   Net Profit   10% Agent Comm   Owner Share     ");
     console.log("------------------------------------------------------------------------------------------------");
 
     let totalStaked = 0;
@@ -143,7 +143,7 @@ describe("Live Multi-Agent Automated Round & 10% Commission Verification (Room I
 
     agents.forEach(a => {
       const netProfit = a.staked - a.won;
-      const comm10 = Math.round(netProfit * 0.10);
+      const comm10 = Math.round(a.staked * 0.10);
       const ownerShare = netProfit - comm10;
 
       totalStaked += a.staked;

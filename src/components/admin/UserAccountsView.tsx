@@ -360,7 +360,8 @@ export function UserAccountsView({
       : betsPayoutsToday;
 
   const liveGrossProfit = liveSalesToday - liveClaimsToday;
-  const liveCommission10 = liveGrossProfit > 0 ? Math.round(liveGrossProfit * 0.10) : 0;
+  // 10% Agent Commission calculated directly on Turnover (Total Sales)
+  const liveCommission10 = liveSalesToday > 0 ? Math.round(liveSalesToday * 0.10) : 0;
   const liveNetCashToCollect = liveSalesToday - liveClaimsToday - liveCommission10;
 
   const handlePrintDailyHisabSlip = () => {
@@ -380,7 +381,7 @@ export function UserAccountsView({
       items: [
         { cardIndex: 0, cardName: "Total Sales (विक्री)", amount: liveSalesToday },
         { cardIndex: 1, cardName: "Claims Paid (दावे वाटप)", amount: liveClaimsToday },
-        { cardIndex: 2, cardName: "10% Comm (नफ्यावर १०%)", amount: liveCommission10 },
+        { cardIndex: 2, cardName: "10% Comm (विक्रीवर १०%)", amount: liveCommission10 },
         { cardIndex: 3, cardName: "Net Cash (जमा रोकड)", amount: liveNetCashToCollect },
       ],
       totalAmount: liveSalesToday,
@@ -392,7 +393,7 @@ export function UserAccountsView({
       executeDirectPrint(hisabTicket, "58mm");
       showNotification(`Daily Hisab Slip sent to 58mm printer for ${selectedUser.displayName}!`);
     } else {
-      const hisabText = `=== SORAT DAILY HISAB SLIP ===\nDate: ${todayStr}\nAgent: ${selectedUser.displayName} (@${selectedUser.username})\n-------------------------------\nTotal Sales (विक्री): ${liveSalesToday} PTS\nClaims Paid (दावे): ${liveClaimsToday} PTS\nGross Profit (नफा): ${liveGrossProfit} PTS\n10% Commission (नफ्यावर): ${liveCommission10} PTS\n-------------------------------\nNET CASH TO COLLECT: ${liveNetCashToCollect} PTS\n===============================\n(Connect Bluetooth thermal printer in POS App to print)`;
+      const hisabText = `=== SORAT DAILY HISAB SLIP ===\nDate: ${todayStr}\nAgent: ${selectedUser.displayName} (@${selectedUser.username})\n-------------------------------\nTotal Sales (विक्री): ${liveSalesToday} PTS\nClaims Paid (दावे): ${liveClaimsToday} PTS\nGross Profit (नफा): ${liveGrossProfit} PTS\n10% Commission (विक्रीवर): ${liveCommission10} PTS\n-------------------------------\nNET CASH TO COLLECT: ${liveNetCashToCollect} PTS\n===============================\n(Connect Bluetooth thermal printer in POS App to print)`;
       alert(hisabText);
     }
   };
@@ -634,9 +635,9 @@ export function UserAccountsView({
 
                         <span
                           className="font-mono font-black px-1.5 py-0.5 rounded text-[9px] bg-amber-500/15 text-amber-300 border border-amber-500/35"
-                          title="10% Agent Commission on Net Profit"
+                          title="10% Agent Commission on Turnover"
                         >
-                          Comm: +{Math.max(0, Math.round(((stats.totalBetAmount - stats.totalWonAmount) > 0 ? (stats.totalBetAmount - stats.totalWonAmount) * 0.10 : 0))).toLocaleString("en-IN")} PTS
+                          Comm: +{Math.round((stats.totalBetAmount || 0) * 0.10).toLocaleString("en-IN")} PTS
                         </span>
                       </div>
                     </div>
@@ -867,7 +868,7 @@ export function UserAccountsView({
                   <button
                     type="button"
                     onClick={() => {
-                      const hisabMsg = `📊 *SORAT DAILY CASH SETTLEMENT* 📊\n\n📅 *Date:* ${todayStr}\n👤 *Agent:* ${selectedUser.displayName} (@${selectedUser.username})\n\n💰 *Total Bikri (विक्री):* ${liveSalesToday.toLocaleString("en-IN")} PTS\n🏆 *Claims Paid (दावे वाटप):* ${liveClaimsToday.toLocaleString("en-IN")} PTS\n📈 *Gross Profit (नफा):* ${liveGrossProfit.toLocaleString("en-IN")} PTS\n🪙 *10% Commission (नफ्यावर १०%):* ${liveCommission10.toLocaleString("en-IN")} PTS\n\n━━━━━━━━━━━━━━━━━━━━\n💵 *NET CASH TO COLLECT (जमा रोकड):* ${liveNetCashToCollect.toLocaleString("en-IN")} PTS\n━━━━━━━━━━━━━━━━━━━━\n\n_Sorat Physical Counter Network System_`;
+                      const hisabMsg = `📊 *SORAT DAILY CASH SETTLEMENT* 📊\n\n📅 *Date:* ${todayStr}\n👤 *Agent:* ${selectedUser.displayName} (@${selectedUser.username})\n\n💰 *Total Bikri (विक्री):* ${liveSalesToday.toLocaleString("en-IN")} PTS\n🏆 *Claims Paid (दावे वाटप):* ${liveClaimsToday.toLocaleString("en-IN")} PTS\n📈 *Gross Profit (नफा):* ${liveGrossProfit.toLocaleString("en-IN")} PTS\n🪙 *10% Commission (विक्रीवर १०%):* ${liveCommission10.toLocaleString("en-IN")} PTS\n\n━━━━━━━━━━━━━━━━━━━━\n💵 *NET CASH TO COLLECT (जमा रोकड):* ${liveNetCashToCollect.toLocaleString("en-IN")} PTS\n━━━━━━━━━━━━━━━━━━━━\n\n_Sorat Physical Counter Network System_`;
                       navigator.clipboard.writeText(hisabMsg);
                       showNotification("Daily Hisab copied to clipboard!");
                       window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(hisabMsg)}`, "_blank");
@@ -905,7 +906,7 @@ export function UserAccountsView({
                   <div className="text-base font-display font-black text-amber-400 mt-0.5">
                     -{liveCommission10.toLocaleString("en-IN")} PTS
                   </div>
-                  <span className="text-[9px] text-muted-foreground block">10% on Net Profit</span>
+                  <span className="text-[9px] text-muted-foreground block">10% on Turnover</span>
                 </div>
 
                 <div className="rounded-xl bg-emerald-500/25 border border-emerald-500/50 p-2.5 shadow-sm">
