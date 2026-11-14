@@ -101,12 +101,12 @@ export function ThermalSlipModal({
             <div className="border-t border-b border-dashed border-zinc-400 py-1.5 my-1.5 space-y-1">
               <div className="flex justify-between font-black text-[10px] text-zinc-700">
                 <span>PICTURE / CARD</span>
-                <span>BET (₹)</span>
+                <span>BET (PTS)</span>
               </div>
               {ticket.items.map((item, i) => (
                 <div key={i} className="flex justify-between font-bold text-[11px]">
                   <span>{i + 1}. {getCardDisplayName(item.cardName)}</span>
-                  <span>₹{item.amount}</span>
+                  <span>{item.amount} PTS</span>
                 </div>
               ))}
             </div>
@@ -115,7 +115,7 @@ export function ThermalSlipModal({
             <div className="space-y-1 text-[11px]">
               <div className="flex justify-between font-black text-xs">
                 <span>TOTAL STAKE:</span>
-                <span>₹{ticket.totalAmount}</span>
+                <span>{ticket.totalAmount} PTS</span>
               </div>
             </div>
 

@@ -229,9 +229,9 @@ export function LiveBetsRiskAudit({
       alert(`Thermal ticket #${tkt.ticketId} sent to Bluetooth printer!`);
     } else {
       alert(
-        `Ticket Details:\nSlip #${tkt.ticketId}\nCard: ${bet.cardName}\nStake: ₹${bet.stake}\nPayout: ₹${
+        `Ticket Details:\nSlip #${tkt.ticketId}\nCard: ${bet.cardName}\nStake: ${bet.stake} PTS\nPayout: ${
           bet.payout || 0
-        }\n\n(Bluetooth printer connect karne ke liye Agent POS app mein 'Printer' tab open karein)`
+        } PTS\n\n(Bluetooth printer connect karne ke liye Agent POS app mein 'Printer' tab open karein)`
       );
     }
   };
@@ -367,13 +367,13 @@ export function LiveBetsRiskAudit({
               </div>
               <div className="p-2 rounded-lg bg-muted/40 border border-border/50">
                 <span className="text-[9px] text-muted-foreground uppercase font-bold block">Staked (Turnover)</span>
-                <span className="font-black text-foreground text-sm block">₹{auditedTicket.totalAmount}</span>
+                <span className="font-black text-foreground text-sm block">{auditedTicket.totalAmount} PTS</span>
                 <span className="text-[10px] text-muted-foreground">{auditedTicket.items.length} Card(s)</span>
               </div>
               <div className="p-2 rounded-lg bg-muted/40 border border-border/50">
                 <span className="text-[9px] text-muted-foreground uppercase font-bold block">Winning Payout</span>
                 <span className={`font-black text-sm block ${auditedTicket.winningPayout ? "text-emerald-400" : "text-muted-foreground"}`}>
-                  ₹{auditedTicket.winningPayout || 0}
+                  {auditedTicket.winningPayout || 0} PTS
                 </span>
                 <span className="text-[10px] text-muted-foreground">
                   {auditedTicket.winningCardName ? `Winning: ${auditedTicket.winningCardName}` : "Pending"}
@@ -407,8 +407,8 @@ export function LiveBetsRiskAudit({
                       : "bg-muted/60 border-border text-foreground"
                   }`}
                 >
-                  {item.cardName}: ₹{item.amount}
-                  {auditedTicket.winningCardIndex === item.cardIndex ? " 🏆 (WON ₹" + (item.amount * 9) + ")" : ""}
+                  {item.cardName}: {item.amount} PTS
+                  {auditedTicket.winningCardIndex === item.cardIndex ? " 🏆 (WON " + (item.amount * 9) + " PTS)" : ""}
                 </span>
               ))}
             </div>
@@ -441,10 +441,10 @@ export function LiveBetsRiskAudit({
             🪙 Total Turnover Staked
           </span>
           <div className="text-2xl font-display font-black text-amber-400 mt-0.5">
-            ₹{stats.turnover.toLocaleString("en-IN")}
+            {stats.turnover.toLocaleString("en-IN")} PTS
           </div>
           <span className="text-[10px] text-muted-foreground block">
-            Lifetime wagers: ₹{totalTurnover.toLocaleString("en-IN")}
+            Lifetime wagers: {totalTurnover.toLocaleString("en-IN")} PTS
           </span>
         </div>
 
@@ -453,7 +453,7 @@ export function LiveBetsRiskAudit({
             🏆 Total Payouts Won
           </span>
           <div className="text-2xl font-display font-black text-purple-300 mt-0.5">
-            ₹{stats.payouts.toLocaleString("en-IN")}
+            {stats.payouts.toLocaleString("en-IN")} PTS
           </div>
           <span className="text-[10px] text-muted-foreground block">
             9X winnings paid to users (1 ka 9)
@@ -468,7 +468,7 @@ export function LiveBetsRiskAudit({
             {stats.margin}%
           </div>
           <span className="text-[10px] text-emerald-300/80 font-bold block">
-            Net Profit: ₹{stats.netProfit.toLocaleString("en-IN")}
+            Net Profit: {stats.netProfit.toLocaleString("en-IN")} PTS
           </span>
         </div>
       </div>
@@ -613,11 +613,11 @@ export function LiveBetsRiskAudit({
               <div className="mt-2 space-y-0.5 text-[10px] font-mono border-t border-border/40 pt-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Staked:</span>
-                  <span className="font-bold text-foreground">₹{item.totalStaked}</span>
+                  <span className="font-bold text-foreground">{item.totalStaked} PTS</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">9X Liability:</span>
-                  <span className="font-bold text-amber-400">₹{item.liability}</span>
+                  <span className="font-bold text-amber-400">{item.liability} PTS</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">House Profit:</span>
@@ -626,7 +626,7 @@ export function LiveBetsRiskAudit({
                       item.houseNetIfWins >= 0 ? "text-emerald-400" : "text-destructive"
                     }`}
                   >
-                    {item.houseNetIfWins >= 0 ? `+₹${item.houseNetIfWins}` : `-₹${Math.abs(item.houseNetIfWins)}`}
+                    {item.houseNetIfWins >= 0 ? `+${item.houseNetIfWins} PTS` : `-${Math.abs(item.houseNetIfWins)} PTS`}
                   </span>
                 </div>
               </div>
@@ -634,7 +634,7 @@ export function LiveBetsRiskAudit({
               <div className="mt-2 text-center">
                 {item.status === "ZERO_BET" && (
                   <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30 block">
-                    💎 100% PROFIT (₹0)
+                    💎 100% PROFIT (0 PTS)
                   </span>
                 )}
                 {item.status === "SAFE" && (
@@ -711,10 +711,10 @@ export function LiveBetsRiskAudit({
                       </span>
                     </td>
                     <td className="py-2 px-2.5 text-right font-black text-amber-400 whitespace-nowrap">
-                      ₹{b.stake}
+                      {b.stake} PTS
                     </td>
                     <td className="py-2 px-2.5 text-right font-black text-purple-300 whitespace-nowrap">
-                      ₹{b.payout || b.stake * PAYOUT_MULTIPLIER}
+                      {(b.payout || b.stake * PAYOUT_MULTIPLIER)} PTS
                     </td>
                     <td className="py-2 px-2.5 text-center whitespace-nowrap">
                       {b.isWin ? (

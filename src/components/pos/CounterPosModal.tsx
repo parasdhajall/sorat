@@ -64,7 +64,7 @@ export function CounterPosModal({
     }
 
     if (!isBalanceEnough) {
-      alert(`Insufficient balance! Needed: ₹${totalTicketStake}, Available: ₹${agentBalance}. Please recharge counter!`);
+      alert(`Insufficient balance! Needed: ${totalTicketStake} PTS, Available: ${agentBalance} PTS. Please recharge counter!`);
       return;
     }
 
@@ -102,7 +102,7 @@ export function CounterPosModal({
     const updated = claimTicket(ticketId);
     if (updated) {
       setTicketsList(getTickets());
-      alert(`Ticket #${ticketId} prize of ₹${updated.winningPayout} marked as PAID/CLAIMED!`);
+      alert(`Ticket #${ticketId} prize of ${updated.winningPayout} PTS marked as PAID/CLAIMED!`);
     }
   };
 
@@ -125,7 +125,7 @@ export function CounterPosModal({
                 </span>
               </div>
               <span className="text-[10px] text-muted-foreground block font-mono">
-                Counter Balance: <strong className="text-primary font-bold">₹{agentBalance.toLocaleString("en-IN")}</strong>
+                Counter Balance: <strong className="text-primary font-bold">{agentBalance.toLocaleString("en-IN")} PTS</strong>
               </span>
             </div>
           </div>
@@ -199,7 +199,7 @@ export function CounterPosModal({
                         : "bg-card border-border text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    ₹{chip}
+                    {chip}
                   </button>
                 ))}
               </div>
@@ -250,7 +250,7 @@ export function CounterPosModal({
                           : "text-muted-foreground"
                       }`}
                     >
-                      {staked > 0 ? `₹${staked}` : "+ Add"}
+                      {staked > 0 ? `${staked} PTS` : "+ Add"}
                     </span>
                   </div>
                 );
@@ -275,10 +275,10 @@ export function CounterPosModal({
                   )}
                 </div>
                 <div className="text-xl font-display font-black text-foreground">
-                  Total Bet: <span className="text-primary">₹{totalTicketStake}</span>
+                  Total Bet: <span className="text-primary">{totalTicketStake} PTS</span>
                 </div>
                 <span className="text-[10px] text-muted-foreground font-mono block">
-                  Remaining Balance: ₹{Math.max(0, agentBalance - totalTicketStake).toLocaleString("en-IN")}
+                  Remaining Balance: {Math.max(0, agentBalance - totalTicketStake).toLocaleString("en-IN")} PTS
                 </span>
               </div>
 
@@ -343,7 +343,7 @@ export function CounterPosModal({
                         }`}
                       >
                         {t.status === "WON"
-                          ? `🏆 WON ₹${t.winningPayout}`
+                          ? `🏆 WON ${t.winningPayout} PTS`
                           : t.status === "CLAIMED"
                           ? "✓ CLAIMED & PAID"
                           : t.status === "LOST"
@@ -363,11 +363,11 @@ export function CounterPosModal({
                           key={idx}
                           className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-lg bg-background border border-border text-foreground"
                         >
-                          {item.cardName}: ₹{item.amount}
+                          {item.cardName}: {item.amount} PTS
                         </span>
                       ))}
                       <span className="text-[10px] font-mono font-black text-primary">
-                        Total: ₹{t.totalAmount}
+                        Total: {t.totalAmount} PTS
                       </span>
                     </div>
                   </div>
@@ -379,7 +379,7 @@ export function CounterPosModal({
                         onClick={() => handleClaimPrize(t.ticketId)}
                         className="py-1.5 px-3 rounded-xl bg-emerald-500 text-black font-display text-xs font-black shadow-gold hover:opacity-90 transition active:scale-95"
                       >
-                        💵 Pay Out ₹{t.winningPayout}
+                        💵 Pay Out {t.winningPayout} PTS
                       </button>
                     )}
 

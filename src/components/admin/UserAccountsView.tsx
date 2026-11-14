@@ -143,7 +143,7 @@ export function UserAccountsView({
       if (selectedUser.id === activeTvUserId) {
         onActiveUserSync?.(selectedUser.id, updated.balance);
       }
-      showNotification(`₹${amount.toLocaleString("en-IN")} deposited to ${selectedUser.displayName}!`);
+      showNotification(`${amount.toLocaleString("en-IN")} PTS deposited to ${selectedUser.displayName}!`);
     } catch (e: any) {
       alert(e.message || "Deposit failed");
     }
@@ -166,7 +166,7 @@ export function UserAccountsView({
         onActiveUserSync?.(selectedUser.id, updated.balance);
       }
       setDepositAmount("");
-      showNotification(`₹${amt.toLocaleString("en-IN")} deposited successfully!`);
+      showNotification(`${amt.toLocaleString("en-IN")} PTS deposited successfully!`);
     } catch (e: any) {
       alert(e.message || "Deposit failed");
     }
@@ -191,7 +191,7 @@ export function UserAccountsView({
         onActiveUserSync?.(selectedUser.id, updated.balance);
       }
       setWithdrawAmount("");
-      showNotification(`₹${amt.toLocaleString("en-IN")} payout processed for ${selectedUser.displayName}`);
+      showNotification(`${amt.toLocaleString("en-IN")} PTS payout processed for ${selectedUser.displayName}`);
     } catch (e: any) {
       alert(e.message || "Withdrawal failed");
     }
@@ -212,7 +212,7 @@ export function UserAccountsView({
         onActiveUserSync?.(selectedUser.id, updated.balance);
       }
       setExactBalanceInput("");
-      showNotification(`Balance set to ₹${bal.toLocaleString("en-IN")}`);
+      showNotification(`Balance set to ${bal.toLocaleString("en-IN")} PTS`);
     } catch (e: any) {
       alert(e.message || "Failed to update balance");
     }
@@ -722,7 +722,7 @@ export function UserAccountsView({
                     <div>
                       <span className="text-muted-foreground text-[10px] uppercase font-bold block">Prepaid Wallet</span>
                       <span className="font-mono font-black text-foreground text-sm">
-                        ₹{selectedUser.balance.toLocaleString("en-IN")}
+                        {selectedUser.balance.toLocaleString("en-IN")} PTS
                       </span>
                     </div>
                     <div className="h-5 w-px bg-border hidden sm:block" />
@@ -766,7 +766,7 @@ export function UserAccountsView({
                 <button
                   type="button"
                   onClick={() => {
-                    const text = `🎰 *SORAT AGENT POS LOGIN CREDENTIALS* 🎰\n\n👤 *Agent Name:* ${selectedUser.displayName}\n🆔 *Agent ID:* ${selectedUser.username}\n🔑 *Login PIN:* ${selectedUser.pin || "1234"}\n🪙 *Prepaid Balance:* ₹${selectedUser.balance.toLocaleString("en-IN")}\n\n📲 *Agent POS App Link:* ${window.location.origin}/agent\n\n_Is link ko open karein aur apna Agent ID aur PIN daal kar counter shuru karein._`;
+                    const text = `🎰 *SORAT AGENT POS LOGIN CREDENTIALS* 🎰\n\n👤 *Agent Name:* ${selectedUser.displayName}\n🆔 *Agent ID:* ${selectedUser.username}\n🔑 *Login PIN:* ${selectedUser.pin || "1234"}\n🪙 *Prepaid Balance:* ${selectedUser.balance.toLocaleString("en-IN")} PTS\n\n📲 *Agent POS App Link:* ${window.location.origin}/agent\n\n_Is link ko open karein aur apna Agent ID aur PIN daal kar counter shuru karein._`;
                     navigator.clipboard.writeText(text);
                     showNotification("WhatsApp login details copied to clipboard!");
                     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, "_blank");
@@ -877,7 +877,7 @@ export function UserAccountsView({
                   <span className="text-xs">💳</span>
                 </div>
                 <div className="mt-1 text-xl font-display font-black text-foreground">
-                  ₹{profitStats.totalDeposited.toLocaleString("en-IN")}
+                  {profitStats.totalDeposited.toLocaleString("en-IN")} PTS
                 </div>
                 <span className="text-[9px] text-muted-foreground block mt-0.5">
                   {selectedUser.deposits?.length || 0} lifetime deposit(s)
@@ -893,7 +893,7 @@ export function UserAccountsView({
                   <span className="text-xs">💰</span>
                 </div>
                 <div className="mt-1 text-xl font-display font-black text-primary">
-                  ₹{profitStats.currentBalance.toLocaleString("en-IN")}
+                  {profitStats.currentBalance.toLocaleString("en-IN")} PTS
                 </div>
                 <span className="text-[9px] text-muted-foreground block mt-0.5">
                   Available to wager on cards
@@ -936,11 +936,11 @@ export function UserAccountsView({
                       }`}
                     >
                       {isHouseGreen
-                        ? `+₹${houseProfit.toLocaleString("en-IN")}`
-                        : `-₹${Math.abs(houseProfit).toLocaleString("en-IN")}`}
+                        ? `+${houseProfit.toLocaleString("en-IN")} PTS`
+                        : `-${Math.abs(houseProfit).toLocaleString("en-IN")} PTS`}
                     </div>
                     <span className="text-[9px] text-muted-foreground block mt-0.5 font-mono">
-                      Staked ₹{effectiveBetAmount.toLocaleString("en-IN")} • Won ₹{effectiveWonAmount.toLocaleString("en-IN")}
+                      Staked {effectiveBetAmount.toLocaleString("en-IN")} PTS • Won {effectiveWonAmount.toLocaleString("en-IN")} PTS
                     </span>
                   </div>
                 );
@@ -971,11 +971,11 @@ export function UserAccountsView({
                 <div className="flex items-center gap-2">
                   <span className="text-base">💳</span>
                   <h3 className="font-display text-sm font-extrabold text-foreground">
-                    Deposit Money into {selectedUser.displayName}'s Account
+                    Deposit Points into {selectedUser.displayName}'s Account
                   </h3>
                 </div>
                 <span className="text-[10px] font-bold text-muted-foreground">
-                  Live Balance: ₹{selectedUser.balance.toLocaleString("en-IN")}
+                  Live Balance: {selectedUser.balance.toLocaleString("en-IN")} PTS
                 </span>
               </div>
 
@@ -992,7 +992,7 @@ export function UserAccountsView({
                       onClick={() => handleQuickDeposit(amt)}
                       className="py-1.5 px-3 rounded-xl bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 hover:bg-emerald-500/25 text-xs font-bold transition active:scale-95 shadow-sm"
                     >
-                      +₹{amt.toLocaleString("en-IN")}
+                      +{amt.toLocaleString("en-IN")} PTS
                     </button>
                   ))}
                 </div>
@@ -1001,8 +1001,8 @@ export function UserAccountsView({
               {/* Custom Deposit Form */}
               <form onSubmit={handleCustomDeposit} className="grid grid-cols-1 sm:grid-cols-12 gap-2 pt-1">
                 <div className="sm:col-span-5 relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-mono text-xs">
-                    ₹
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-mono text-[10px] font-bold">
+                    PTS
                   </span>
                   <input
                     type="number"
@@ -1044,7 +1044,7 @@ export function UserAccountsView({
                     max={selectedUser.balance}
                     value={withdrawAmount}
                     onChange={(e) => setWithdrawAmount(e.target.value)}
-                    placeholder="Withdraw amount ₹"
+                    placeholder="Withdraw PTS"
                     className="w-32 px-2.5 py-1.5 rounded-lg border border-input bg-background font-mono text-xs"
                   />
                   <button
@@ -1063,7 +1063,7 @@ export function UserAccountsView({
                     min="0"
                     value={exactBalanceInput}
                     onChange={(e) => setExactBalanceInput(e.target.value)}
-                    placeholder="Exact balance ₹"
+                    placeholder="Exact PTS"
                     className="w-32 px-2.5 py-1.5 rounded-lg border border-input bg-background font-mono text-xs"
                   />
                   <button
@@ -1099,13 +1099,13 @@ export function UserAccountsView({
                               {dep.dateStr} • {dep.timeStr}
                             </td>
                             <td className="py-1.5 px-2 text-emerald-400 font-bold">
-                              +₹{dep.amount.toLocaleString("en-IN")}
+                              +{dep.amount.toLocaleString("en-IN")} PTS
                             </td>
                             <td className="py-1.5 px-2 text-muted-foreground text-[10px]">
                               {dep.note || "Counter Cash"}
                             </td>
                             <td className="py-1.5 px-2 text-right text-foreground">
-                              ₹{dep.balanceAfter?.toLocaleString("en-IN") || "-"}
+                              {dep.balanceAfter?.toLocaleString("en-IN") || "-"} PTS
                             </td>
                           </tr>
                         ))}
@@ -1204,24 +1204,22 @@ export function UserAccountsView({
                   <div>
                     <span className="text-muted-foreground">Total Bet: </span>
                     <span className="font-bold text-foreground">
-                      ₹
                       {betPeriodFilter === "today"
                         ? (cloudDailySummary && cloudDailySummary.sales > 0 ? cloudDailySummary.sales : profitStats.todayBetAmount)
                         : betPeriodFilter === "yesterday"
                         ? profitStats.yesterdayBetAmount
-                        : profitStats.totalBetAmount}
+                        : profitStats.totalBetAmount} PTS
                     </span>
                   </div>
 
                   <div>
                     <span className="text-muted-foreground">Total Won: </span>
                     <span className="font-bold text-emerald-400">
-                      ₹
                       {betPeriodFilter === "today"
                         ? (cloudDailySummary && (cloudDailySummary.sales > 0 || cloudDailySummary.claimsPaid > 0) ? cloudDailySummary.claimsPaid : profitStats.todayWonAmount)
                         : betPeriodFilter === "yesterday"
                         ? profitStats.yesterdayWonAmount
-                        : profitStats.totalWonAmount}
+                        : profitStats.totalWonAmount} PTS
                     </span>
                   </div>
 
@@ -1248,7 +1246,7 @@ export function UserAccountsView({
                             isGreen ? "text-emerald-400" : "text-destructive"
                           }`}
                         >
-                          {isGreen ? `+₹${houseMargin.toLocaleString("en-IN")}` : `-₹${Math.abs(houseMargin).toLocaleString("en-IN")}`}
+                          {isGreen ? `+${houseMargin.toLocaleString("en-IN")} PTS` : `-${Math.abs(houseMargin).toLocaleString("en-IN")} PTS`}
                         </span>
                       );
                     })()}
@@ -1310,7 +1308,7 @@ export function UserAccountsView({
                             <span className="text-[9px] uppercase font-bold text-muted-foreground block">
                               Bet Stake
                             </span>
-                            <span className="font-bold text-foreground">₹{bet.stake}</span>
+                            <span className="font-bold text-foreground">{bet.stake} PTS</span>
                           </div>
 
                           {bet.status === "SETTLED" && winningCard && (
@@ -1338,7 +1336,7 @@ export function UserAccountsView({
                                 bet.isWin ? "text-emerald-400" : "text-muted-foreground"
                               }`}
                             >
-                              ₹{bet.payout}
+                              {bet.payout} PTS
                             </span>
                           </div>
                         </div>
@@ -1352,13 +1350,13 @@ export function UserAccountsView({
                           ) : bet.isWin ? (
                             <div>
                               <span className="rounded-full bg-emerald-500/20 border border-emerald-500/40 px-2 py-0.5 text-[10px] font-black text-emerald-400">
-                                🏆 WON (+₹{netBetPL})
+                                🏆 WON (+{netBetPL} PTS)
                               </span>
                             </div>
                           ) : (
                             <div>
                               <span className="rounded-full bg-destructive/15 border border-destructive/30 px-2 py-0.5 text-[10px] font-black text-destructive">
-                                ❌ LOST (-₹{bet.stake})
+                                ❌ LOST (-{bet.stake} PTS)
                               </span>
                             </div>
                           )}
@@ -1461,17 +1459,17 @@ export function UserAccountsView({
 
               <div>
                 <label className="block text-[11px] font-bold text-muted-foreground uppercase mb-1">
-                  Initial Deposit Amount (₹)
+                  Initial Deposit (PTS)
                 </label>
                 <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-mono">₹</span>
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-mono text-[10px] font-bold">PTS</span>
                   <input
                     type="number"
                     min="0"
                     value={newInitialDeposit}
                     onChange={(e) => setNewInitialDeposit(e.target.value)}
                     placeholder="1000"
-                    className="w-full pl-7 pr-3 py-2 rounded-xl border border-input bg-background text-foreground font-mono font-bold focus:border-primary focus:outline-none"
+                    className="w-full pl-10 pr-3 py-2 rounded-xl border border-input bg-background text-foreground font-mono font-bold focus:border-primary focus:outline-none"
                   />
                 </div>
                 <span className="text-[10px] text-muted-foreground block mt-1">

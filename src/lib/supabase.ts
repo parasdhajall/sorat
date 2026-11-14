@@ -244,7 +244,7 @@ BEGIN
     END IF;
 
     IF cur_balance < total_stake THEN
-        RAISE EXCEPTION 'Insufficient balance! Needed: ₹%, Available: ₹%', total_stake, cur_balance;
+        RAISE EXCEPTION 'Insufficient balance! Needed: % PTS, Available: % PTS', total_stake, cur_balance;
     END IF;
 
     UPDATE public.players

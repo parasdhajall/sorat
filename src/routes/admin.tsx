@@ -545,7 +545,7 @@ export default function AdminPage() {
                       Active TV / Agent Live Wallet Balance
                     </span>
                     <span className="text-2xl font-display font-black text-primary leading-tight">
-                      ₹{agentBalance.toLocaleString("en-IN")}
+                      {agentBalance.toLocaleString("en-IN")} PTS
                     </span>
                   </div>
                 </div>
@@ -557,25 +557,25 @@ export default function AdminPage() {
                     onClick={() => handleRechargeAgent(100)}
                     className="py-1 px-2 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 text-xs font-bold transition active:scale-95"
                   >
-                    +₹100
+                    +100 PTS
                   </button>
                   <button
                     onClick={() => handleRechargeAgent(500)}
                     className="py-1 px-2.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 text-xs font-bold transition active:scale-95"
                   >
-                    +₹500
+                    +500 PTS
                   </button>
                   <button
                     onClick={() => handleRechargeAgent(1000)}
                     className="py-1 px-2.5 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30 text-xs font-black transition active:scale-95"
                   >
-                    +₹1,000
+                    +1,000 PTS
                   </button>
                   <button
                     onClick={() => handleRechargeAgent(5000)}
                     className="py-1 px-2.5 rounded-lg bg-emerald-500/25 border border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/35 text-xs font-black transition active:scale-95"
                   >
-                    +₹5,000
+                    +5,000 PTS
                   </button>
                 </div>
               </div>
@@ -583,8 +583,8 @@ export default function AdminPage() {
               {/* Direct Custom Amount Set / Add Input */}
               <div className="pt-2 border-t border-border/50 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                 <div className="relative flex-1">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-mono text-xs">
-                    ₹
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-mono text-[10px] font-bold">
+                    PTS
                   </span>
                   <input
                     type="number"
@@ -624,10 +624,10 @@ export default function AdminPage() {
                   <button
                     type="button"
                     onClick={() => handleSetExactBalance(1000)}
-                    title="Reset wallet to default ₹1,000"
+                    title="Reset wallet to default 1,000 PTS"
                     className="py-1.5 px-2 rounded-xl bg-destructive/15 text-destructive border border-destructive/30 hover:bg-destructive/25 text-xs font-bold transition"
                   >
-                    Reset ₹1k
+                    Reset 1k PTS
                   </button>
                 </div>
               </div>
@@ -657,18 +657,18 @@ export default function AdminPage() {
               <div className="grid grid-cols-4 gap-1.5 text-center">
                 <div className="rounded-lg bg-background/80 p-1.5 border border-border/60">
                   <span className="text-[9px] uppercase font-bold text-muted-foreground block">Round Bets</span>
-                  <span className="text-sm font-display font-black text-primary">₹{totalUserBets}</span>
+                  <span className="text-sm font-display font-black text-primary">{totalUserBets} PTS</span>
                 </div>
                 <div className="rounded-lg bg-background/80 p-1.5 border border-border/60">
                   <span className="text-[9px] uppercase font-bold text-muted-foreground block">Total Turnover</span>
                   <span className="text-sm font-display font-black text-foreground">
-                    ₹{totalTurnover.toLocaleString("en-IN")}
+                    {totalTurnover.toLocaleString("en-IN")} PTS
                   </span>
                 </div>
                 <div className="rounded-lg bg-background/80 p-1.5 border border-border/60">
                   <span className="text-[9px] uppercase font-bold text-muted-foreground block">Player Payouts</span>
                   <span className="text-sm font-display font-black text-destructive">
-                    ₹{totalPayouts.toLocaleString("en-IN")}
+                    {totalPayouts.toLocaleString("en-IN")} PTS
                   </span>
                 </div>
                 <div className="rounded-lg bg-background/80 p-1.5 border border-border/60">
@@ -678,7 +678,7 @@ export default function AdminPage() {
                       houseProfit >= 0 ? "text-emerald-400" : "text-destructive"
                     }`}
                   >
-                    {profitPercentage}% (₹{houseProfit.toLocaleString("en-IN")})
+                    {profitPercentage}% ({houseProfit.toLocaleString("en-IN")} PTS)
                   </span>
                 </div>
               </div>
@@ -778,10 +778,10 @@ export default function AdminPage() {
                             isHighest ? "text-destructive" : userBet > 0 ? "text-primary" : "text-muted-foreground/60"
                           }`}
                         >
-                          🪙 ₹{userBet}
+                          🪙 {userBet} PTS
                         </span>
                         <span className="text-[9px] font-mono text-muted-foreground block leading-none mt-0.5">
-                          Payout: ₹{payout}
+                          Payout: {payout} PTS
                         </span>
                       </div>
                     </div>
@@ -794,7 +794,7 @@ export default function AdminPage() {
                           netHousePL > 0 ? "text-emerald-400" : netHousePL < 0 ? "text-destructive" : "text-muted-foreground"
                         }`}
                       >
-                        {netHousePL >= 0 ? `+₹${netHousePL}` : `-₹${Math.abs(netHousePL)}`}
+                        {netHousePL >= 0 ? `+${netHousePL} PTS` : `-${Math.abs(netHousePL)} PTS`}
                       </span>
                     </div>
 

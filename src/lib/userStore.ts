@@ -1440,7 +1440,7 @@ export function deductAgentBalance(
     return {
       success: false,
       newBalance: currentUser.balance,
-      error: `Balance kam hai: Needed ₹${totalStake}, Available ₹${currentUser.balance}`,
+      error: `Balance kam hai: Needed ${totalStake} PTS, Available ${currentUser.balance} PTS`,
     };
   }
 
