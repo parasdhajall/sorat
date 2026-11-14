@@ -93,10 +93,10 @@ export function LiveBetsRiskAudit({
     dateFilter === "today"
       ? todayStr
       : dateFilter === "yesterday"
-      ? yesterdayStr
-      : dateFilter === "custom"
-      ? customDate
-      : "";
+        ? yesterdayStr
+        : dateFilter === "custom"
+          ? customDate
+          : "";
 
   // 2. Aggregate all bets from all user accounts
   const allBetsWithUser = useMemo(() => {
@@ -229,8 +229,7 @@ export function LiveBetsRiskAudit({
       alert(`Thermal ticket #${tkt.ticketId} sent to Bluetooth printer!`);
     } else {
       alert(
-        `Ticket Details:\nSlip #${tkt.ticketId}\nCard: ${bet.cardName}\nStake: ${bet.stake} PTS\nPayout: ${
-          bet.payout || 0
+        `Ticket Details:\nSlip #${tkt.ticketId}\nCard: ${bet.cardName}\nStake: ${bet.stake} PTS\nPayout: ${bet.payout || 0
         } PTS\n\n(Bluetooth printer connect karne ke liye Agent POS app mein 'Printer' tab open karein)`
       );
     }
@@ -307,23 +306,22 @@ export function LiveBetsRiskAudit({
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-sm font-black text-primary">#{auditedTicket.ticketId}</span>
                   <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase border ${
-                      auditedTicket.status === "CLAIMED"
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase border ${auditedTicket.status === "CLAIMED"
                         ? "bg-purple-500/20 text-purple-300 border-purple-500/40"
                         : auditedTicket.status === "WON"
-                        ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40 animate-pulse"
-                        : auditedTicket.status === "LOST"
-                        ? "bg-destructive/20 text-destructive border-destructive/40"
-                        : "bg-amber-500/20 text-amber-300 border-amber-500/40"
-                    }`}
+                          ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40 animate-pulse"
+                          : auditedTicket.status === "LOST"
+                            ? "bg-destructive/20 text-destructive border-destructive/40"
+                            : "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                      }`}
                   >
                     {auditedTicket.status === "CLAIMED"
                       ? "✓ PAID & CLAIMED"
                       : auditedTicket.status === "WON"
-                      ? "🏆 WINNER (UNCLAIMED)"
-                      : auditedTicket.status === "LOST"
-                      ? "❌ LOST"
-                      : "⏳ IN PLAY"}
+                        ? "🏆 WINNER (UNCLAIMED)"
+                        : auditedTicket.status === "LOST"
+                          ? "❌ LOST"
+                          : "⏳ IN PLAY"}
                   </span>
                 </div>
                 <div className="text-[11px] text-muted-foreground mt-0.5">
@@ -401,11 +399,10 @@ export function LiveBetsRiskAudit({
               {auditedTicket.items.map((item, idx) => (
                 <span
                   key={idx}
-                  className={`px-2 py-1 rounded-md text-xs font-mono font-bold border ${
-                    auditedTicket.winningCardIndex === item.cardIndex
+                  className={`px-2 py-1 rounded-md text-xs font-mono font-bold border ${auditedTicket.winningCardIndex === item.cardIndex
                       ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-black"
                       : "bg-muted/60 border-border text-foreground"
-                  }`}
+                    }`}
                 >
                   {item.cardName}: {item.amount} PTS
                   {auditedTicket.winningCardIndex === item.cardIndex ? " 🏆 (WON " + (item.amount * 9) + " PTS)" : ""}
@@ -481,42 +478,38 @@ export function LiveBetsRiskAudit({
             <span className="text-xs font-bold text-muted-foreground">📅 Date:</span>
             <button
               onClick={() => setDateFilter("today")}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
-                dateFilter === "today"
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition ${dateFilter === "today"
                   ? "bg-primary text-primary-foreground shadow-sm"
                   : "bg-muted text-muted-foreground hover:text-foreground"
-              }`}
+                }`}
             >
               Today
             </button>
             <button
               onClick={() => setDateFilter("yesterday")}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
-                dateFilter === "yesterday"
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition ${dateFilter === "yesterday"
                   ? "bg-primary text-primary-foreground shadow-sm"
                   : "bg-muted text-muted-foreground hover:text-foreground"
-              }`}
+                }`}
             >
               Yesterday
             </button>
             <button
               onClick={() => setDateFilter("all")}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
-                dateFilter === "all"
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition ${dateFilter === "all"
                   ? "bg-primary text-primary-foreground shadow-sm"
                   : "bg-muted text-muted-foreground hover:text-foreground"
-              }`}
+                }`}
             >
               All Time
             </button>
 
             {/* Custom Date Input */}
             <div
-              className={`flex items-center gap-1 rounded-lg border px-2 py-0.5 text-xs ${
-                dateFilter === "custom"
+              className={`flex items-center gap-1 rounded-lg border px-2 py-0.5 text-xs ${dateFilter === "custom"
                   ? "border-primary bg-primary/10 text-primary"
                   : "border-border bg-background text-muted-foreground"
-              }`}
+                }`}
             >
               <input
                 type="date"
@@ -586,13 +579,12 @@ export function LiveBetsRiskAudit({
           {cardExposureMatrix.map((item) => (
             <div
               key={item.cardIndex}
-              className={`rounded-xl border p-2 flex flex-col justify-between transition ${
-                item.status === "ZERO_BET"
+              className={`rounded-xl border p-2 flex flex-col justify-between transition ${item.status === "ZERO_BET"
                   ? "border-blue-500/30 bg-blue-500/5"
                   : item.status === "SAFE"
-                  ? "border-emerald-500/40 bg-emerald-500/5 shadow-sm"
-                  : "border-destructive/40 bg-destructive/10"
-              }`}
+                    ? "border-emerald-500/40 bg-emerald-500/5 shadow-sm"
+                    : "border-destructive/40 bg-destructive/10"
+                }`}
             >
               <div className="flex items-center gap-1.5">
                 <img
@@ -622,9 +614,8 @@ export function LiveBetsRiskAudit({
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">House Profit:</span>
                   <span
-                    className={`font-black ${
-                      item.houseNetIfWins >= 0 ? "text-emerald-400" : "text-destructive"
-                    }`}
+                    className={`font-black ${item.houseNetIfWins >= 0 ? "text-emerald-400" : "text-destructive"
+                      }`}
                   >
                     {item.houseNetIfWins >= 0 ? `+${item.houseNetIfWins} PTS` : `-${Math.abs(item.houseNetIfWins)} PTS`}
                   </span>
