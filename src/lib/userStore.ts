@@ -2289,7 +2289,7 @@ export async function purgeAllSupabaseData(): Promise<{ success: boolean; messag
     const { error: errRounds } = await client
       .from("sorat_rounds")
       .delete()
-      .neq("id", "00000000-0000-0000-0000-000000000000");
+      .neq("round_id", "_none_");
     if (errRounds) console.warn("Purge sorat_rounds warning:", errRounds);
 
     const { error: errDeposits } = await client
