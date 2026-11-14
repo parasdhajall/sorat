@@ -1,5 +1,5 @@
 import { CARDS } from "./cards";
-import { calculateProfitGuaranteedWinner, getDeterministicRoundWinner, sanitizeRoomId } from "./realtime";
+import { calculateProfitGuaranteedWinner, getDeterministicRoundWinner, sanitizeRoomId, DEFAULT_ROOM_ID } from "./realtime";
 import { getTickets } from "./ticketStore";
 import { getUsers } from "./userStore";
 import { declareSoratRoundRpc } from "./supabase";
@@ -28,7 +28,7 @@ export function getRecordedRoundWinner(roundNumber: number, roomId?: string): nu
   if (typeof window === "undefined") return null;
   const cleanRoom = roomId ? sanitizeRoomId(roomId) : null;
   try {
-    if (cleanRoom) {
+    if (cleanRoom && cleanRoom !== DEFAULT_ROOM_ID) {
       const roomRaw = localStorage.getItem(`sorat_round_winners_${cleanRoom}`);
       if (roomRaw) {
         const map = JSON.parse(roomRaw);
@@ -36,6 +36,8 @@ export function getRecordedRoundWinner(roundNumber: number, roomId?: string): nu
           return map[roundNumber];
         }
       }
+      // Strictly isolated: do not fall back to other counters or global pool
+      return null;
     }
     const raw = localStorage.getItem(ROUND_WINNERS_STORAGE_KEY);
     if (raw) {
@@ -59,7 +61,7 @@ export function saveRecordedRoundWinner(
   if (typeof window === "undefined") return;
   const cleanRoom = roomId ? sanitizeRoomId(roomId) : null;
   try {
-    if (cleanRoom) {
+    if (cleanRoom && cleanRoom !== DEFAULT_ROOM_ID) {
       const roomKey = `sorat_round_winners_${cleanRoom}`;
       const roomRaw = localStorage.getItem(roomKey);
       const roomMap = roomRaw ? JSON.parse(roomRaw) : {};
@@ -72,6 +74,7 @@ export function saveRecordedRoundWinner(
         roomId: cleanRoom,
         timestamp: Date.now(),
       });
+      return;
     }
 
     const raw = localStorage.getItem(ROUND_WINNERS_STORAGE_KEY);

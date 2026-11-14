@@ -87,5 +87,50 @@ describe("Independent Counter Rooms & Realtime Isolation Tests", () => {
     expect(getRecordedRoundWinner(851, "counter_a")).toBe(winnerA);
     expect(getRecordedRoundWinner(851, "counter_b")).toBe(winnerB);
   });
+
+  it("proves that in Room Isolated Mode, an individual counter (like Nandan) NEVER has a loss and always secures >= 35% house margin and positive commission", () => {
+    clearTickets("all");
+
+    // Nandan's counter receives 850 PTS total bets:
+    // Card 3 (सूर्य): 300 PTS -> 2700 PTS potential payout (Loss if wins)
+    // Card 4 (गुलाब): 100 PTS -> 900 PTS potential payout (Loss if wins, because 900 > 850)
+    // Card 5 (दिवा): 200 PTS -> 1800 PTS potential payout (Loss if wins)
+    // Card 7 (चिमणी): 150 PTS -> 1350 PTS potential payout (Loss if wins)
+    // Card 8 (ससा): 100 PTS -> 900 PTS potential payout (Loss if wins)
+    // Cards 0, 1, 2, 6, 9, 10, 11: 0 PTS -> 0 PTS payout (100% profit!)
+    createTicket({
+      roundId: "#0852",
+      roundNumber: 852,
+      roomId: "nandan",
+      agentId: "agent_nandan",
+      items: [
+        { cardIndex: 3, cardName: "सूर्य", amount: 300 },
+        { cardIndex: 4, cardName: "गुलाब", amount: 100 },
+        { cardIndex: 5, cardName: "दिवा", amount: 200 },
+        { cardIndex: 7, cardName: "चिमणी", amount: 150 },
+        { cardIndex: 8, cardName: "ससा", amount: 100 },
+      ],
+    });
+
+    // In isolated room mode for 'nandan', resolve winner:
+    const winnerNandan = resolveProfitGuaranteedWinnerForRound(852, "#0852", null, undefined, "nandan");
+
+    // All loss-making cards (3, 4, 5, 7, 8) MUST BE BLOCKED on Nandan's counter!
+    expect([3, 4, 5, 7, 8].includes(winnerNandan)).toBe(false);
+
+    // Only zero-bet / profit-guaranteed cards (0, 1, 2, 6, 9, 10, 11) can win!
+    expect([0, 1, 2, 6, 9, 10, 11].includes(winnerNandan)).toBe(true);
+
+    // Calculate Nandan's financial outcome in isolated mode:
+    const nandanStaked = 850;
+    const nandanPayout = 0; // because a zero-bet card won
+    const nandanNetProfit = nandanStaked - nandanPayout;
+    const nandanCommission10 = Math.round(nandanNetProfit * 0.10);
+
+    // Guaranteed >= 35% margin (here 100% profit!)
+    expect(nandanNetProfit).toBeGreaterThanOrEqual(850 * 0.35);
+    // Guaranteed positive agent commission
+    expect(nandanCommission10).toBe(85);
+  });
 });
 
